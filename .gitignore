@@ -1,0 +1,8 @@
+# 忽略根目录下所有内容，仅保留下列白名单项
+/*
+!/Config
+!/Content
+!/Source
+!/Ori5_8.uproject
+# .gitignore 自身需入库
+!/.gitignore
