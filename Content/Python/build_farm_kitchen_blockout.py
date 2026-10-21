@@ -112,10 +112,12 @@ bc.box('WBM_WellPost', -280, 200, 60, 10, 10, 120)
 bc.box('WBM_WellPost', -220, 200, 60, 10, 10, 120)
 bc.box('WBM_WellBar', -250, 200, 125, 80, 16, 16)
 
-# corn field (5x5 cones)
-for i in range(5):
-    for j in range(5):
-        bc.cone_up('WBM_Corn', -440 + i * 85, 450 + j * 95, 50, 26, 100)
+# corn field: PCG BP_Corn — one closed rect spline (x -440..-100, y 450..830) baked in the
+# BP's spline template; PCG_CornGraph fills the interior on an ~80cm grid and spawns Engine
+# Cone scaled (0.26,0.26,1.0) lifted z+50. Resize the field by editing BP_Corn's spline.
+_cls = unreal.BlueprintEditorLibrary.generated_class(unreal.load_object(None, '/Game/_BLOCKOUT/BP_Corn.BP_Corn'))
+_corn = bc._eas().spawn_actor_from_class(_cls, unreal.Vector(0.0, 0.0, 0.0), unreal.Rotator(0.0, 0.0, 0.0))
+_corn.set_actor_label('WBM_Corn_Field')
 
 # crop beds 3x3
 for bx in (-1450, -1100, -750):
