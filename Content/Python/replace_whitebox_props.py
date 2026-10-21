@@ -37,6 +37,9 @@ REPLACE = {
 # the SM_QueueBarrier, the rest are dropped)
 DROP = ('TableLeg', 'ChairBack', 'QueueBar')
 TABLE_ROWS = (-600.0, -200.0)
+# bottom overrides: MenuBoard stands on the cashier counter top; DiningTable is a complete
+# grounded table — must NOT inherit the old floating TableTop-only bottom (z=69)
+BOTTOM_OVERRIDE = {'MenuBoard': 100.0, 'TableTop': 0.0}
 
 
 def swap(act, mesh, yaw, bottom=None):
@@ -93,10 +96,7 @@ for base, acts in sorted(buckets.items()):
         continue
     unmatched_assets.discard(asset)
     for act in acts:
-        # hang the sign standing on the cashier counter top (z=100), not at the old
-        # floating board height
-        bottom = 100.0 if base == 'MenuBoard' else None
-        if swap(act, mesh, yaw, bottom):
+        if swap(act, mesh, yaw, BOTTOM_OVERRIDE.get(base)):
             replaced.append(act.get_actor_label())
             print('replaced', act.get_actor_label(), '-> SM_' + asset, 'yaw', yaw)
 
