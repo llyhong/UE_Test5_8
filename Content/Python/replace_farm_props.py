@@ -29,7 +29,8 @@ REPLACE = {
     'Well':      ('Well',          0.0),
     'Reservoir': ('WaterTank',     0.0),
 }
-DROP = ('CowHead', 'PigHead', 'CoopRoof', 'WellPost', 'WellBar', 'WellRoof', 'ReservoirWater')
+# TreeCrown too: TreeTrunk becomes a complete SM_WildTree, the whitebox canopy is redundant
+DROP = ('CowHead', 'PigHead', 'CoopRoof', 'WellPost', 'WellBar', 'WellRoof', 'ReservoirWater', 'TreeCrown')
 FLOOR = ('Cow', 'Pig')  # whitebox body floats; real mesh stands on the ground
 
 

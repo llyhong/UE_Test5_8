@@ -72,6 +72,8 @@ for qx in (1150, 1270, 1390):
     bc.cyl('WBM_QueuePost', qx, -200, 50, 10, 100)
 bc.box('WBM_QueueBar', 1210, -200, 92, 130, 6, 6)
 bc.box('WBM_QueueBar', 1330, -200, 92, 130, 6, 6)
+# greet counter inside the front door, east side of the entry hall (whitebox for now)
+bc.box('WBM_GreetCounter', 960, -940, 55, 120, 60, 110)
 bc.text('WBM_Text', 920, -1185, 5, 'ENTRANCE', 34, (0.15, 0.15, 0.15))
 
 # ---------------------------------------------------------------- dining: 6 tables 3 cols x 2 rows
@@ -176,10 +178,7 @@ trees = [(-1650, 850, 1), (-1500, 1080, 1), (-1350, 900, 0), (-1580, 1150, 1),
          (-1300, 1080, 0), (-1420, 760, 1), (-950, 180, 0), (100, 950, 1), (1150, -1100, 0)]
 for tx, ty, pine in trees:
     bc.cyl('WBM_TreeTrunk', tx, ty, 45, 20, 90, G)
-    if pine:
-        bc.cone_up('WBM_TreeCrown', tx, ty, 170, 110, 160)
-    else:
-        bc.sph('WBM_TreeCrown', tx, ty, 150, 120)
+    # no crown here — TreeTrunk is swapped for a complete SM_WildTree by the replace script
 
 for rx, ry, rd in ((-1650, -250, 55), (-700, -1180, 44), (-900, -850, 40), (-250, -750, 36),
                    (-1550, 300, 50), (-450, 250, 40)):
