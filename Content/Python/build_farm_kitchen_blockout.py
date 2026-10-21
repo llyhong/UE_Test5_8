@@ -31,7 +31,7 @@ bc.wall_x('WBM_Wall', 560, 740, -1000, 230, 300)        # window 2 header
 bc.wall_x('WBM_Wall', 740, 800, -1000, 0, 300)          # pier before entrance
 bc.wall_x('WBM_Wall', 1040, 1600, -1000, 0, 300)        # south, east of entrance
 bc.box('WBM_DoorHeader', 920, -1000, 270, 240, 20, 60)  # over entrance 240w x 240h
-# north/west/east shell sides are open-air: PCG fence BP_Fence_Patio (see fence section below)
+# north/west/east shell sides are open-air: PCG fence BP_Fence (see fence section below)
 # kitchen divider at Y=100 with pass window (opening X 1250..1450, z 90..210)
 bc.wall_x('WBM_Wall', 900, 1250, 100, 0, 300)
 bc.wall_x('WBM_Wall', 1450, 1600, 100, 0, 300)
@@ -77,20 +77,14 @@ for ty, row in ((-600, 1), (-200, 2)):
             bc.box('WBM_ChairSeat', tx + ox, ty + 78, 22, 42, 42, 45)
             bc.box('WBM_ChairBack', tx + ox, ty + 96, 70, 42, 8, 50)
 
-# ---------------------------------------------------------------- farm: PCG fences
-# Fence blueprints own their spline + PCG graph: the pen outline is baked into the BP's
-# spline template (Spline_GEN_VARIABLE) and PCG regenerates instances on level load.
-# Reshape a fence by editing that BP's spline, then recompile and it updates in place.
-# BP_Fence_Patio is the dining-area shell: open U (west 200 / north y=1000 / east 1600).
-_fence_eas = bc._eas()
-for _bp_path, _label in (('/Game/_BLOCKOUT/BP_Fence_Cow.BP_Fence_Cow', 'WBM_Fence_CowPen'),
-                         ('/Game/_BLOCKOUT/BP_Fence_Pig.BP_Fence_Pig', 'WBM_Fence_PigPen'),
-                         ('/Game/_BLOCKOUT/BP_Fence_Chicken.BP_Fence_Chicken', 'WBM_Fence_ChickenYard'),
-                         ('/Game/_BLOCKOUT/BP_Fence_Patio.BP_Fence_Patio', 'WBM_Fence_Patio')):
-    _cls = unreal.BlueprintEditorLibrary.generated_class(unreal.load_object(None, _bp_path))
-    _fence = _fence_eas.spawn_actor_from_class(_cls, unreal.Vector(0.0, 0.0, 0.0),
-                                               unreal.Rotator(0.0, 0.0, 0.0))
-    _fence.set_actor_label(_label)
+# ---------------------------------------------------------------- farm: PCG fence
+# One BP_Fence owns four spline templates (cow pen, pig pen, chicken yard, patio U) plus a
+# PCG component that samples every spline of the actor at 250cm and spawns SM_Fence.
+# Reshape any fence by editing BP_Fence's splines, then recompile and it updates in place.
+# Patio U: west x=200 / north y=1000 / east x=1600 (dining-area shell, open to the south).
+_cls = unreal.BlueprintEditorLibrary.generated_class(unreal.load_object(None, '/Game/_BLOCKOUT/BP_Fence.BP_Fence'))
+_fence = bc._eas().spawn_actor_from_class(_cls, unreal.Vector(0.0, 0.0, 0.0), unreal.Rotator(0.0, 0.0, 0.0))
+_fence.set_actor_label('WBM_Fences')
 for cx, cy in ((-1450, -250), (-1280, 100), (-1400, 220)):
     bc.cyl_x('WBM_Cow', cx, cy, 85, 70, 170)
     bc.sph('WBM_CowHead', cx + 95, cy, 100, 42)
