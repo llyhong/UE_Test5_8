@@ -14,6 +14,13 @@ SERV = bc.MAT_SERV
 
 deleted = bc.cleanup_wbm()
 
+# PCG SpawnActor leftovers (BP_Tomato / BP_CornStalk / ... instances) are plain level actors,
+# not owned by the field actor — sweep them by generated class name.
+eas0 = bc._eas()
+for a in [x for x in eas0.get_all_level_actors()
+          if x.get_class().get_name().startswith('BP_') and not x.get_actor_label().startswith('WBM_')]:
+    eas0.destroy_actor(a)
+
 # ---------------------------------------------------------------- ground
 bc.box('WBM_GroundInf', 0, 0, -5, 200000, 200000, 10, G)  # single 2km ground, top at z=0, no edge step
 bc.box('WBM_FloorInterior', 900, 0, 2, 1400, 2000, 4, W)
@@ -77,51 +84,95 @@ for ty, row in ((-600, 1), (-200, 2)):
             bc.box('WBM_ChairSeat', tx + ox, ty + 78, 22, 42, 42, 45)
             bc.box('WBM_ChairBack', tx + ox, ty + 96, 70, 42, 8, 50)
 
-# ---------------------------------------------------------------- farm: PCG fence
-# One BP_Fence owns four spline templates (cow pen, pig pen, chicken yard, patio U) plus a
+# ---------------------------------------------------------------- farm: open world (PCG fence + fields)
+# One BP_Fence owns four spline templates (cow district, pig pen, chicken yard, patio U) plus a
 # PCG component that samples every spline of the actor at 250cm and spawns SM_Fence.
-# Reshape any fence by editing BP_Fence's splines, then recompile and it updates in place.
+# Reshape any pen by editing BP_Fence's spline templates (see farm_world_setup.py), recompile.
+# FenceMesh (SoftObject StaticMesh var, default SM_Fence, instance-editable) drives which
+# mesh PCG spawns: GetActorProperty -> CopyAttributes -> spawner picks it by attribute.
 # Patio U: west x=200 / north y=1000 / east x=1600 (dining-area shell, open to the south).
 _cls = unreal.BlueprintEditorLibrary.generated_class(unreal.load_object(None, '/Game/_BLOCKOUT/BP_Fence.BP_Fence'))
 _fence = bc._eas().spawn_actor_from_class(_cls, unreal.Vector(0.0, 0.0, 0.0), unreal.Rotator(0.0, 0.0, 0.0))
 _fence.set_actor_label('WBM_Fences')
-for cx, cy in ((-1450, -250), (-1280, 100), (-1400, 220)):
+_fence.set_folder_path('PCG')
+
+def make_crate(label, x, y, z, mat):
+    bc.box(label, x, y, z + 1, 60, 40, 2, mat)
+    bc.box(label, x, y - 19, z + 13, 60, 2, 24, mat)
+    bc.box(label, x, y + 19, z + 13, 60, 2, 24, mat)
+    bc.box(label, x - 29, y, z + 13, 2, 36, 24, mat)
+    bc.box(label, x + 29, y, z + 13, 2, 36, 24, mat)
+    for px, py in ((-28, -18), (28, -18), (-28, 18), (28, 18)):
+        bc.box(label, x + px, y + py, z + 14, 4, 4, 28, mat)
+    for i in range(3):
+        bc.sph(label + 'Fill', x - 12 + i * 12, y, z + 26, 9, mat)
+
+# per reference image: three fenced field plots across the north (carrot small plot W, corn
+# center, cabbage E near the building), pens along the south (cow W, pig center, chicken E),
+# well + rectangular reservoir at the farm heart, round basin SW, wooded hill NW. No dirt
+# paths — flows are dashed arrows only. Field fences = BP_Fence splines 4/5/6 (see
+# farm_world_setup.py).
+
+# cow pen (x -1600..-1000 / y -550..-100): 2 cows, feed trough, ring feeder
+for cx, cy in ((-1420, -300), (-1180, -420)):
     bc.cyl_x('WBM_Cow', cx, cy, 85, 70, 170)
     bc.sph('WBM_CowHead', cx + 95, cy, 100, 42)
-for cx, cy in ((-850, -250), (-700, 60), (-800, 220)):
+bc.box('WBM_Trough', -1300, -160, 17, 320, 60, 34, G)
+bc.cyl('WBM_RingFeeder', -1060, -330, 8, 170, 16, G)
+bc.cyl('WBM_RingFeeder', -1060, -330, 9, 120, 18, W)
+
+# pig pen (x -880..-480 / y -620..-300)
+for cx, cy in ((-720, -480), (-570, -390)):
     bc.cyl_x('WBM_Pig', cx, cy, 55, 52, 110)
     bc.sph('WBM_PigHead', cx + 65, cy, 62, 34)
+bc.box('WBM_Trough', -650, -570, 15, 220, 50, 30, G)
+bc.cyl('WBM_RingFeeder', -520, -360, 7, 120, 14, G)
+bc.cyl('WBM_RingFeeder', -520, -360, 8, 80, 16, W)
 
-# chicken coops + chickens
-for ccx in (-380, -170):
-    bc.box('WBM_Coop', ccx, -330, 45, 140, 110, 90)
-    bc.cone_up('WBM_CoopRoof', ccx, -330, 115, 150, 50)
-for kx, ky in ((-300, -150), (-255, -110), (-345, -110), (-205, -165)):
+# chicken yard (x -360..40 / y -620..-320): two hut coops, birds out front
+for ccx, ccy in ((-260, -430), (-90, -400)):
+    bc.box('WBM_Coop', ccx, ccy, 45, 140, 110, 90)
+    bc.cone_up('WBM_CoopRoof', ccx, ccy, 115, 150, 50)
+for kx, ky in ((-300, -560), (-170, -545), (-30, -555), (10, -540)):
     bc.sph('WBM_Chicken', kx, ky, 13, 26, zsq=0.85)
     bc.sph('WBM_ChickenHead', kx + 11, ky, 22, 13)
 
-# well
-bc.cyl('WBM_Well', -250, 200, 30, 80, 60, G)
-bc.box('WBM_WellPost', -280, 200, 60, 10, 10, 120)
-bc.box('WBM_WellPost', -220, 200, 60, 10, 10, 120)
-bc.box('WBM_WellBar', -250, 200, 125, 80, 16, 16)
+# round basin south of the pens
+bc.cyl('WBM_Basin', -620, -1000, 8, 280, 16, G)
+bc.cyl('WBM_BasinWater', -620, -1000, 9, 220, 18, W)
 
-# corn field: PCG BP_Corn — one closed rect spline (x -440..-100, y 450..830) baked in the
-# BP's spline template; PCG_CornGraph fills the interior on an ~80cm grid and spawns Engine
-# Cone scaled (0.26,0.26,1.0) lifted z+50. Resize the field by editing BP_Corn's spline.
-_cls = unreal.BlueprintEditorLibrary.generated_class(unreal.load_object(None, '/Game/_BLOCKOUT/BP_Corn.BP_Corn'))
-_corn = bc._eas().spawn_actor_from_class(_cls, unreal.Vector(0.0, 0.0, 0.0), unreal.Rotator(0.0, 0.0, 0.0))
-_corn.set_actor_label('WBM_Corn_Field')
+# well (with little roof) + rectangular reservoir at the farm heart
+bc.cyl('WBM_Well', -160, 140, 30, 80, 60, G)
+bc.box('WBM_WellPost', -190, 140, 60, 10, 10, 120)
+bc.box('WBM_WellPost', -130, 140, 60, 10, 10, 120)
+bc.box('WBM_WellBar', -160, 140, 125, 80, 16, 16)
+bc.cone_up('WBM_WellRoof', -160, 140, 150, 120, 50)
+bc.box('WBM_Reservoir', 40, 140, 20, 280, 140, 40, G)
+bc.box('WBM_ReservoirWater', 40, 140, 19, 232, 92, 38, W)
 
-# crop beds 3x3
-for bx in (-1450, -1100, -750):
-    for by in (620, 780, 940):
-        bc.box('WBM_CropBed', bx, by, 15, 280, 110, 30, G)
+# three fields: BP_Corn instances with per-instance PlantClass. The rect (x -440..-100 /
+# y 450..830) is baked in the BP spline template around the instance origin; yaw 90 maps
+# rel (px,py) -> world offset (-py,px). Corn center (-600,700), cabbage center (-40,620)
+# near the building, carrot small plot center (-1080,620). Interior grid ~80cm.
+bel = unreal.BlueprintEditorLibrary
+_stalk = bel.generated_class(unreal.load_object(None, '/Game/_BLOCKOUT/BP_CornStalk.BP_CornStalk'))
+_cabbage = bel.generated_class(unreal.load_object(None, '/Game/_BLOCKOUT/BP_Cabbage.BP_Cabbage'))
+_carrot = bel.generated_class(unreal.load_object(None, '/Game/_BLOCKOUT/BP_Carrot.BP_Carrot'))
+_corn_cls = bel.generated_class(unreal.load_object(None, '/Game/_BLOCKOUT/BP_Corn.BP_Corn'))
+_corn = bc._eas().spawn_actor_from_class(_corn_cls, unreal.Vector(-330.0, 60.0, 0.0), unreal.Rotator(0.0, 0.0, 0.0))
+_corn.set_actor_label('WBM_Field_Corn')
+_corn.set_editor_property('PlantClass', _stalk)
+_corn = bc._eas().spawn_actor_from_class(_corn_cls, unreal.Vector(600.0, 890.0, 0.0), unreal.Rotator(0.0, 0.0, 90.0))
+_corn.set_actor_label('WBM_Field_Cabbage')
+_corn.set_editor_property('PlantClass', _cabbage)
+_corn = bc._eas().spawn_actor_from_class(_corn_cls, unreal.Vector(-810.0, -20.0, 0.0), unreal.Rotator(0.0, 0.0, 0.0))
+_corn.set_actor_label('WBM_Field_Carrot')
+_corn.set_editor_property('PlantClass', _carrot)
 
-# trees (pine = cone, round = sphere)
-trees = [(-1550, -850, 1), (-1300, -950, 0), (-1000, -900, 1), (-700, -980, 0),
-         (-350, -920, 1), (-1550, 700, 0), (-450, 1000, 1), (60, 1050, 1),
-         (-100, -800, 0), (60, -500, 1)]
+# wooded hill NW + scattered trees
+bc.sph('WBM_Hill', -1480, 950, 30, 360, G, zsq=0.32)
+trees = [(-1650, 850, 1), (-1500, 1080, 1), (-1350, 900, 0), (-1580, 1150, 1),
+         (-1300, 1080, 0), (-1420, 760, 1), (-950, 180, 0), (100, 950, 1), (1150, -1100, 0)]
 for tx, ty, pine in trees:
     bc.cyl('WBM_TreeTrunk', tx, ty, 45, 20, 90, G)
     if pine:
@@ -129,8 +180,20 @@ for tx, ty, pine in trees:
     else:
         bc.sph('WBM_TreeCrown', tx, ty, 150, 120)
 
-for rx, ry, rd in ((-600, -700, 60), (-1550, 150, 50), (-620, 1050, 70), (-160, -1050, 44), (-1180, -780, 52)):
+for rx, ry, rd in ((-1650, -250, 55), (-700, -1180, 44), (-900, -850, 40), (-250, -750, 36),
+                   (-1550, 300, 50), (-450, 250, 40)):
     bc.sph('WBM_Rock', rx, ry, rd * 0.22, rd, G, zsq=0.6)
+
+# scattered flower dots for breathing room
+for fx, fy in ((-1500, -700), (-1250, -150), (-800, -250), (-350, -800), (-100, -260),
+               (-500, 100), (-850, 550), (-1250, 950), (-550, 1000), (-200, 850),
+               (150, 300), (-1450, 550), (-750, -650), (-1050, -950), (0, -900)):
+    bc.sph('WBM_Flower', fx, fy, 4, 16, W, zsq=0.5)
+
+# colored food crates in a row along the kitchen back wall (reference layout)
+make_crate('WBM_Crate_Red', 950, 830, 0, '/Game/_BLOCKOUT/M_Crate_Red')
+make_crate('WBM_Crate_Orange', 1030, 830, 0, '/Game/_BLOCKOUT/M_Crate_Orange')
+make_crate('WBM_Crate_Green', 1110, 830, 0, '/Game/_BLOCKOUT/M_Crate_Green')
 
 # ---------------------------------------------------------------- customer flow (solid cyan)
 bc.poly_arrow([(920, -1150), (920, -950)], CUST, z=2.5)
@@ -150,6 +213,15 @@ bc.poly_arrow([(690, -20), (690, -350), (310, -350)], SERV, dashed=True, width=1
 for tx in (310, 560, 820):
     bc.floor_arrow(tx, -20, tx, -130, SERV, dashed=True, width=12, z=8.5)
     bc.floor_arrow(tx, -350, tx, -460, SERV, dashed=True, width=12, z=8.5)
+# farm harvest runs converging on the restaurant entrance (floor arrows are axis-aligned only)
+bc.poly_arrow([(-600, 480), (-600, -100), (-420, -100), (-420, -1150), (920, -1150)],
+              SERV, dashed=True, width=12, z=8.5)
+bc.poly_arrow([(-220, 450), (-220, -100), (-420, -100)], SERV, dashed=True, width=12, z=8.5)
+bc.poly_arrow([(-160, 60), (-160, -100), (-420, -100)], SERV, dashed=True, width=12, z=8.5)
+bc.poly_arrow([(-1080, 400), (-940, 400), (-940, -700), (-420, -700)], SERV, dashed=True, width=12, z=8.5)
+bc.poly_arrow([(-1300, -580), (-1300, -700), (-940, -700)], SERV, dashed=True, width=12, z=8.5)
+bc.poly_arrow([(-620, -650), (-620, -700), (-420, -700)], SERV, dashed=True, width=12, z=8.5)
+bc.poly_arrow([(-160, -650), (-160, -700), (-420, -700)], SERV, dashed=True, width=12, z=8.5)
 
 # ---------------------------------------------------------------- legend (bottom-left)
 bc.box('WBM_LegendPlate', -1275, -1085, 2, 660, 160, 4, G)
@@ -160,7 +232,9 @@ bc.floor_arrow(-1580, -1140, -1480, -1140, SERV, dashed=True, width=12, z=13)
 bc.text('WBM_Text', -1350, -1140, 5, 'Service Flow', 32, (0.1, 0.1, 0.1))
 
 # ---------------------------------------------------------------- zone labels
-bc.text('WBM_Zone', -850, 100, 6, 'FARM', 90, (0.45, 0.45, 0.45))
+bc.text('WBM_Zone', -850, -950, 6, 'FARM', 90, (0.45, 0.45, 0.45))
+bc.text('WBM_Zone', -1300, -320, 6, 'PASTURE', 46, (0.45, 0.45, 0.45))
+bc.text('WBM_Zone', -600, 990, 6, 'CROPS', 46, (0.45, 0.45, 0.45))
 bc.text('WBM_Zone', 430, -880, 6, 'DINING', 70, (0.45, 0.45, 0.45))
 bc.text('WBM_Zone', 1350, 800, 8, 'KITCHEN', 50, (0.45, 0.45, 0.45))
 
@@ -169,7 +243,7 @@ gm_cls = unreal.load_object(None, '/Game/ThirdPerson/Blueprints/BP_ThirdPersonGa
 for a in bc._eas().get_all_level_actors():
     if isinstance(a, unreal.WorldSettings):
         a.set_editor_property('default_game_mode', gm_cls)
-ps = bc._eas().spawn_actor_from_class(unreal.PlayerStart, unreal.Vector(920.0, -1150.0, 100.0), unreal.Rotator(0.0, 90.0, 0.0))
+ps = bc._eas().spawn_actor_from_class(unreal.PlayerStart, unreal.Vector(920.0, -1150.0, 100.0), unreal.Rotator(0.0, 0.0, 90.0))
 ps.set_actor_label('WBM_PlayerStart')
 
 unreal.EditorLoadingAndSavingUtils.save_dirty_packages(True, False)
