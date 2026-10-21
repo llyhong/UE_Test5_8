@@ -36,9 +36,13 @@ REPLACE = {
 # the SM_QueueBarrier, the rest are dropped)
 DROP = ('TableLeg', 'ChairBack', 'QueueBar', 'MenuBoard')
 TABLE_ROWS = (-600.0, -200.0)
+# panda (132cm tall) vs manny (181cm): dining-side furniture uniformly scaled to panda
+# proportions; chairs also pull in toward the table centre so they don't float outside
+PANDA = 0.73
+TABLE_COLS = (300.0, 560.0, 820.0)
 # bottom overrides: DiningTable is a complete grounded table — must NOT inherit the old
-# floating TableTop-only bottom (z=69)
-BOTTOM_OVERRIDE = {'TableTop': 0.0}
+# floating TableTop-only bottom (z=69); the register rests on the SHRUNK counter top
+BOTTOM_OVERRIDE = {'TableTop': 0.0, 'CashierRegister': 98.0 * PANDA}
 # queue line by the player start, along the east edge of the entrance path; entrance sign
 # east of the front door (door gap x800..1040), sign face south toward arriving players
 QUEUE_SPOT = unreal.Vector(1000.0, -1120.0, 0.0)
@@ -57,10 +61,10 @@ def swap(act, mesh, yaw, bottom=None):
         if not comp.set_static_mesh(mesh):
             print('FAIL set mesh on', act.get_actor_label())
             return False
-    act.set_actor_scale3d(unreal.Vector(1.0, 1.0, 1.0))
+    act.set_actor_scale3d(unreal.Vector(PANDA, PANDA, PANDA))
     act.set_actor_rotation(unreal.Rotator(0.0, 0.0, yaw), False)
     loc = act.get_actor_location()
-    act.set_actor_location(unreal.Vector(loc.x, loc.y, bottom - mesh.get_bounding_box().min.z), False, True)
+    act.set_actor_location(unreal.Vector(loc.x, loc.y, bottom - mesh.get_bounding_box().min.z * PANDA), False, True)
     return True
 
 
@@ -84,8 +88,12 @@ for base, acts in sorted(buckets.items()):
             continue
         unmatched_assets.discard('Chair')
         for act in acts:
-            y = act.get_actor_location().y
-            ty = min(TABLE_ROWS, key=lambda r: abs(y - r))
+            loc = act.get_actor_location()
+            # pull the chair in toward its table centre (furniture is panda-scaled now)
+            tx = min(TABLE_COLS, key=lambda v: abs(loc.x - v))
+            ty = min(TABLE_ROWS, key=lambda v: abs(loc.y - v))
+            act.set_actor_location(unreal.Vector(tx + (loc.x - tx) * PANDA, ty + (loc.y - ty) * PANDA, loc.z), False, True)
+            y = loc.y
             yaw = 0.0 if y < ty else 180.0  # sitter faces the table
             if swap(act, mesh, yaw):
                 replaced.append(act.get_actor_label())

@@ -56,12 +56,14 @@ bc.box('WBM_Sink', 990, 940, 45, 100, 70, 90, G)
 bc.box('WBM_KitchenTable', 1160, 940, 45, 200, 70, 90)
 bc.box('WBM_Stove', 1330, 945, 45, 100, 80, 90)
 bc.box('WBM_Stove', 1440, 945, 45, 100, 80, 90)
-bc.cyl('WBM_StovePot', 1330, 945, 105, 40, 30)
+# whitebox-kept kitchen furniture is panda-scaled (PANDA=0.73, see replace_whitebox_props);
+# swapped pieces keep human whitebox dims here — the replace script rescales the real meshes
+bc.cyl('WBM_StovePot', 1330, 945, 82, 29, 22)
 bc.box('WBM_Fridge', 1550, 780, 100, 80, 80, 200)
 bc.box('WBM_Fridge', 1550, 650, 100, 80, 80, 200)
-bc.box('WBM_KitchenIsland', 1200, 500, 45, 200, 90, 90)
-bc.box('WBM_KitchenShelf', 935, 400, 80, 30, 160, 160, G)
-bc.box('WBM_PassCounter', 1350, 145, 45, 220, 60, 90)   # kitchen side of pass window, top at 90
+bc.box('WBM_KitchenIsland', 1200, 500, 33, 146, 66, 66)
+bc.box('WBM_KitchenShelf', 935, 400, 58, 22, 117, 117, G)
+bc.box('WBM_PassCounter', 1350, 145, 33, 161, 44, 66)   # kitchen side of pass window
 
 # ---------------------------------------------------------------- cashier between dining and kitchen + queue
 bc.box('WBM_CashierCounter', 1350, 60, 50, 280, 60, 100)  # dining side, under pass window
@@ -72,8 +74,8 @@ for qx in (1150, 1270, 1390):
     bc.cyl('WBM_QueuePost', qx, -200, 50, 10, 100)
 bc.box('WBM_QueueBar', 1210, -200, 92, 130, 6, 6)
 bc.box('WBM_QueueBar', 1330, -200, 92, 130, 6, 6)
-# greet counter inside the front door, east side of the entry hall (whitebox for now)
-bc.box('WBM_GreetCounter', 960, -940, 55, 120, 60, 110)
+# greet counter outside the front door, west side of the entrance path (whitebox for now)
+bc.box('WBM_GreetCounter', 740, -1120, 40, 88, 44, 80)
 bc.text('WBM_Text', 920, -1185, 5, 'ENTRANCE', 34, (0.15, 0.15, 0.15))
 
 # ---------------------------------------------------------------- dining: 6 tables 3 cols x 2 rows
