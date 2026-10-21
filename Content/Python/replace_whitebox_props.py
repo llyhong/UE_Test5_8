@@ -31,15 +31,18 @@ REPLACE = {
     'CashierCounter':  ('BarCounter',   180.0),
     'CashierRegister': ('CashRegister', 180.0),
     'TableTop':        ('DiningTable',   0.0),
-    'MenuBoard':       ('HangingSign',  180.0),
 }
 # sub-parts superseded by a complete prop mesh (QueuePost handled separately: one becomes
 # the SM_QueueBarrier, the rest are dropped)
-DROP = ('TableLeg', 'ChairBack', 'QueueBar')
+DROP = ('TableLeg', 'ChairBack', 'QueueBar', 'MenuBoard')
 TABLE_ROWS = (-600.0, -200.0)
-# bottom overrides: MenuBoard stands on the cashier counter top; DiningTable is a complete
-# grounded table — must NOT inherit the old floating TableTop-only bottom (z=69)
-BOTTOM_OVERRIDE = {'MenuBoard': 100.0, 'TableTop': 0.0}
+# bottom overrides: DiningTable is a complete grounded table — must NOT inherit the old
+# floating TableTop-only bottom (z=69)
+BOTTOM_OVERRIDE = {'TableTop': 0.0}
+# queue line by the player start, along the east edge of the entrance path; entrance sign
+# east of the front door (door gap x800..1040), sign face south toward arriving players
+QUEUE_SPOT = unreal.Vector(1000.0, -1120.0, 0.0)
+SIGN_SPOT = unreal.Vector(1120.0, -1080.0, 0.0)
 
 
 def swap(act, mesh, yaw, bottom=None):
@@ -100,25 +103,45 @@ for base, acts in sorted(buckets.items()):
             replaced.append(act.get_actor_label())
             print('replaced', act.get_actor_label(), '-> SM_' + asset, 'yaw', yaw)
 
-# one SM_QueueBarrier centered on the queue line: reuse the middle post when present,
-# otherwise spawn a fresh actor (a previous run may have destroyed all posts)
+# one SM_QueueBarrier at the entrance queue line: reuse the middle post when present, an
+# already-placed barrier otherwise, or spawn a fresh actor (rebuilds leave no post at all)
 barrier = meshes.get('QueueBarrier')
 if barrier:
     unmatched_assets.discard('QueueBarrier')
     posts = buckets.get('QueuePost', [])
+    placed = [a for a in eas.get_all_level_actors() if a.get_actor_label() == 'WBM_QueueBarrier']
     if posts:
         target = min(posts, key=lambda a: abs(a.get_actor_location().x - 1270.0))
         others = [a for a in posts if a is not target]
+    elif placed:
+        target = placed[0]
+        others = []
     else:
-        target = eas.spawn_actor_from_object(barrier, unreal.Vector(1270.0, -200.0, 0.0), unreal.Rotator(0.0, 0.0, 0.0))
+        target = eas.spawn_actor_from_object(barrier, QUEUE_SPOT, unreal.Rotator(0.0, 0.0, 90.0))
         target.set_actor_label('WBM_QueueBarrier')
         others = []
     for act in others:
         eas.destroy_actor(act)
         dropped.append(act.get_actor_label())
-    if swap(target, barrier, 0.0, 0.0):
+    if swap(target, barrier, 90.0, 0.0):
+        target.set_actor_location(QUEUE_SPOT, False, True)
+        if target.get_folder_path() != 'Service':
+            target.set_folder_path('Service')
         replaced.append(target.get_actor_label())
-        print('replaced', target.get_actor_label(), '-> SM_QueueBarrier')
+        print('replaced', target.get_actor_label(), '-> SM_QueueBarrier at entrance')
+
+# entrance sign: stand a fresh SM_HangingSign by the front door (never duplicate on re-run)
+sign = meshes.get('HangingSign')
+if sign:
+    unmatched_assets.discard('HangingSign')
+    have_sign = [a for a in eas.get_all_level_actors() if a.get_actor_label().startswith('WBM_HangingSign')]
+    if not have_sign:
+        act = eas.spawn_actor_from_object(sign, SIGN_SPOT, unreal.Rotator(0.0, 0.0, 180.0))
+        act.set_actor_label('WBM_HangingSign_1631')
+        act.set_folder_path('Service')
+        act.set_actor_location(unreal.Vector(SIGN_SPOT.x, SIGN_SPOT.y, -sign.get_bounding_box().min.z), False, True)
+        replaced.append(act.get_actor_label())
+        print('placed', act.get_actor_label(), 'at the entrance')
 
 print('---')
 print('replaced %d actors, dropped %d whitebox parts' % (len(replaced), len(dropped)))

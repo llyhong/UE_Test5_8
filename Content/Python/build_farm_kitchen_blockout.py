@@ -66,7 +66,8 @@ bc.box('WBM_PassCounter', 1350, 145, 45, 220, 60, 90)   # kitchen side of pass w
 # ---------------------------------------------------------------- cashier between dining and kitchen + queue
 bc.box('WBM_CashierCounter', 1350, 60, 50, 280, 60, 100)  # dining side, under pass window
 bc.box('WBM_CashierRegister', 1440, 60, 112, 24, 24, 24, G)
-bc.box('WBM_MenuBoard', 1300, 85, 180, 300, 10, 70, G)
+# queue line stands by the player start at the entrance (replace script consolidates the
+# posts into one SM_QueueBarrier there); no menu board — the HangingSign covers signage
 for qx in (1150, 1270, 1390):
     bc.cyl('WBM_QueuePost', qx, -200, 50, 10, 100)
 bc.box('WBM_QueueBar', 1210, -200, 92, 130, 6, 6)
