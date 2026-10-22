@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """Open-world farm asset setup (run once):
-1) re-lay BP_Fence farm spline templates (cow district / pig pen / chicken yard; patio U untouched)
+1) re-lay BP_Fence farm spline templates (cattle pen / pig hex; patio U untouched,
+   chicken run removed — coops are scattered now)
 2) create BP_CornStalk / BP_Cabbage / BP_Carrot plant blueprints
 3) BP_Corn default PlantClass -> BP_CornStalk_C
 """
@@ -10,35 +11,18 @@ bel = unreal.BlueprintEditorLibrary
 sds = unreal.get_engine_subsystem(unreal.SubobjectDataSubsystem)
 
 # ---------- 1) BP_Fence spline templates (world coords, instance spawns at origin) ----------
-# Spline/Spline1/Spline2: cow pen, pig pen, chicken yard (south row).
-# Spline4/5/6: field fences matching the three BP_Corn field rects (added if missing).
+# Spline/Spline1: cattle pen rect (SW edge), pig pen hexagon (S edge).
+# Spline2 (old chicken yard) is emptied — four coops stand scattered, no run.
 # Spline3 (patio U) is intentionally not listed — left untouched.
+# Former field fences Spline4/5/6 were removed (fields are open ridged plots now); their
+# empty spline templates may linger in BP_Fence — harmless, no points means no spawns.
 SHAPES = {
-    'Spline_GEN_VARIABLE':   ([(-1600.0, -550.0), (-1000.0, -550.0), (-1000.0, -100.0), (-1600.0, -100.0)], True),
-    'Spline1_GEN_VARIABLE':  ([(-880.0, -620.0), (-480.0, -620.0), (-480.0, -300.0), (-880.0, -300.0)], True),
-    'Spline2_GEN_VARIABLE':  ([(-360.0, -620.0), (40.0, -620.0), (40.0, -320.0), (-360.0, -320.0)], True),
-    'Spline4_GEN_VARIABLE':  ([(-770.0, 510.0), (-430.0, 510.0), (-430.0, 890.0), (-770.0, 890.0)], True),
-    'Spline5_GEN_VARIABLE':  ([(-230.0, 450.0), (150.0, 450.0), (150.0, 790.0), (-230.0, 790.0)], True),
-    'Spline6_GEN_VARIABLE':  ([(-1250.0, 430.0), (-910.0, 430.0), (-910.0, 810.0), (-1250.0, 810.0)], True),
+    'Spline_GEN_VARIABLE':   ([(-1650.0, -1050.0), (-1050.0, -1050.0), (-1050.0, -650.0), (-1650.0, -650.0)], True),
+    'Spline1_GEN_VARIABLE':  ([(-140.0, -750.0), (-245.0, -611.0), (-455.0, -611.0),
+                               (-560.0, -750.0), (-455.0, -889.0), (-245.0, -889.0)], True),
+    'Spline2_GEN_VARIABLE':  ([], False),
 }
 bp_fence = unreal.load_object(None, '/Game/_BLOCKOUT/BP_Fence.BP_Fence')
-existing = set()
-for o in unreal.ObjectIterator():
-    try:
-        pn = o.get_path_name()
-    except Exception:
-        continue
-    if pn.startswith('/Game/_BLOCKOUT/BP_Fence.') and o.get_class().get_name() == 'SplineComponent':
-        existing.add(o.get_name())
-hs = sds.k2_gather_subobject_data_for_blueprint(bp_fence)
-for want in ('Spline4_GEN_VARIABLE', 'Spline5_GEN_VARIABLE', 'Spline6_GEN_VARIABLE'):
-    if want not in existing:
-        p = unreal.AddNewSubobjectParams()
-        p.set_editor_property('parent_handle', hs[0])
-        p.set_editor_property('new_class', unreal.SplineComponent)
-        p.set_editor_property('blueprint_context', bp_fence)
-        sds.add_new_subobject(p)
-        print('added spline template for', want)
 bel.compile_blueprint(bp_fence)
 found = 0
 for o in unreal.ObjectIterator():
@@ -60,35 +44,22 @@ for o in unreal.ObjectIterator():
     found += 1
 print('farm splines re-laid:', found)
 bel.compile_blueprint(bp_fence)
-eal.save_loaded_asset(bp_fence)
+eal.save_asset('/Game/_BLOCKOUT/BP_Fence', False)
 
 # ---------- 2) plant blueprints ----------
-cy = unreal.load_object(None, '/Engine/BasicShapes/Cylinder.Cylinder')
-sp = unreal.load_object(None, '/Engine/BasicShapes/Sphere.Sphere')
-co = unreal.load_object(None, '/Engine/BasicShapes/Cone.Cone')
-cu = unreal.load_object(None, '/Engine/BasicShapes/Cube.Cube')
-white = unreal.load_object(None, '/Game/_BLOCKOUT/M_Whitebox.M_Whitebox')
-
+# Real Crops meshes; mesh min.z=0 + rel location zero keeps plants grounded on their origin.
+# BP_Cabbage: no cabbage asset yet — tomato plants stand in; extra whitebox templates are
+# blanked so reruns keep the swap.
 PLANTS = {
     'BP_CornStalk': [
-        # (mesh, scale, loc, rot(pitch,yaw,roll))
-        (cy, (0.12, 0.12, 2.00), (0, 0, 100), (0, 0, 0)),    # stem
-        (co, (0.40, 0.40, 0.70), (0, 0, 225), (0, 0, 0)),    # tassel
-        (cu, (0.70, 0.06, 0.04), (28, 0, 115), (-20, 0, 0)),  # leaf +X
-        (cu, (0.70, 0.06, 0.04), (0, 28, 95), (-20, 90, 0)),  # leaf +Y
-        (cu, (0.55, 0.06, 0.04), (-24, 0, 130), (-20, 180, 0)),  # leaf -X
+        ('/Game/_LOCAL/Crops/SM_CornPlant.SM_CornPlant', (1.0, 1.0, 1.0), (0, 0, 0), (0, 0, 0)),
     ],
     'BP_Cabbage': [
-        (sp, (0.90, 0.90, 0.55), (0, 0, 27), (0, 0, 0)),     # outer head
-        (sp, (0.55, 0.55, 0.40), (0, 0, 42), (0, 0, 0)),     # inner head
-        (sp, (0.35, 0.15, 0.08), (38, 0, 8), (0, 0, 0)),     # ground leaf +X
-        (sp, (0.35, 0.15, 0.08), (0, 38, 8), (0, 90, 0)),    # ground leaf +Y
+        ('/Game/_LOCAL/Crops/SM_TomatoPlant.SM_TomatoPlant', (1.0, 1.0, 1.0), (0, 0, 0), (0, 0, 0)),
+        (None, None, None, None), (None, None, None, None), (None, None, None, None),
     ],
     'BP_Carrot': [
-        (co, (0.28, 0.28, 0.35), (0, 0, 8), (0, 0, 0)),      # shoulder (tip up)
-        (sp, (0.16, 0.16, 0.30), (0, 0, 38), (0, 0, 0)),     # foliage
-        (sp, (0.12, 0.12, 0.24), (8, 3, 32), (10, 0, 15)),
-        (sp, (0.12, 0.12, 0.24), (-7, -2, 33), (-10, 0, -15)),
+        ('/Game/_LOCAL/Crops/SM_CarrotPlant.SM_CarrotPlant', (1.8, 1.8, 1.8), (0, 0, 0), (0, 0, 0)),
     ],
 }
 
@@ -106,20 +77,24 @@ for name, comps in PLANTS.items():
             p.set_editor_property('blueprint_context', bp)
             sds.add_new_subobject(p)
         bel.compile_blueprint(bp)
-        eal.save_loaded_asset(bp)
+        eal.save_asset('/Game/_BLOCKOUT/' + name, False)
         print(name, 'created with', len(comps), 'comps')
-    for i, (mesh, scale, loc, rot) in enumerate(comps):
+    for i, (mesh_path, scale, loc, rot) in enumerate(comps):
         obj = unreal.find_object(None, '/Game/_BLOCKOUT/%s:%s_C:StaticMesh%s_GEN_VARIABLE' % (name, name, '' if i == 0 else str(i)))
         if not obj:
             print(name, 'MISSING template StaticMesh%s' % ('' if i == 0 else str(i)))
             continue
-        obj.set_editor_property('static_mesh', mesh)
-        obj.set_editor_property('relative_location', unreal.Vector(loc[0], loc[1], loc[2]))
-        obj.set_editor_property('relative_scale3d', unreal.Vector(scale[0], scale[1], scale[2]))
-        obj.set_editor_property('relative_rotation', unreal.Rotator(rot[0], rot[1], rot[2]))
-        obj.set_material(0, white)
+        obj.set_editor_property('static_mesh', unreal.load_object(None, mesh_path) if mesh_path else None)
+        if mesh_path:
+            obj.set_editor_property('relative_location', unreal.Vector(loc[0], loc[1], loc[2]))
+            obj.set_editor_property('relative_scale3d', unreal.Vector(scale[0], scale[1], scale[2]))
+            obj.set_editor_property('relative_rotation', unreal.Rotator(rot[0], rot[1], rot[2]))
+            try:
+                obj.set_editor_property('override_materials', [])
+            except Exception:
+                pass
     bel.compile_blueprint(bp)
-    eal.save_loaded_asset(bp)
+    eal.save_asset('/Game/_BLOCKOUT/' + name, False)
     print(name, 'configured')
 
 # ---------- 3) BP_Corn default PlantClass ----------
@@ -128,7 +103,7 @@ stalk_cls = bel.generated_class(unreal.load_object(None, '/Game/_BLOCKOUT/BP_Cor
 cdo = unreal.load_object(None, '/Game/_BLOCKOUT/BP_Corn.Default__BP_Corn_C')
 cdo.set_editor_property('PlantClass', stalk_cls)
 bel.compile_blueprint(bp_corn)
-eal.save_loaded_asset(bp_corn)
+eal.save_asset('/Game/_BLOCKOUT/BP_Corn', False)
 print('BP_Corn default plant:', cdo.get_editor_property('PlantClass'))
 
 print('level saved:', unreal.EditorLoadingAndSavingUtils.save_dirty_packages(True, True))

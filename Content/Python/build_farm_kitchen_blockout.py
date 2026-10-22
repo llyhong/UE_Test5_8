@@ -26,7 +26,7 @@ bc.box('WBM_GroundInf', 0, 0, -5, 200000, 200000, 10, G)  # single 2km ground, t
 bc.box('WBM_FloorInterior', 900, 0, 2, 1400, 2000, 4, W)
 bc.box('WBM_FloorKitchen', 1250, 550, 4, 700, 900, 4, G)
 bc.box('WBM_PathEntrance', 920, -1105, 2, 240, 210, 4, G)
-bc.box('WBM_PathFarm', -1025, -425, 2, 150, 1550, 4, G)
+# no farm dirt path — the reference image has none, flows are dashed arrows only
 
 # ---------------------------------------------------------------- building shell (h300 t20)
 bc.wall_x('WBM_Wall', 200, 300, -1000, 0, 300)          # south, west of window 1
@@ -52,15 +52,17 @@ bc.wall_x('WBM_Wall', 250, 380, -760, 0, 300)           # front wall, left of do
 bc.wall_x('WBM_Wall', 450, 470, -760, 0, 300)           # front wall, right of door gap
 
 # ---------------------------------------------------------------- kitchen equipment (kitchen X 900..1600, Y 100..1000)
-bc.box('WBM_Sink', 990, 940, 45, 100, 70, 90, G)
-bc.box('WBM_KitchenTable', 1160, 940, 45, 200, 70, 90)
-bc.box('WBM_Stove', 1330, 945, 45, 100, 80, 90)
-bc.box('WBM_Stove', 1440, 945, 45, 100, 80, 90)
+# north-edge row per reference image, west -> east: fridges | sink | prep | stoves+pot | crates
+# box/cyl z is CENTRE; floor kitchen slab top z=6, gear bottom z=4 (sunk 2cm)
+bc.box('WBM_Sink', 1076, 940, 49, 100, 70, 90, G)
+bc.box('WBM_KitchenTable', 1165, 940, 49, 200, 70, 90)
+bc.box('WBM_Stove', 1254, 945, 49, 100, 80, 90)
+bc.box('WBM_Stove', 1334, 945, 49, 100, 80, 90)
 # whitebox-kept kitchen furniture is panda-scaled (PANDA=0.73, see replace_whitebox_props);
 # swapped pieces keep human whitebox dims here — the replace script rescales the real meshes
-bc.cyl('WBM_StovePot', 1330, 945, 82, 29, 22)
-bc.box('WBM_Fridge', 1550, 780, 100, 80, 80, 200)
-bc.box('WBM_Fridge', 1550, 650, 100, 80, 80, 200)
+bc.cyl('WBM_StovePot', 1254, 945, 84.5, 29, 22)
+bc.box('WBM_Fridge', 938, 940, 104, 80, 80, 200)
+bc.box('WBM_Fridge', 1005, 940, 104, 80, 80, 200)
 bc.box('WBM_KitchenIsland', 1200, 500, 33, 146, 66, 66)
 bc.box('WBM_KitchenShelf', 935, 400, 58, 22, 117, 117, G)
 bc.box('WBM_PassCounter', 1350, 145, 33, 161, 44, 66)   # kitchen side of pass window
@@ -83,14 +85,15 @@ for ty, row in ((-600, 1), (-200, 2)):
     for tx in (300, 560, 820):
         bc.box('WBM_TableTop', tx, ty, 72, 130, 85, 6)
         bc.box('WBM_TableLeg', tx, ty, 35, 14, 14, 70)
-        for ox in (-35, 35):
-            bc.box('WBM_ChairSeat', tx + ox, ty - 78, 22, 42, 42, 45)
-            bc.box('WBM_ChairBack', tx + ox, ty - 96, 70, 42, 8, 50)
-            bc.box('WBM_ChairSeat', tx + ox, ty + 78, 22, 42, 42, 45)
-            bc.box('WBM_ChairBack', tx + ox, ty + 96, 70, 42, 8, 50)
+        # two seats per table: one chair each side, centred on the table axis
+        bc.box('WBM_ChairSeat', tx, ty - 78, 22, 42, 42, 45)
+        bc.box('WBM_ChairBack', tx, ty - 96, 70, 42, 8, 50)
+        bc.box('WBM_ChairSeat', tx, ty + 78, 22, 42, 42, 45)
+        bc.box('WBM_ChairBack', tx, ty + 96, 70, 42, 8, 50)
 
 # ---------------------------------------------------------------- farm: open world (PCG fence + fields)
-# One BP_Fence owns four spline templates (cow district, pig pen, chicken yard, patio U) plus a
+# One BP_Fence owns four spline templates (cattle pen rect, pig hexagon, patio U; the old
+# chicken-yard spline Spline2 stays empty — coops are scattered now) plus a
 # PCG component that samples every spline of the actor at 250cm and spawns SM_Fence.
 # Reshape any pen by editing BP_Fence's spline templates (see farm_world_setup.py), recompile.
 # FenceMesh (SoftObject StaticMesh var, default SM_Fence, instance-editable) drives which
@@ -112,33 +115,38 @@ def make_crate(label, x, y, z, mat):
     for i in range(3):
         bc.sph(label + 'Fill', x - 12 + i * 12, y, z + 26, 9, mat)
 
-# per reference image: three fenced field plots across the north (carrot small plot W, corn
-# center, cabbage E near the building), pens along the south (cow W, pig center, chicken E),
-# well + rectangular reservoir at the farm heart, round basin SW, wooded hill NW. No dirt
-# paths — flows are dashed arrows only. Field fences = BP_Fence splines 4/5/6 (see
-# farm_world_setup.py).
+# v3 spread for a big-world breathing feel: three open field plots scattered diagonally
+# across the north (cabbage NW-top, corn centre-N, carrot W) with wide gaps between them,
+# cattle pen on the SW edge, pig hexagon on the south edge, four coops scattered wide,
+# well + rectangular reservoir west-centre, wooded hill pushed to the NW world edge.
+# SM_FieldTile/SM_FieldRidge ridged ground and the real plant meshes come from
+# replace_farm_props.py + farm_world_setup.py, field fences were removed. No dirt paths
+# — flows are dashed arrows only. The whole strip east of x~-150 is left open as a buffer
+# between farm and the dining patio (user: farm must not hug the customer/table side).
 
-# cow pen (x -1600..-1000 / y -550..-100): 2 cows, feed trough, ring feeder
-for cx, cy in ((-1420, -300), (-1180, -420)):
+# cattle pen (x -1650..-1050 / y -1050..-650): 2 cows, feed trough, ring feeder
+for cx, cy in ((-1470, -825), (-1230, -945)):
     bc.cyl_x('WBM_Cow', cx, cy, 85, 70, 170)
     bc.sph('WBM_CowHead', cx + 95, cy, 100, 42)
-bc.box('WBM_Trough', -1300, -160, 17, 320, 60, 34, G)
-bc.cyl('WBM_RingFeeder', -1060, -330, 8, 170, 16, G)
-bc.cyl('WBM_RingFeeder', -1060, -330, 9, 120, 18, W)
+bc.box('WBM_Trough', -1350, -700, 17, 320, 60, 34, G)
+bc.cyl('WBM_RingFeeder', -1150, -855, 8, 170, 16, G)
+bc.cyl('WBM_RingFeeder', -1150, -855, 9, 120, 18, W)
 
-# pig pen (x -880..-480 / y -620..-300)
-for cx, cy in ((-720, -480), (-570, -390)):
+# pig hexagon (x -560..-140 / y -889..-611)
+for cx, cy in ((-390, -770), (-240, -680)):
     bc.cyl_x('WBM_Pig', cx, cy, 55, 52, 110)
     bc.sph('WBM_PigHead', cx + 65, cy, 62, 34)
-bc.box('WBM_Trough', -650, -570, 15, 220, 50, 30, G)
-bc.cyl('WBM_RingFeeder', -520, -360, 7, 120, 14, G)
-bc.cyl('WBM_RingFeeder', -520, -360, 8, 80, 16, W)
+bc.box('WBM_Trough', -320, -860, 15, 220, 50, 30, G)
+bc.cyl('WBM_RingFeeder', -290, -690, 7, 120, 14, G)
+bc.cyl('WBM_RingFeeder', -290, -690, 8, 80, 16, W)
 
-# chicken yard (x -360..40 / y -620..-320): two hut coops, birds out front
-for ccx, ccy in ((-260, -430), (-90, -400)):
+# four hut coops scattered wide (no chicken run), birds pecking around each;
+# none east of x=-300 — the whole east strip is a buffer between farm and dining patio
+for ccx, ccy in ((-620, 320), (-880, 450), (-320, -180), (-940, -760)):
     bc.box('WBM_Coop', ccx, ccy, 45, 140, 110, 90)
     bc.cone_up('WBM_CoopRoof', ccx, ccy, 115, 150, 50)
-for kx, ky in ((-300, -560), (-170, -545), (-30, -555), (10, -540)):
+for kx, ky in ((-665, 260), (-575, 260), (-925, 390), (-835, 390),
+               (-365, -240), (-275, -240), (-985, -820), (-895, -820)):
     bc.sph('WBM_Chicken', kx, ky, 13, 26, zsq=0.85)
     bc.sph('WBM_ChickenHead', kx + 11, ky, 22, 13)
 
@@ -146,56 +154,57 @@ for kx, ky in ((-300, -560), (-170, -545), (-30, -555), (10, -540)):
 bc.cyl('WBM_Basin', -620, -1000, 8, 280, 16, G)
 bc.cyl('WBM_BasinWater', -620, -1000, 9, 220, 18, W)
 
-# well (with little roof) + rectangular reservoir at the farm heart
-bc.cyl('WBM_Well', -160, 140, 30, 80, 60, G)
-bc.box('WBM_WellPost', -190, 140, 60, 10, 10, 120)
-bc.box('WBM_WellPost', -130, 140, 60, 10, 10, 120)
-bc.box('WBM_WellBar', -160, 140, 125, 80, 16, 16)
-bc.cone_up('WBM_WellRoof', -160, 140, 150, 120, 50)
-bc.box('WBM_Reservoir', 40, 140, 20, 280, 140, 40, G)
-bc.box('WBM_ReservoirWater', 40, 140, 19, 232, 92, 38, W)
+# well (with little roof) + rectangular reservoir, west-centre pair
+bc.cyl('WBM_Well', -200, 100, 30, 80, 60, G)
+bc.box('WBM_WellPost', -230, 100, 60, 10, 10, 120)
+bc.box('WBM_WellPost', -170, 100, 60, 10, 10, 120)
+bc.box('WBM_WellBar', -200, 100, 125, 80, 16, 16)
+bc.cone_up('WBM_WellRoof', -200, 100, 150, 120, 50)
+bc.box('WBM_Reservoir', -520, 100, 20, 280, 140, 40, G)
+bc.box('WBM_ReservoirWater', -520, 100, 19, 232, 92, 38, W)
 
 # three fields: BP_Corn instances with per-instance PlantClass. The rect (x -440..-100 /
 # y 450..830) is baked in the BP spline template around the instance origin; yaw 90 maps
-# rel (px,py) -> world offset (-py,px). Corn center (-600,700), cabbage center (-40,620)
-# near the building, carrot small plot center (-1080,620). Interior grid ~80cm.
+# rel (px,py) -> world offset (-py,px). Corn center (-310,650), cabbage center (-1150,850),
+# carrot plot center (-1400,100). Interior grid ~80cm.
 bel = unreal.BlueprintEditorLibrary
 _stalk = bel.generated_class(unreal.load_object(None, '/Game/_BLOCKOUT/BP_CornStalk.BP_CornStalk'))
 _cabbage = bel.generated_class(unreal.load_object(None, '/Game/_BLOCKOUT/BP_Cabbage.BP_Cabbage'))
 _carrot = bel.generated_class(unreal.load_object(None, '/Game/_BLOCKOUT/BP_Carrot.BP_Carrot'))
 _corn_cls = bel.generated_class(unreal.load_object(None, '/Game/_BLOCKOUT/BP_Corn.BP_Corn'))
-_corn = bc._eas().spawn_actor_from_class(_corn_cls, unreal.Vector(-330.0, 60.0, 0.0), unreal.Rotator(0.0, 0.0, 0.0))
+_corn = bc._eas().spawn_actor_from_class(_corn_cls, unreal.Vector(-40.0, 10.0, 0.0), unreal.Rotator(0.0, 0.0, 0.0))
 _corn.set_actor_label('WBM_Field_Corn')
 _corn.set_editor_property('PlantClass', _stalk)
-_corn = bc._eas().spawn_actor_from_class(_corn_cls, unreal.Vector(600.0, 890.0, 0.0), unreal.Rotator(0.0, 0.0, 90.0))
+_corn = bc._eas().spawn_actor_from_class(_corn_cls, unreal.Vector(-510.0, 1120.0, 0.0), unreal.Rotator(0.0, 0.0, 90.0))
 _corn.set_actor_label('WBM_Field_Cabbage')
 _corn.set_editor_property('PlantClass', _cabbage)
-_corn = bc._eas().spawn_actor_from_class(_corn_cls, unreal.Vector(-810.0, -20.0, 0.0), unreal.Rotator(0.0, 0.0, 0.0))
+_corn = bc._eas().spawn_actor_from_class(_corn_cls, unreal.Vector(-1130.0, -540.0, 0.0), unreal.Rotator(0.0, 0.0, 0.0))
 _corn.set_actor_label('WBM_Field_Carrot')
 _corn.set_editor_property('PlantClass', _carrot)
 
-# wooded hill NW + scattered trees
-bc.sph('WBM_Hill', -1480, 950, 30, 360, G, zsq=0.32)
-trees = [(-1650, 850, 1), (-1500, 1080, 1), (-1350, 900, 0), (-1580, 1150, 1),
-         (-1300, 1080, 0), (-1420, 760, 1), (-950, 180, 0), (100, 950, 1), (1150, -1100, 0)]
+# wooded hill pushed to the NW world edge + scattered trees (none hugging the patio fence)
+bc.sph('WBM_Hill', -1780, 1100, 30, 360, G, zsq=0.32)
+trees = [(-1950, 1000, 1), (-1800, 1230, 1), (-1650, 1050, 0), (-1880, 1300, 1),
+         (-1600, 1230, 0), (-1720, 910, 1), (-700, 250, 0), (-180, 1010, 1), (1150, -1100, 0)]
 for tx, ty, pine in trees:
     bc.cyl('WBM_TreeTrunk', tx, ty, 45, 20, 90, G)
     # no crown here — TreeTrunk is swapped for a complete SM_WildTree by the replace script
 
-for rx, ry, rd in ((-1650, -250, 55), (-700, -1180, 44), (-900, -850, 40), (-250, -750, 36),
-                   (-1550, 300, 50), (-450, 250, 40)):
+for rx, ry, rd in ((-1690, -550, 55), (-800, -850, 40), (-450, 320, 40), (-1600, -1150, 44),
+                   (-120, -850, 36), (-1450, -1150, 50)):
     bc.sph('WBM_Rock', rx, ry, rd * 0.22, rd, G, zsq=0.6)
 
-# scattered flower dots for breathing room
-for fx, fy in ((-1500, -700), (-1250, -150), (-800, -250), (-350, -800), (-100, -260),
-               (-500, 100), (-850, 550), (-1250, 950), (-550, 1000), (-200, 850),
-               (150, 300), (-1450, 550), (-750, -650), (-1050, -950), (0, -900)):
+# scattered flower dots for breathing room (kept west of the farm/dining buffer strip)
+for fx, fy in ((-1500, -700), (-1500, -450), (-800, -250), (-350, -800), (-600, -500),
+               (-550, 30), (-550, -40), (-750, 350), (-1250, 1080), (-200, 900),
+               (-120, 300), (-170, 300), (-1200, 600), (-1050, -950), (-900, -980)):
     bc.sph('WBM_Flower', fx, fy, 4, 16, W, zsq=0.5)
 
-# colored food crates in a row along the kitchen back wall (reference layout)
-make_crate('WBM_Crate_Red', 950, 830, 0, '/Game/_BLOCKOUT/M_Crate_Red')
-make_crate('WBM_Crate_Orange', 1030, 830, 0, '/Game/_BLOCKOUT/M_Crate_Orange')
-make_crate('WBM_Crate_Green', 1110, 830, 0, '/Game/_BLOCKOUT/M_Crate_Green')
+# colored food crates in a row at the east end of the kitchen row (reference layout);
+# z = crate bottom, kitchen slab top z=6 with 2cm sink
+make_crate('WBM_Crate_Green', 1409, 940, 4, '/Game/_BLOCKOUT/M_Crate_Green')
+make_crate('WBM_Crate_Orange', 1479, 940, 4, '/Game/_BLOCKOUT/M_Crate_Orange')
+make_crate('WBM_Crate_Red', 1549, 940, 4, '/Game/_BLOCKOUT/M_Crate_Red')
 
 # ---------------------------------------------------------------- customer flow (solid cyan)
 bc.poly_arrow([(920, -1150), (920, -950)], CUST, z=2.5)
@@ -216,14 +225,14 @@ for tx in (310, 560, 820):
     bc.floor_arrow(tx, -20, tx, -130, SERV, dashed=True, width=12, z=8.5)
     bc.floor_arrow(tx, -350, tx, -460, SERV, dashed=True, width=12, z=8.5)
 # farm harvest runs converging on the restaurant entrance (floor arrows are axis-aligned only)
-bc.poly_arrow([(-600, 480), (-600, -100), (-420, -100), (-420, -1150), (920, -1150)],
-              SERV, dashed=True, width=12, z=8.5)
-bc.poly_arrow([(-220, 450), (-220, -100), (-420, -100)], SERV, dashed=True, width=12, z=8.5)
-bc.poly_arrow([(-160, 60), (-160, -100), (-420, -100)], SERV, dashed=True, width=12, z=8.5)
-bc.poly_arrow([(-1080, 400), (-940, 400), (-940, -700), (-420, -700)], SERV, dashed=True, width=12, z=8.5)
-bc.poly_arrow([(-1300, -580), (-1300, -700), (-940, -700)], SERV, dashed=True, width=12, z=8.5)
-bc.poly_arrow([(-620, -650), (-620, -700), (-420, -700)], SERV, dashed=True, width=12, z=8.5)
-bc.poly_arrow([(-160, -650), (-160, -700), (-420, -700)], SERV, dashed=True, width=12, z=8.5)
+# v3 spread routing: main trunk x=-60, south collector ring y=-1150
+bc.poly_arrow([(-60, 480), (-60, -1150), (920, -1150)], SERV, dashed=True, width=12, z=8.5)
+bc.poly_arrow([(-1150, 680), (-1150, -100), (-60, -100)], SERV, dashed=True, width=12, z=8.5)
+bc.poly_arrow([(-200, 10), (-200, -100), (-60, -100)], SERV, dashed=True, width=12, z=8.5)
+bc.poly_arrow([(-1400, -140), (-830, -140), (-830, -1150)], SERV, dashed=True, width=12, z=8.5)
+bc.poly_arrow([(-1350, -1060), (-1350, -1150), (-60, -1150)], SERV, dashed=True, width=12, z=8.5)
+bc.poly_arrow([(-350, -910), (-350, -1150), (-60, -1150)], SERV, dashed=True, width=12, z=8.5)
+bc.poly_arrow([(-940, -850), (-940, -1150), (-60, -1150)], SERV, dashed=True, width=12, z=8.5)
 
 # ---------------------------------------------------------------- legend (bottom-left)
 bc.box('WBM_LegendPlate', -1275, -1085, 2, 660, 160, 4, G)
@@ -235,8 +244,8 @@ bc.text('WBM_Text', -1350, -1140, 5, 'Service Flow', 32, (0.1, 0.1, 0.1))
 
 # ---------------------------------------------------------------- zone labels
 bc.text('WBM_Zone', -850, -950, 6, 'FARM', 90, (0.45, 0.45, 0.45))
-bc.text('WBM_Zone', -1300, -320, 6, 'PASTURE', 46, (0.45, 0.45, 0.45))
-bc.text('WBM_Zone', -600, 990, 6, 'CROPS', 46, (0.45, 0.45, 0.45))
+bc.text('WBM_Zone', -1350, -850, 6, 'PASTURE', 46, (0.45, 0.45, 0.45))
+bc.text('WBM_Zone', -800, 1100, 6, 'CROPS', 46, (0.45, 0.45, 0.45))
 bc.text('WBM_Zone', 430, -880, 6, 'DINING', 70, (0.45, 0.45, 0.45))
 bc.text('WBM_Zone', 1350, 800, 8, 'KITCHEN', 50, (0.45, 0.45, 0.45))
 

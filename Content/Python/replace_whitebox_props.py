@@ -24,7 +24,7 @@ eas = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
 # base -> (asset, yaw): fridge on east wall doors west (90); north-wall kitchen gear and
 # customer-facing cashier gear face south (180); dining tables neutral (0)
 REPLACE = {
-    'Fridge':          ('Fridge',        90.0),
+    'Fridge':          ('Fridge',       180.0),
     'Stove':           ('Stove',        180.0),
     'Sink':            ('Sink',         180.0),
     'KitchenTable':    ('PrepTable',    180.0),
@@ -37,7 +37,7 @@ REPLACE = {
 DROP = ('TableLeg', 'ChairBack', 'QueueBar', 'MenuBoard')
 TABLE_ROWS = (-600.0, -200.0)
 # panda (132cm tall) vs manny (181cm): dining-side furniture uniformly scaled to panda
-# proportions; chairs also pull in toward the table centre so they don't float outside
+# proportions; dining is two seats per table (one per side, on the table axis)
 PANDA = 0.73
 TABLE_COLS = (300.0, 560.0, 820.0)
 # bottom overrides: DiningTable is a complete grounded table — must NOT inherit the old
@@ -87,17 +87,27 @@ for base, acts in sorted(buckets.items()):
         if not mesh:
             continue
         unmatched_assets.discard('Chair')
+        # two seats per table — one chair per side, both centred on the table axis; extra
+        # chairs in a group are destroyed. Absolute offsets, so re-runs are idempotent.
+        groups = {}
         for act in acts:
             loc = act.get_actor_location()
-            # pull the chair in toward its table centre (furniture is panda-scaled now)
             tx = min(TABLE_COLS, key=lambda v: abs(loc.x - v))
             ty = min(TABLE_ROWS, key=lambda v: abs(loc.y - v))
-            act.set_actor_location(unreal.Vector(tx + (loc.x - tx) * PANDA, ty + (loc.y - ty) * PANDA, loc.z), False, True)
-            y = loc.y
-            yaw = 0.0 if y < ty else 180.0  # sitter faces the table
-            if swap(act, mesh, yaw):
-                replaced.append(act.get_actor_label())
-                print('replaced', act.get_actor_label(), '-> SM_Chair yaw', yaw)
+            side = -1.0 if loc.y < ty else 1.0
+            groups.setdefault((tx, ty, side), []).append(act)
+        for (tx, ty, side), group in sorted(groups.items()):
+            keep = min(group, key=lambda a: a.get_actor_label())
+            for act in group:
+                if act is not keep:
+                    eas.destroy_actor(act)
+                    dropped.append(act.get_actor_label())
+            loc = keep.get_actor_location()
+            keep.set_actor_location(unreal.Vector(tx, ty + side * 78.0 * PANDA, loc.z), False, True)
+            yaw = 0.0 if side < 0 else 180.0  # sitter faces the table
+            if swap(keep, mesh, yaw):
+                replaced.append(keep.get_actor_label())
+                print('replaced', keep.get_actor_label(), '-> SM_Chair yaw', yaw)
         continue
     if base not in REPLACE:
         continue
