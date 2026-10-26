@@ -39,7 +39,10 @@ APlatformingCharacter::APlatformingCharacter()
 	bUseControllerRotationYaw = false;
 	
 	// Configure character movement
-	GetCharacterMovement()->GravityScale = 2.5f;
+	// Mario Odyssey feel: lighter falling so the jump has real hang-time.
+	// With JumpZVelocity below, single-jump apex ~= 207cm (character is 180cm tall),
+	// so the character can clear roughly its own height.
+	GetCharacterMovement()->GravityScale = 2.0f;
 	GetCharacterMovement()->MaxAcceleration = 1500.0f;
 	GetCharacterMovement()->BrakingFrictionFactor = 1.0f;
 	GetCharacterMovement()->bUseSeparateBrakingFriction = true;
