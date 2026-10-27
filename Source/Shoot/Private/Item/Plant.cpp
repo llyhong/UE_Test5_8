@@ -231,6 +231,7 @@ void APlant::AdvanceStage()
 	{
 		SpawnFruit(); // 果实直接长在树上，每个果实自行启动熟度计时
 		OnReadyToHarvest();
+		UpdateHarvestHintOutline(); // 玩家已在范围内时，立即点亮“可采摘”描边提示
 	}
 }
 
@@ -269,7 +270,60 @@ bool APlant::Harvest()
 		return false;
 	}
 
-	// 收集长在树上的果实：摘下后直接放到玩家手上（不收进背包；无交互角色则直接销毁）
+	// 新行为：按 E 直接把果实放入玩家背包，然后植被消失（一次性采摘，不再自动重结果）
+	if (bHarvestToInventory && InteractingCharacter)
+	{
+		const int32 Yield = (HarvestYield > 0) ? HarvestYield : FMath::Max(1, Info->FruitCount);
+		const EIngredientQuality Quality = GetCurrentQuality();
+
+		// 清理树上已挂的果实，避免与入背包的果实重复（这些会随植被一起销毁）
+		for (AItemActor* Fruit : SpawnedFruits)
+		{
+			if (Fruit)
+			{
+				Fruit->StopRipening();
+				Fruit->Destroy();
+			}
+		}
+		SpawnedFruits.Empty();
+		bHarvested = true;
+
+		// 生成配置数量的果实并逐个入背包（背包按 ItemClass 堆叠为同一槽位，Quantity=Yield）
+		for (int32 i = 0; i < Yield; i++)
+		{
+			if (!Info->FruitClass)
+			{
+				UE_LOG(LogShoot, Warning, TEXT("[%s] 采摘入背包失败：DataTable 未配置 FruitClass"), *GetName());
+				break;
+			}
+			FActorSpawnParameters SpawnParams;
+			SpawnParams.Owner = this;
+			SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+			AItemActor* Fruit = GetWorld()->SpawnActor<AItemActor>(Info->FruitClass, GetActorTransform(), SpawnParams);
+			if (Fruit)
+			{
+				Fruit->SetIngredientQuality(Quality); // 按当前整株熟度写入品质
+				if (!InteractingCharacter->AddItemToInventory(Fruit))
+				{
+					// 背包已满等情况：入包失败则直接销毁，避免世界残留
+					Fruit->Destroy();
+				}
+			}
+		}
+
+		// 解除与角色的交互注册，避免悬空引用
+		if (InteractingCharacter->GetOverlappingPlant() == this)
+		{
+			InteractingCharacter->SetOverlappingPlant(nullptr);
+		}
+		InteractingCharacter = nullptr;
+
+		// 植被消失
+		Destroy();
+		return true;
+	}
+
+	// 旧行为：把树上的果实挂到玩家手上（不收进背包）；无交互角色则直接销毁
 	// 采摘瞬间按【每个果实自身】的熟度把品质写入该果实（不同果实可能处于不同熟度阶段），最终影响成品品质与上菜奖励
 	if (InteractingCharacter)
 	{
@@ -388,6 +442,10 @@ void APlant::SpawnSingleFruit(int32 Index)
 
 		SpawnedFruits.Add(Fruit);
 
+		// 入背包采摘模式下，树上的果实不再可被玩家单独拾取，仅作为普通场景物件；
+		// 采摘由植物在 Harvest 中统一处理入背包。旧模式（挂手上）则保持可拾取。
+		Fruit->bPickable = !bHarvestToInventory;
+
 		// 写入熟度配置并启动该果实自身的熟度计时（每个果实独立累计，互不影响）
 		Fruit->ConfigureAndStartRipening(Info->bEnableRipeness, Info->RipeTime, Info->OverripeTime);
 	}
@@ -504,6 +562,7 @@ void APlant::OnInteractionOverlap(UPrimitiveComponent* OverlappedComponent, AAct
 	{
 		InteractingCharacter = Character;
 		Character->SetOverlappingPlant(this);
+		UpdateHarvestHintOutline();
 	}
 }
 
@@ -520,7 +579,21 @@ void APlant::OnInteractionEndOverlap(UPrimitiveComponent* OverlappedComponent, A
 		{
 			InteractingCharacter = nullptr;
 		}
+		UpdateHarvestHintOutline();
 	}
+}
+
+void APlant::UpdateHarvestHintOutline()
+{
+	// 仅当“入背包采摘模式 + 已结果 + 未收获 + 已解锁 + 玩家在范围内 + 是当前正在交互（待采摘）的目标植被”时描边
+	const bool bShowHint = bHarvestToInventory
+		&& IsFruiting()
+		&& !bHarvested
+		&& (IngredientUnlockID < 0 || bIngredientUnlocked)
+		&& InteractingCharacter != nullptr
+		&& InteractingCharacter->GetOverlappingPlant() == this;
+
+	AItemActor::SetActorsOutline(this, bShowHint);
 }
 
 void APlant::SetIngredientUnlocked(bool bUnlocked)
@@ -531,6 +604,7 @@ void APlant::SetIngredientUnlocked(bool bUnlocked)
 	}
 	bIngredientUnlocked = bUnlocked;
 	OnPlantUnlockStateChanged(bUnlocked);
+	UpdateHarvestHintOutline();
 }
 
 void APlant::HandleIngredientsUnlocked(const TArray<int32>& UnlockedIDs)

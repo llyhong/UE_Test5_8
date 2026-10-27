@@ -1,7 +1,7 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
-#include "Game/BaseLevelBP.h"
 #include "Game/OrderSystem.h"
+#include "Game/BaseLevelBP.h"
 
 #include "BaseGameInstance.h"
 #include "NPC/GuestCharacter.h"

@@ -140,6 +140,11 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item")
 	int32 MenuFoodID = -1;
 
+	/** 是否可被玩家拾取：false 时禁用本 ItemActor 的拾取（Pickable）逻辑，仅作为场景普通物件
+	 *  （例如挂在树上、由植物统一采摘入背包的果实）。默认 true。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item")
+	bool bPickable = true;
+
 	// ========== 成品腐烂（未被玩家持有一段时间后自动销毁） ==========
 	/** 是否启用腐烂：被启用后，若成品未被玩家拾取（不在手上），累计超过 DecayTime 则自动销毁。
 	 *  玩家"拾取起来"时计时【暂停】（保留已累计时长，不清零）；"放下"后从原值【继续累计】。 */

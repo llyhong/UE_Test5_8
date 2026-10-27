@@ -1,10 +1,10 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
+#include "Item/ItemActor.h"
 #include "Components/SphereComponent.h"
 #include "Interfaces/PickupInterface.h"
 #include "ShootCharacter.h"
 #include "Game/BaseFoodActor.h"
-#include "Item/ItemActor.h"
 
 #include "Game/PlateSystem.h"
 #include "Game/BaseGameInstance.h"
@@ -211,6 +211,11 @@ void AItemActor::EnableDecay(float InDecayTime)
 void AItemActor::OnSphereOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
 	UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
 {
+	// 禁止拾取：作为场景普通物件（如由植物统一采摘的树上果实），不参与任何拾取交互
+	if (!bPickable)
+	{
+		return;
+	}
 	// 食材未解锁：屏蔽一切拾取交互（不进入 Hovering、不注册为可拾取物）
 	if (IngredientUnlockID >= 0 && !bIngredientUnlocked)
 	{
@@ -245,6 +250,11 @@ void AItemActor::OnSphereOverlap(UPrimitiveComponent* OverlappedComponent, AActo
 void AItemActor::OnSphereEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
 	UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
 {
+	// 禁止拾取：本身不参与拾取交互，无需处理重叠结束逻辑
+	if (!bPickable)
+	{
+		return;
+	}
 	// 食材未解锁：无需处理拾取重叠结束逻辑
 	if (IngredientUnlockID >= 0 && !bIngredientUnlocked)
 	{

@@ -50,6 +50,16 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Plant")
 	bool Harvest();
 
+	// ========== 按 E 采摘：直接入背包并让植被消失 ==========
+	/** 按 E 采摘后是否直接把果实放入玩家背包（true=直接入背包并销毁植被；
+	 *  false=旧逻辑，果实挂到玩家手上并支持自动重新结果）。默认开启新行为。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Plant|Harvest")
+	bool bHarvestToInventory = true;
+
+	/** 采摘后直接入背包的果实数量；<=0 表示使用 DataTable 的 FruitCount。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Plant|Harvest")
+	int32 HarvestYield = -1;
+
 	// ========== 解锁（食材未解锁时禁止采摘） ==========
 	/** 食材解锁 ID：>=0 表示需要对应 ID 解锁后才能采摘果实（如玉米田里的玉米）；<0 表示无需解锁，默认可摘。
 	 *  解锁由 UBaseGameInstance 统一管理（关卡达成目标后 UnlockIngredients）。 */
@@ -75,6 +85,9 @@ public:
 	/** 监听 GameInstance 的食材解锁广播 */
 	UFUNCTION()
 	void HandleIngredientsUnlocked(const TArray<int32>& UnlockedIDs);
+
+	/** 根据当前状态刷新“靠近可采摘”描边提示（仅当前目标植被且可收获时显示） */
+	void UpdateHarvestHintOutline();
 
 	// ========== 查询（供 UI / 蓝图） ==========
 

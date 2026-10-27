@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
+#include "Animation/AnimMontage.h"
 #include "Interfaces/PickupInterface.h"
 #include "Logging/LogMacros.h"
 #include "Item/Weapon.h"
@@ -151,8 +152,15 @@ private:
 	TObjectPtr<ACookingMachine> CookingMachine;
 
 	void PlayPickMontage(FName SelectionName);
-	
-	bool CanAttack(); 
+
+	/** 播放采集（摘取植被）动画，返回是否成功开始播放 */
+	bool PlayGatheringMontage();
+
+	/** 采集蒙太奇结束回调：此时才真正收获并删除植物 */
+	UFUNCTION()
+	void GatheringMontageEnded(UAnimMontage* Montage, bool bInterrupted);
+
+bool CanAttack(); 
 	bool IsHolding();
 	bool CanPick(); //可以捡
 	bool IsSpawner();//是否是生产raw食物的箱子
@@ -465,6 +473,17 @@ public:
 
 	 UPROPERTY(EditDefaultsOnly, Category="Montages")
 	 UAnimMontage* ThrowMontage;
+
+	/** 采集（摘取植被）动画：在触发植物收获时播放 */
+	UPROPERTY(EditDefaultsOnly, Category="Montages")
+	UAnimMontage* GatheringMontage;
+
+	/** 采集蒙太奇结束委托（用于动画播完后才真正收获并删除植物） */
+	FOnMontageEnded OnGatheringMontageEnded;
+
+	/** 正在等待采集动画结束、随后要收获的植物（避免动画途中被销毁） */
+	TObjectPtr<APlant> PendingGatherPlant = nullptr;
+
 
 	 UFUNCTION(BlueprintImplementableEvent, Category="Character Events")
 	 void OnPickEvent();	

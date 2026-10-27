@@ -30,18 +30,42 @@
 #include "Data/ItemActorInfo.h"
 
 
- void AShootCharacter::PlayPickMontage(FName SelectionName)
- {
- 	if (CharacterActionState == ECharacterActionState::EAS_Unoccupied)
- 	{
- 		UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
- 		if (AnimInstance && PickMontage)
- 		{
- 			AnimInstance->Montage_Play(PickMontage);
- 			AnimInstance->Montage_JumpToSection(SelectionName,PickMontage);
- 		}
- 	}
- }
+void AShootCharacter::PlayPickMontage(FName SelectionName)
+{
+	if (CharacterActionState == ECharacterActionState::EAS_Unoccupied)
+	{
+		UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
+		if (AnimInstance && PickMontage)
+		{
+			AnimInstance->Montage_Play(PickMontage);
+			AnimInstance->Montage_JumpToSection(SelectionName,PickMontage);
+		}
+	}
+}
+
+bool AShootCharacter::PlayGatheringMontage()
+{
+	if (CharacterActionState == ECharacterActionState::EAS_Unoccupied)
+	{
+		UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
+		if (AnimInstance && GatheringMontage)
+		{
+			AnimInstance->Montage_Play(GatheringMontage);
+			return true;
+		}
+	}
+	return false;
+}
+
+void AShootCharacter::GatheringMontageEnded(UAnimMontage* Montage, bool bInterrupted)
+{
+	// 采集动画播完（无论是否被中断）才真正收获并删除植物
+	if (PendingGatherPlant && IsValid(PendingGatherPlant))
+	{
+		PendingGatherPlant->Harvest();
+	}
+	PendingGatherPlant = nullptr;
+}
 
  bool AShootCharacter::CanAttack()
 {
@@ -207,7 +231,19 @@ void AShootCharacter::SetOverlappingItem(AItemActor* Item)
 
 void AShootCharacter::SetOverlappingPlant(APlant* Plant)
 {
+	// 若切换了目标植被，先让旧植被重新评估描边（会因其不再是当前目标而关闭描边）
+	if (OverlappingPlant && OverlappingPlant != Plant && IsValid(OverlappingPlant))
+	{
+		OverlappingPlant->UpdateHarvestHintOutline();
+	}
+
 	OverlappingPlant = Plant;
+
+	// 新目标植被立即评估描边（若满足条件则点亮，否则保持关闭）
+	if (Plant && IsValid(Plant))
+	{
+		Plant->UpdateHarvestHintOutline();
+	}
 }
 
 void AShootCharacter::SetOverlappingCounter(AServingCounter* Counter)
@@ -244,7 +280,31 @@ void AShootCharacter::InteractWithPlant()
 	}
 	else if (OverlappingPlant->IsFruiting())
 	{
-		OverlappingPlant->Harvest();
+		// 触发摘取植被：先播放 A_Gathering，待动画播完（OnGatheringMontageEnded）后再真正收获并删除植物
+		if (PendingGatherPlant == nullptr)
+		{
+			PendingGatherPlant = OverlappingPlant;
+			if (PlayGatheringMontage())
+			{
+				if (UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance())
+				{
+					OnGatheringMontageEnded.BindUObject(this, &AShootCharacter::GatheringMontageEnded);
+					AnimInstance->Montage_SetEndDelegate(OnGatheringMontageEnded, GatheringMontage);
+				}
+				else
+				{
+					// 没有动画实例：直接收获
+					PendingGatherPlant->Harvest();
+					PendingGatherPlant = nullptr;
+				}
+			}
+			else
+			{
+				// 蒙太奇未播放（未配置或角色忙碌）：直接收获
+				PendingGatherPlant->Harvest();
+				PendingGatherPlant = nullptr;
+			}
+		}
 	}
 	else
 	{
