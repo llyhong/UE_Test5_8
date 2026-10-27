@@ -114,6 +114,11 @@ void APlant::ApplyStageMesh(int32 StageIndex)
 void APlant::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
+
+	// 每帧以“当前目标植被”为准校正采摘描边：确保只有当前待采摘的植被亮起，
+	// 其它植被（即使曾因事件顺序残留描边）会被强制关闭。
+	UpdateHarvestHintOutline();
+
 // 调试信息：节流打印到屏幕
 	if (bDebug)
 	{
@@ -593,7 +598,12 @@ void APlant::UpdateHarvestHintOutline()
 		&& InteractingCharacter != nullptr
 		&& InteractingCharacter->GetOverlappingPlant() == this;
 
-	AItemActor::SetActorsOutline(this, bShowHint);
+	// 仅在状态变化时改写自定义深度，避免每帧无意义调用
+	if (bShowHint != bHintOutlineActive)
+	{
+		bHintOutlineActive = bShowHint;
+		AItemActor::SetActorsOutline(this, bShowHint);
+	}
 }
 
 void APlant::SetIngredientUnlocked(bool bUnlocked)

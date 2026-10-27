@@ -478,6 +478,10 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category="Montages")
 	UAnimMontage* GatheringMontage;
 
+	/** 采集时是否让角色转向（朝向）待采摘的植被；关闭则保持原朝向。默认开启。 */
+	UPROPERTY(EditDefaultsOnly, Category="Montages")
+	bool bFacePlantWhenGathering = true;
+
 	/** 采集蒙太奇结束委托（用于动画播完后才真正收获并删除植物） */
 	FOnMontageEnded OnGatheringMontageEnded;
 

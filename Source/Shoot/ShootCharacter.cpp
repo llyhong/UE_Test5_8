@@ -284,6 +284,19 @@ void AShootCharacter::InteractWithPlant()
 		if (PendingGatherPlant == nullptr)
 		{
 			PendingGatherPlant = OverlappingPlant;
+
+			// 采集时朝向植被（开关控制）：仅水平转向，让角色面对待采摘的植物
+			if (bFacePlantWhenGathering && PendingGatherPlant)
+			{
+				FVector ToPlant = PendingGatherPlant->GetActorLocation() - GetActorLocation();
+				ToPlant.Z = 0.f;
+				if (!ToPlant.IsNearlyZero())
+				{
+					const FRotator FaceRot = ToPlant.Rotation();
+					SetActorRotation(FaceRot);
+				}
+			}
+
 			if (PlayGatheringMontage())
 			{
 				if (UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance())

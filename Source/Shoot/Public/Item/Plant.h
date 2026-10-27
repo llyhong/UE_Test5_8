@@ -199,6 +199,9 @@ protected:
 	UPROPERTY()
 	TObjectPtr<AShootCharacter> InteractingCharacter;
 
+	/** 当前采摘描边是否已开启（缓存，避免每帧重复调用 SetActorsOutline） */
+	bool bHintOutlineActive = false;
+
 	/** 自动重新结果定时器（逐个生长时用） */
 	FTimerHandle RefruitTimerHandle;
 };
