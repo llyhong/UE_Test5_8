@@ -4,5 +4,7 @@
 !/Content
 !/Source
 !/*.uproject
-# .gitignore 自身需入库
 !/.gitignore
+!/Plugins
+Plugins/*/Binaries/
+Plugins/*/Intermediate/
