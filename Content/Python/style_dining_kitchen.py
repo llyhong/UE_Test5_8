@@ -88,7 +88,7 @@ def strip(label, x, y, sx, sy, folder):
 tw_s = wall_thickness('WBM_Wall_1602')
 strip('WBM_Wainscot_South', 500.0, -1000.0 + tw_s / 2.0 + 4.0, 6.0, 0.08, 'Building/Walls')
 tw_p = wall_thickness('WBM_Wall_1611')
-strip('WBM_Wainscot_Partition', 1320.0, 100.0 - tw_p / 2.0 - 4.0, 5.6, 0.08, 'Building/Walls')
+strip('WBM_Wainscot_Partition', 1250.0, 100.0 - tw_p / 2.0 - 4.0, 7.0, 0.08, 'Building/Walls')
 
 eal.save_asset('/Game/_BLOCKOUT/L_FarmKitchen_Blockout', False)
 print('map saved')

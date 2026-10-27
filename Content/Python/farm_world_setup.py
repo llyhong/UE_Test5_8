@@ -16,10 +16,11 @@ sds = unreal.get_engine_subsystem(unreal.SubobjectDataSubsystem)
 # Spline3 (patio U) is intentionally not listed — left untouched.
 # Former field fences Spline4/5/6 were removed (fields are open ridged plots now); their
 # empty spline templates may linger in BP_Fence — harmless, no points means no spawns.
+# Pens snap to the 1 m build grid (100 cm cells, origin 0,0): cattle 6x4 cells,
+# pig 5x4 cells. Fence posts land on cell boundaries like every placeable edge.
 SHAPES = {
-    'Spline_GEN_VARIABLE':   ([(-1650.0, -1050.0), (-1050.0, -1050.0), (-1050.0, -650.0), (-1650.0, -650.0)], True),
-    'Spline1_GEN_VARIABLE':  ([(-140.0, -750.0), (-245.0, -611.0), (-455.0, -611.0),
-                               (-560.0, -750.0), (-455.0, -889.0), (-245.0, -889.0)], True),
+    'Spline_GEN_VARIABLE':   ([(-1700.0, -1100.0), (-1100.0, -1100.0), (-1100.0, -700.0), (-1700.0, -700.0)], True),
+    'Spline1_GEN_VARIABLE':  ([(-600.0, -900.0), (-100.0, -900.0), (-100.0, -500.0), (-600.0, -500.0)], True),
     'Spline2_GEN_VARIABLE':  ([], False),
 }
 bp_fence = unreal.load_object(None, '/Game/_BLOCKOUT/BP_Fence.BP_Fence')
