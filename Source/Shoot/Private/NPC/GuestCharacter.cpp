@@ -4,6 +4,8 @@
 #include "NPC/ChairSeat.h"
 #include "NPC/GuestManager.h"
 #include "ShootCharacter.h"
+#include "Item/ItemActor.h"
+#include "Item/Dish.h"
 #include "Components/SphereComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/WidgetComponent.h"
@@ -369,13 +371,13 @@ void AGuestCharacter::SitDown()
 	bIsEating = false;
 	bIsLeaving = false;
 
-	SetGuestState(EGuestState::WaitingFood);
-
 	// 接单方式：
-	// - 自动接单：坐下即向订单系统点单（订单出现时机 = 客人点餐）
-	// - 需要玩家接单：坐下后等待玩家按 E 接单（见 AcceptOrderByPlayer），未接单则超时离场
+	// - 自动接单：坐下即向订单系统点单（订单出现时机 = 客人点餐），状态直接进入 WaitingFood
+	// - 需要玩家接单：坐下后进入 WaitingOrder（等待玩家按 E 接单），玩家接单成功后才转入 WaitingFood 并出现订单
 	if (OrderAcceptMode == EGuestOrderAcceptMode::AutoAccept)
 	{
+		SetGuestState(EGuestState::WaitingFood);
+
 		// 若没有订单系统（未初始化 / 未启动），退化为“自己等一会儿就走”，避免客人卡死在座位上
 		const bool bOrdered = PlaceOrder();
 		if (bShowDebugInfo && GEngine)
@@ -392,7 +394,8 @@ void AGuestCharacter::SitDown()
 	}
 	else
 	{
-		// 等待玩家接单；长时间无人接单则兜底离场
+		// 等待玩家接单：进入 WaitingOrder（头上提示“请按E点单”），长时间无人接单则兜底离场
+		SetGuestState(EGuestState::WaitingOrder);
 		StartWaitFoodTimeout();
 	}
 }
@@ -405,7 +408,8 @@ void AGuestCharacter::StartWaitFoodTimeout()
 		FTimerDelegate TimeoutDelegate;
 		TimeoutDelegate.BindLambda([this]()
 		{
-			if (GuestState == EGuestState::WaitingFood)
+			// 等待上菜 / 等待玩家接单 任一阶段超时都离场（客人没等到结果）
+			if (GuestState == EGuestState::WaitingFood || GuestState == EGuestState::WaitingOrder)
 			{
 				StartLeaving();
 			}
@@ -490,7 +494,7 @@ bool AGuestCharacter::PlaceOrder()
 bool AGuestCharacter::CanAcceptOrderByPlayer() const
 {
 	return OrderAcceptMode == EGuestOrderAcceptMode::NeedPlayerAccept
-		&& GuestState == EGuestState::WaitingFood
+		&& GuestState == EGuestState::WaitingOrder
 		&& CurrentOrder == nullptr;
 }
 
@@ -508,7 +512,8 @@ bool AGuestCharacter::AcceptOrderByPlayer()
 		return false;
 	}
 
-	// 接单成功：取消兜底超时，改由订单系统的等待超时驱动（见 OnOrderFailed）
+	// 接单成功：状态从“等待接单”转入“等待上菜”，取消兜底超时，改由订单系统的等待超时驱动（见 OnOrderFailed）
+	SetGuestState(EGuestState::WaitingFood);
 	GetWorld()->GetTimerManager().ClearTimer(GuestTimerHandle);
 
 	// 点单成功的调试信息已由 PlaceOrder 统一打印（含订单号与“玩家接单”标记）
@@ -518,12 +523,9 @@ bool AGuestCharacter::AcceptOrderByPlayer()
 void AGuestCharacter::OnInteractionOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
 	UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
 {
-	// 只有“需要玩家接单”模式才需要玩家靠近交互
-	if (OrderAcceptMode != EGuestOrderAcceptMode::NeedPlayerAccept)
-	{
-		return;
-	}
-
+	// 无论接单方式，都注册为可交互客人：
+	// - 需要玩家接单：靠近按 E 接单；
+	// - 方案B上菜：靠近“正在等餐”的客人按 E 直接端菜上菜。
 	if (AShootCharacter* Player = Cast<AShootCharacter>(OtherActor))
 	{
 		Player->SetOverlappingGuest(this);
@@ -605,16 +607,132 @@ void AGuestCharacter::StartEating()
 	bIsEating = true;
 	bIsSitting = true;
 
-	// 进食结束后离开
+	// 进食结束后：方案B 把桌上菜品转为空碟占据座位，再离座
 	GetWorld()->GetTimerManager().SetTimerForNextTick([this]()
 	{
 		FTimerDelegate EatDelegate;
 		EatDelegate.BindLambda([this]()
 		{
-			StartLeaving();
+			FinishEating();
 		});
 		GetWorld()->GetTimerManager().SetTimer(GuestTimerHandle, EatDelegate, EatDuration, false);
 	});
+}
+
+bool AGuestCharacter::CanPlayerServeDish() const
+{
+	return GuestState == EGuestState::WaitingFood;
+}
+
+bool AGuestCharacter::TryServeDish(AShootCharacter* Player, AItemActor* Dish)
+{
+	if (!Player || !Dish || GuestState != EGuestState::WaitingFood)
+	{
+		return false;
+	}
+
+	// 订单系统未就绪：无法完成订单
+	UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetGameInstance());
+	AOrderSystem* OS = (GI && GI->curLevelBP) ? GI->curLevelBP->orderSystem : nullptr;
+	if (!OS || !OS->IsStarted)
+	{
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 3.f, FColor::Red, TEXT("[上菜] 订单系统未就绪，无法上菜"));
+		}
+		return false;
+	}
+
+	// 组装菜品 ID（优先用碟子里的真实菜品，退回单个 MenuFoodID）
+	TArray<int> FoodIDs = Dish->FoodIdArray;
+	if (FoodIDs.Num() == 0 && Dish->GetMenuFoodID() >= 0)
+	{
+		FoodIDs.Add(Dish->GetMenuFoodID());
+	}
+
+	// 仅完成“本客人”的订单（针对性上菜，而非最紧急的任意客人）
+	const bool bServed = OS->PushFoodsForGuest(FoodIDs, this);
+	if (!bServed)
+	{
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 3.f, FColor::Red,
+				TEXT("[上菜] 该客人没有匹配此菜的订单（可能菜不对）"));
+		}
+		return false;
+	}
+
+	// 把手上的菜从手部插槽取下，摆到客人桌前（座位处略抬高）
+	Dish->DeAttachMeshToSocket();
+	if (SeatActor)
+	{
+		const FVector Forward = SeatActor->GetActorRotation().Vector();
+		const FVector TableLoc = SeatActor->GetActorLocation()
+			+ Forward * 35.f
+			+ FVector(0.f, 0.f, SeatActor->SitSocketOffset.Z * 0.5f);
+		Dish->SetActorLocation(TableLoc);
+		Dish->SetActorRotation(SeatActor->GetActorRotation());
+	}
+	else
+	{
+		Dish->SetActorLocation(GetActorLocation() + FVector(0.f, 0.f, 30.f));
+	}
+
+	// 桌上成品：不可被普通拾取、不会腐烂消失、停留在桌上
+	Dish->bPickable = false;
+	Dish->bEnableDecay = false;
+	Dish->SetItemState(EItemState::EIS_Idle);
+	// 关闭普通拾取球，避免桌上的菜被当作可捡物；回收球(CollectSphere)仅在成为空碟后启用
+	if (Dish->Sphere)
+	{
+		Dish->Sphere->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Dish->Sphere->SetGenerateOverlapEvents(false);
+	}
+
+	// 记录桌上这道菜（进食结束后转为空碟）
+	PlateOnTable = Dish;
+
+	// 玩家清空手持状态（剩余手持复位由调用方在 E 分发里处理）
+	Player->SetPickingItem(nullptr);
+
+	if (bShowDebugInfo && GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 3.f, FColor::Green,
+			FString::Printf(TEXT("[上菜] 已把菜品端给客人 %s，开始进食"), *GetName()));
+	}
+	return true;
+}
+
+void AGuestCharacter::FinishEating()
+{
+	// 方案B：进食结束 → 把桌上的菜变成“空碟”并占据座位；客人离座但座位不释放，
+	// 直到玩家按 E 收走空碟（PickUpByPlayer → ClearDirtyPlate）才真正释放。
+	if (bUseDirtyPlateFlow && SeatActor && PlateOnTable && PlateOnTable->IsValidLowLevel())
+	{
+		// 空碟相关字段（bIsEmptyPlate / OwningSeat / CollectSphere）已在基类 AItemActor 上，
+		// 因此任何成品（不论是否为 ADish）都能变成空碟并被玩家收走。
+		AItemActor* Plate = PlateOnTable;
+		Plate->bIsEmptyPlate = true;
+		Plate->bPickable = false;
+
+		// 清掉碟上的食材演员，视觉上变成真正的"空碟"（只留盘子的网格）
+		Plate->OnClear();
+
+		// 启用空碟的回收球，玩家靠近即可按 E 收走
+		if (Plate->CollectSphere)
+		{
+			Plate->CollectSphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+			Plate->CollectSphere->SetGenerateOverlapEvents(true);
+		}
+
+		// 空碟占据座位：bIsOccupied 保持为真，客人不再占用（改由空碟占座）
+		Plate->OwningSeat = SeatActor;
+		SeatActor->SetDirtyPlate(Plate);
+		SeatActor = nullptr; // 客人离座时不释放座位（Release 改由玩家收走空碟触发）
+	}
+
+	PlateOnTable = nullptr;
+	StartLeaving();
 }
 
 void AGuestCharacter::GiveUpAndLeave()
@@ -681,6 +799,11 @@ void AGuestCharacter::StartLeaving()
 				GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Yellow,
 					FString::Printf(TEXT("[Guest] %s 无离场点，直接销毁"), *GetName()));
 			}
+		}
+		// 先从管理器反注册（否则打烊收尾检测收不到"客人已离场"通知，会一直等下去）
+		if (Manager)
+		{
+			Manager->UnregisterGuest(this);
 		}
 		SetGuestState(EGuestState::Dead);
 		Destroy();

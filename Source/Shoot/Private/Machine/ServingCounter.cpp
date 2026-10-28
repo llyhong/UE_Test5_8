@@ -167,9 +167,11 @@ bool AServingCounter::SubmitDish(AItemActor* Dish)
 			UE_LOG(LogTemp, Log, TEXT("[ServingCounter] 上菜成功！菜品(FoodID=%d)已送达客人"), FoodID);
 			GEngine->AddOnScreenDebugMessage(-1, 3.f, FColor::Green,
 				FString::Printf(TEXT("[上菜台] 上菜成功！FoodID=%d"), FoodID));
-			// 先按成品品质结算额外奖励（佳品/次品），随后销毁成品
+			// 先按成品品质结算额外奖励（佳品/次品）
 			ApplyQualityReward(Dish);
-			Dish->Destroy();
+			// 上菜到客人位置（读取本次 PushFoods 实际服务的客人），停留后销毁
+			AGuestCharacter* ServedGuest = Cast<UBaseGameInstance>(GetGameInstance())->curLevelBP->orderSystem->GetLastServedGuest();
+			DeliverDishToSeat(Dish, ServedGuest);
 			OnServeSuccess(FoodID);
 			return true;
 		}
@@ -208,10 +210,11 @@ bool AServingCounter::SubmitDish(AItemActor* Dish)
 		}
 		
 		// 2) 找一个正在等餐的客人
+		AGuestCharacter* TargetGuest = nullptr;
 		if (bRequireWaitingGuest)
 		{
-			AGuestCharacter* Guest = FindWaitingGuest();
-			if (!Guest)
+			TargetGuest = FindWaitingGuest();
+			if (!TargetGuest)
 			{
 				UE_LOG(LogTemp, Log, TEXT("[ServingCounter] 上菜失败：当前没有正在等餐的客人 (FoodID=%d)"), FoodID);
 				GEngine->AddOnScreenDebugMessage(-1, 3.f, FColor::Red,
@@ -220,7 +223,7 @@ bool AServingCounter::SubmitDish(AItemActor* Dish)
 				return false;
 			}
 		
-			Guest->StartEating();
+			TargetGuest->StartEating();
 		}
 		
 		// 3) 成功：消费（销毁）成品，并同步完成订单系统里的对应订单（驱动分数、声誉、金钱）
@@ -228,12 +231,12 @@ bool AServingCounter::SubmitDish(AItemActor* Dish)
 		GEngine->AddOnScreenDebugMessage(-1, 3.f, FColor::Green,
 			FString::Printf(TEXT("[上菜台] 上菜成功！FoodID=%d"), FoodID));
 
-		// 先按成品品质结算额外奖励（佳品/次品），随后销毁成品
+		// 先按成品品质结算额外奖励（佳品/次品），随后把成品送到客人位置（停留后销毁）
 		ApplyQualityReward(Dish);
 
 		// 取出碟子里的菜品 ID（拷贝一份，避免 Destroy 后悬空引用）
 		const TArray<int32> DishFoods = Dish->FoodIdArray;
-		Dish->Destroy();
+		DeliverDishToSeat(Dish, TargetGuest);
 
 		if (UWorld* W = GetWorld())
 		{
@@ -261,6 +264,39 @@ bool AServingCounter::SubmitDish(AItemActor* Dish)
 		return true;
 	}
 
+}
+
+void AServingCounter::DeliverDishToSeat(AItemActor* Dish, AGuestCharacter* Guest)
+{
+	if (!Dish)
+	{
+		return;
+	}
+	// 无目标客人（或开关关闭）：退回旧行为，直接销毁
+	if (!Guest || !bDeliverToSeat)
+	{
+		Dish->Destroy();
+		return;
+	}
+
+	// 把成品送到客人面前（座位处略抬高），停用碰撞，停留 ServeArriveDelay 后销毁，视觉上“上菜到客人位置”
+	const FVector Dest = Guest->GetActorLocation() + FVector(0.f, 0.f, 30.f);
+	Dish->SetActorLocation(Dest);
+	Dish->SetActorEnableCollision(false);
+
+	if (UWorld* W = GetWorld())
+	{
+		const TWeakObjectPtr<AItemActor> WeakDish(Dish);
+		const float Delay = FMath::Max(0.1f, ServeArriveDelay);
+		FTimerHandle TH;
+		W->GetTimerManager().SetTimer(TH, FTimerDelegate::CreateLambda([WeakDish]()
+		{
+			if (WeakDish.IsValid())
+			{
+				WeakDish->Destroy();
+			}
+		}), Delay, false);
+	}
 }
 
 void AServingCounter::OnInteractionOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,

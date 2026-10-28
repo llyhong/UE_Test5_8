@@ -40,6 +40,30 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "HUD")
 	int32 GetMoney() const;
 
+	/** 显示/更新当前对准食物箱的剩余数量（Remaining<0 表示无限，会自动隐藏） */
+	UFUNCTION(BlueprintCallable, Category = "HUD")
+	void SetSpawnerRemaining(int32 Remaining);
+
+	/** 隐藏食物箱剩余数量提示（对准物不是食物箱时调用） */
+	UFUNCTION(BlueprintCallable, Category = "HUD")
+	void HideSpawnerRemaining();
+
+	/** 蓝图实现：刷新食物箱剩余数量显示。bVisible=false 时隐藏（如无限模式或对准物非食物箱）。 */
+	UFUNCTION(BlueprintImplementableEvent, Category = "HUD")
+	void OnSpawnerRemainingChanged(int32 Remaining, bool bVisible);
+
+	/** 刷新时钟显示：CurrentHour 为 0~24（由 DayProgress 映射），bIsOpen 为是否营业中 */
+	UFUNCTION(BlueprintCallable, Category = "HUD")
+	void SetClock(float CurrentHour, bool bIsOpen);
+
+	/** 蓝图实现：显示当前时间（如 17:30）与营业状态（营业中 / 备货中 / 已打烊） */
+	UFUNCTION(BlueprintImplementableEvent, Category = "HUD")
+	void OnClockChanged(float CurrentHour, bool bIsOpen);
+
+	/** 把 0~24 的浮点小时格式化为 "HH:MM"（如 17.5 -> "17:30"）；蓝图在 OnClockChanged 里调用以显示时间文本 */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "HUD")
+	static FString FormatClock(float CurrentHour);
+
 	// 蓝图实现：刷新 HUD 全部内容。
 	//  - Reputation：当前声誉（来自经济系统，全局持久）
 	//  - MoneyEarned：本关已赚金钱（MoneyEarnedThisLevel，开局为 0，上菜才累加；非全局钱包）

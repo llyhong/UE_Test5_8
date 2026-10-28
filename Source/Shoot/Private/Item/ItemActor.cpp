@@ -1,9 +1,11 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 #include "Item/ItemActor.h"
+#include "Data/ItemActorInfo.h"
 #include "Components/SphereComponent.h"
 #include "Interfaces/PickupInterface.h"
 #include "ShootCharacter.h"
+#include "NPC/ChairSeat.h"
 #include "Game/BaseFoodActor.h"
 
 #include "Game/PlateSystem.h"
@@ -26,6 +28,14 @@ AItemActor::AItemActor()
 	
 	Sphere = CreateDefaultSubobject<USphereComponent>(TEXT("Sphere"));
 	Sphere->SetupAttachment(GetRootComponent());
+
+	// 空碟回收交互球：默认关闭，仅当本物品成为“桌上空碟”后才启用
+	CollectSphere = CreateDefaultSubobject<USphereComponent>(TEXT("CollectSphere"));
+	CollectSphere->SetupAttachment(GetRootComponent());
+	CollectSphere->SetSphereRadius(140.f);
+	CollectSphere->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	CollectSphere->SetCollisionResponseToAllChannels(ECR_Overlap);
+	CollectSphere->SetGenerateOverlapEvents(false);
 }
 
 void AItemActor::BeginPlay()
@@ -35,6 +45,10 @@ void AItemActor::BeginPlay()
 	//绑定回调函数
 	Sphere->OnComponentBeginOverlap.AddDynamic(this, &AItemActor::OnSphereOverlap);
 	Sphere->OnComponentEndOverlap.AddDynamic(this, &AItemActor::OnSphereEndOverlap);
+
+	// 空碟回收球（仅在成为空碟后启用碰撞，届时才会触发）
+	CollectSphere->OnComponentBeginOverlap.AddDynamic(this, &AItemActor::OnCollectOverlap);
+	CollectSphere->OnComponentEndOverlap.AddDynamic(this, &AItemActor::OnCollectEndOverlap);
 
 	// 食材解锁：若配置了 IngredientUnlockID(>=0)，则按其是否已解锁决定能否交互；
 	// 并订阅 GameInstance 的解锁广播，运行时解锁后即时开放交互。
@@ -208,6 +222,27 @@ void AItemActor::EnableDecay(float InDecayTime)
 	DecayTime = FMath::Max(0.1f, InDecayTime);
 	DecayTimer = 0.f;
 }
+int32 AItemActor::GetItemID() const
+{
+	if (const FItemActorInfo* Row = ItemInfoRow.GetRow<FItemActorInfo>(TEXT("ItemActor::GetItemID")))
+	{
+		return Row->ItemID;
+	}
+	return -1;
+}
+
+void AItemActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	// 安全兜底：若空碟在未被玩家收走的情况下被销毁（如关卡卸载），
+	// 释放其占据的座位，避免座位残留“幽灵占用”导致新客人无法入座。
+	if (OwningSeat && OwningSeat->DirtyPlate.Get() == this)
+	{
+		OwningSeat->ClearDirtyPlate();
+		OwningSeat = nullptr;
+	}
+	Super::EndPlay(EndPlayReason);
+}
+
 void AItemActor::OnSphereOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
 	UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
 {
@@ -341,29 +376,6 @@ bool AItemActor::NeedOutLineEffect()
 	return  GetItemState() == EItemState::EIS_Hovering;
 }
 
-void AItemActor::OnSpawnActorEvent()
-{
-	OnSpawnActor.Broadcast();
-}
-
-void AItemActor::OnRemoveActorEvent()
-{
-	FRemoveActorEvent.Broadcast();
-	UWorld* World = GetWorld();
-	if (World)
-	{
-		// 获取第一个找到的指定类Actor
-		APlateSystem* FoundActor = Cast<APlateSystem>(
-			UGameplayStatics::GetActorOfClass(World, APlateSystem::StaticClass())
-		);
-		if (FoundActor)
-		{
-			FoundActor->RemovePlate();
-		}
-	}
-}
-
-
 void AItemActor::AttachMeshToSocket(USceneComponent* InParent, const FName& InSocketName)
 {
 	FAttachmentTransformRules TransformRules(EAttachmentRule::SnapToTarget, true);
@@ -374,4 +386,65 @@ void AItemActor::DeAttachMeshToSocket()
 {
 	//FAttachmentTransformRules TransformRules(EAttachmentRule::SnapToTarget, true);
 	ItemMesh->DetachFromComponent(FDetachmentTransformRules::KeepWorldTransform);
+}
+
+void AItemActor::OnCollectOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
+	UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
+{
+	// 仅“桌上空碟”可被收走；普通物品（食材/端在手上/在桌上等待进食）不响应
+	if (!bIsEmptyPlate)
+	{
+		return;
+	}
+	if (AShootCharacter* Player = Cast<AShootCharacter>(OtherActor))
+	{
+		Player->SetOverlappingEmptyPlate(this);
+	}
+}
+
+void AItemActor::OnCollectEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
+	UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
+{
+	if (AShootCharacter* Player = Cast<AShootCharacter>(OtherActor))
+	{
+		if (Player->GetOverlappingEmptyPlate() == this)
+		{
+			Player->SetOverlappingEmptyPlate(nullptr);
+		}
+	}
+}
+
+bool AItemActor::PickUpByPlayer(AShootCharacter* Player)
+{
+	if (!Player || !bIsEmptyPlate)
+	{
+		return false;
+	}
+	// 手上已有东西则无法再收走空碟（一只手只能拿一个）
+	if (Player->GetPickingItem() != nullptr)
+	{
+		return false;
+	}
+
+	// 碟子离开桌面 → 座位立即释放（下一位客人可以入座）
+	if (OwningSeat)
+	{
+		OwningSeat->ClearDirtyPlate();
+		OwningSeat = nullptr;
+	}
+
+	// 不再是“桌上空碟”，改为玩家手上的“脏碟”，需交给洗碗机清洗
+	bIsEmptyPlate = false;
+	bIsDirtyPlate = true;
+	bPickable = false;       // 脏碟不能被当作普通可捡物放下/丢弃，只能交还洗碗机
+	bEnableDecay = false;
+	if (CollectSphere)
+	{
+		CollectSphere->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		CollectSphere->SetGenerateOverlapEvents(false);
+	}
+
+	// 拿在手上（挂到手部插槽并设为主手持物）
+	Player->HoldItemInHand(this, true);
+	return true;
 }

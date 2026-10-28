@@ -18,6 +18,13 @@ void APlateSystem::BeginPlay()
 void APlateSystem::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
+
+	// 自动补碟仅在开关开启时生效：洗碗机模式下碟子只能靠玩家交还脏碟回收
+	if (!bAutoRegenPlates)
+	{
+		return;
+	}
+
 	if (CurOrderIndex<TotalCount)
 	{
 		TimeAccumulator += DeltaTime;
@@ -36,6 +43,16 @@ void APlateSystem::InitParam(int PlateCount, float SpawnPlateTime)
 	CurOrderIndex = PlateCount;
 	TotalTime = SpawnPlateTime;
 	TimeAccumulator = 0.0f;
+}
+
+void APlateSystem::SetTotalCount(int32 NewTotal)
+{
+	TotalCount = FMath::Max(0, NewTotal);
+	// 当前可用数不能超过新的总数
+	if (CurOrderIndex > TotalCount)
+	{
+		CurOrderIndex = TotalCount;
+	}
 }
 
 void APlateSystem::AddPlate()

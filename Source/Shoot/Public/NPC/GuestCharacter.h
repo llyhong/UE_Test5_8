@@ -15,6 +15,8 @@ class USphereComponent;
 class UWidgetComponent;
 class UGuestStatusWidget;
 class UTexture2D;
+class AShootCharacter;
+class AItemActor;
 
 /** 客人订单接单方式 */
 UENUM(BlueprintType)
@@ -94,9 +96,14 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guest|Debug")
 	bool bShowDebugInfo = true;
 
-	/** 接单方式：自动接单 / 需要玩家接单（默认自动，保持原有行为；GuestManager 会统一下发） */
+	/** 接单方式：自动接单 / 需要玩家接单（默认需要玩家接单；GuestManager 会统一下发覆盖） */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guest|Order")
-	EGuestOrderAcceptMode OrderAcceptMode = EGuestOrderAcceptMode::AutoAccept;
+	EGuestOrderAcceptMode OrderAcceptMode = EGuestOrderAcceptMode::NeedPlayerAccept;
+
+	/** 方案B：客人吃完离座后留下“空碟”继续占据座位，玩家按 E 回收空碟才释放座位。
+	 *  关闭则退回旧行为（客人离座即释放座位）。默认开启。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guest")
+	bool bUseDirtyPlateFlow = true;
 
 	/** 当前状态 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Guest")
@@ -109,6 +116,10 @@ public:
 	/** 当前排队序号（-1 表示未在队列中），由 AGuestManager 维护 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Guest")
 	int32 QueueIndex = -1;
+
+	/** 玩家端菜上菜后摆在桌上的那道菜（进食结束后转为“空碟”占据座位） */
+	UPROPERTY()
+	TObjectPtr<AItemActor> PlateOnTable;
 
 	/** 坐下点餐后产生的订单（未点餐 / 已上菜 / 已超时为 null） */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Guest")
@@ -163,6 +174,17 @@ public:
 	/** 外部（玩家上菜逻辑）调用：开始进食 */
 	UFUNCTION(BlueprintCallable, Category = "Guest")
 	void StartEating();
+
+	/** 是否允许玩家端菜上菜（正在等餐且手持菜品时） */
+	UFUNCTION(BlueprintCallable, Category = "Guest")
+	bool CanPlayerServeDish() const;
+
+	/** 玩家端菜走到面前按 E：把菜品摆到桌上并完成该客人的订单（开始进食）。返回是否上菜成功 */
+	UFUNCTION(BlueprintCallable, Category = "Guest")
+	bool TryServeDish(AShootCharacter* Player, AItemActor* Dish);
+
+	/** 进食结束：把桌上菜品转为空碟占据座位，随后离座（方案B） */
+	void FinishEating();
 
 	/** 客人点餐：向订单系统请求一个绑定自身的订单，成功返回 true */
 	UFUNCTION(BlueprintCallable, Category = "Guest")

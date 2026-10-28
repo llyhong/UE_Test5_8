@@ -5,10 +5,14 @@
 #include "Components/BoxComponent.h"
 #include "Components/SceneComponent.h"
 #include "Components/WidgetComponent.h"
+#include "Engine/Engine.h"
 #include "Interfaces/PickupInterface.h"
 #include "Game/BaseGameInstance.h"
+#include "Game/BaseLevelBP.h"
 #include "Game/EconomySystem.h"
+#include "Game/PlateSystem.h"
 #include "Item/ItemActor.h"
+#include "Kismet/GameplayStatics.h"
 
 // Sets default values
 ACookingMachine::ACookingMachine()
@@ -61,6 +65,30 @@ void ACookingMachine::ResetFoodData()
 	OverCookTime = 0;
 	PotentialMenuIDs.Empty(4);
 	FoodMaterial.Empty(6);
+	// 新的一锅：复位"没碟子"提示，允许再次提示
+	bNoPlateNotified = false;
+}
+
+APlateSystem* ACookingMachine::FindPlateSystem() const
+{
+	// 优先关卡蓝图上的实例
+	if (const UWorld* W = GetWorld())
+	{
+		if (UBaseGameInstance* GI = Cast<UBaseGameInstance>(W->GetGameInstance()))
+		{
+			if (GI->curLevelBP && GI->curLevelBP->PlateSystem)
+			{
+				return GI->curLevelBP->PlateSystem;
+			}
+		}
+	}
+
+	// 回退：场景中第一个盘子系统
+	if (UWorld* W = GetWorld())
+	{
+		return Cast<APlateSystem>(UGameplayStatics::GetActorOfClass(W, APlateSystem::StaticClass()));
+	}
+	return nullptr;
 }
 bool ACookingMachine::FindMatchMenu(int32 FoodMaterialID,FMenuData& matchMenuData)
 {
@@ -235,8 +263,33 @@ static float GetActorHeight(AActor* InActor)
 
 void ACookingMachine::SpawnCookedActor()
 {
-	// 开关未开启则不生成
+	// 开关未开启则不生成（走原始逻辑：保持完成状态等待玩家取餐，久了会煮糊）
 	if (!bSpawnOnCookingFinish) return;
+
+	// —— 洗碗机闭环：只有存在"空闲碟子"时才自动生成成品 ——
+	// 没有空闲碟子 → 本次不出成品，直接 return 走回原始逻辑：
+	// 机器保持"完成/加热"状态并继续累计煮过头时间，最终煮糊/着火（OnFire）；
+	// 玩家把脏碟交还洗碗机后，下一次烹饪才能正常出菜。
+	if (bConsumePlateOnFinish)
+	{
+		APlateSystem* PlateSys = FindPlateSystem();
+		if (!PlateSys || PlateSys->GetAvailablePlates() <= 0)
+		{
+			if (!bNoPlateNotified)
+			{
+				bNoPlateNotified = true;
+				UE_LOG(LogTemp, Warning,
+					TEXT("[CookingMachine] 没有空闲碟子，本次不出成品 → 走回原始逻辑（继续加热会煮糊）"));
+				if (GEngine)
+				{
+					GEngine->AddOnScreenDebugMessage(-1, 4.f, FColor::Red,
+						TEXT("[烹饪] 没有干净碟子了！菜会煮糊，请把桌上的碟子送进洗碗机"));
+				}
+				OnNoPlateAvailable();
+			}
+			return;
+		}
+	}
 
 	// 清理已被销毁/拾取走的成品记录
 	for (int32 i = CookedActorStack.Num() - 1; i >= 0; --i)
@@ -276,6 +329,17 @@ void ACookingMachine::SpawnCookedActor()
 	{
 		UE_LOG(LogTemp, Log, TEXT("[CookingMachine] 成品已叠满 %d 层，本次不生成，等待玩家取餐"), CookedActorStack.Num());
 		return;
+	}
+
+	// 能走到这里说明确实有空闲碟子（前面已校验）：生成成品消耗 1 个
+	if (bConsumePlateOnFinish)
+	{
+		if (APlateSystem* PlateSys = FindPlateSystem())
+		{
+			PlateSys->RemovePlate();
+			UE_LOG(LogTemp, Log, TEXT("[CookingMachine] 生成成品消耗 1 个碟子，剩余可用碟子 %d/%d"),
+				PlateSys->CurOrderIndex, PlateSys->TotalCount);
+		}
 	}
 
 	const FVector SpawnLocation = BaseLocation + FVector(0.f, 0.f, StackHeight + StackSpacing * CookedActorStack.Num());

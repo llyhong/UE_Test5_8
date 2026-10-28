@@ -10,7 +10,13 @@ void UBusinessSimulation::Init(UEconomySystem* InEconomy)
 
 	if (!TimeSystem)
 	{
-		TimeSystem = NewObject<UTimeSystem>(this);
+		// 按可配置的 TimeSystemClass 创建（蓝图子类化调参），空则回退到 UTimeSystem
+		UClass* Cls = TimeSystemClass.Get();
+		if (!Cls)
+		{
+			Cls = UTimeSystem::StaticClass();
+		}
+		TimeSystem = NewObject<UTimeSystem>(this, Cls);
 	}
 	if (!StaffSystem)
 	{

@@ -10,6 +10,7 @@
 #include "DrawDebugHelpers.h"
 #include "Game/BaseGameInstance.h"
 #include "Game/EconomySystem.h"
+#include "Game/BusinessTime.h"
 #include "Kismet/GameplayStatics.h"
 #include "NavigationSystem.h"
 
@@ -52,6 +53,20 @@ void AGuestManager::BeginPlay()
 		else
 		{
 			UE_LOG(LogTemp, Log, TEXT("[GuestManager] 场景座位数 = %d"), SeatCount);
+		}
+	}
+
+	// 绑定每个座位的“空碟回收释放”委托：空碟被玩家收走时座位才真正释放，
+	// 由本管理器安排下一位客人入座（方案B 用餐闭环）。
+	{
+		TArray<AActor*> AllSeats;
+		UGameplayStatics::GetAllActorsOfClass(this, AChairSeat::StaticClass(), AllSeats);
+		for (AActor* A : AllSeats)
+		{
+			if (AChairSeat* Seat = Cast<AChairSeat>(A))
+			{
+				Seat->OnSeatFreedDelegate.AddDynamic(this, &AGuestManager::OnSeatFreed);
+			}
 		}
 	}
 
@@ -207,6 +222,24 @@ AGuestCharacter* AGuestManager::SpawnGuest()
 		return nullptr;
 	}
 
+	// 仅在营业时生成客人（白天备货 / 打烊后不再来客）；同时懒绑定营业委托
+	if (UBaseGameInstance* GI = Cast<UBaseGameInstance>(World->GetGameInstance()))
+	{
+		if (GI->businessSimulation && GI->businessSimulation->TimeSystem)
+		{
+			UTimeSystem* TS = GI->businessSimulation->TimeSystem;
+			if (!bBoundBusiness)
+			{
+				TS->OnBusinessOpenChanged.AddDynamic(this, &AGuestManager::OnBusinessOpenChanged);
+				bBoundBusiness = true;
+			}
+			if (!TS->IsBusinessOpen())
+			{
+				return nullptr; // 未营业：静默跳过，不刷屏
+			}
+		}
+	}
+
 	// 每个失败分支都给出明确原因，避免"静默不生成"
 	if (!GuestClass)
 	{
@@ -358,6 +391,117 @@ void AGuestManager::UnregisterGuest(AGuestCharacter* Guest)
 					*Guest->GetName(), ActiveGuests.Num(), GetEffectiveMaxGuests()));
 		}
 	}
+
+	// 打烊收尾中：每走一位客人就检测一次，全部处理完才真正打烊
+	if (bClosingPending)
+	{
+		CheckClosingFinished();
+	}
+}
+
+bool AGuestManager::IsGuestNeedKeepOnClose(const AGuestCharacter* Guest) const
+{
+	if (!IsValid(Guest))
+	{
+		return false;
+	}
+	// 已点菜（等餐）/ 正在进食 的客人需要保留：等玩家上完菜，或等待超时离场
+	return Guest->GuestState == EGuestState::WaitingFood
+		|| Guest->GuestState == EGuestState::Eating
+		|| Guest->CurrentOrder != nullptr;
+}
+
+int32 AGuestManager::GetPendingClosingGuestCount() const
+{
+	int32 Count = 0;
+	for (const TObjectPtr<AGuestCharacter>& G : ActiveGuests)
+	{
+		if (IsGuestNeedKeepOnClose(G.Get()))
+		{
+			Count++;
+		}
+	}
+	return Count;
+}
+
+void AGuestManager::ClearGuestsExcept(const TArray<AGuestCharacter*>& KeepList)
+{
+	// 收集需要清走的：在场列表 + 排队列表，跳过需要保留的
+	TArray<AGuestCharacter*> ToDestroy;
+	for (AGuestCharacter* G : ActiveGuests)
+	{
+		if (IsValid(G) && !KeepList.Contains(G) && !ToDestroy.Contains(G))
+		{
+			ToDestroy.Add(G);
+		}
+	}
+	for (AGuestCharacter* Q : WaitingQueue)
+	{
+		if (IsValid(Q) && !KeepList.Contains(Q) && !ToDestroy.Contains(Q))
+		{
+			ToDestroy.Add(Q);
+		}
+	}
+
+	for (AGuestCharacter* G : ToDestroy)
+	{
+		if (IsValid(G))
+		{
+			// 立刻释放座位再销毁，避免同帧座位仍被判定为占用
+			G->ReleaseSeatIfOccupied();
+			G->Destroy();
+		}
+	}
+
+	// 从列表里移除被清走的（保留的仍留在列表中继续等餐/进食）
+	ActiveGuests.RemoveAll([&ToDestroy](const TObjectPtr<AGuestCharacter>& G)
+	{
+		return !IsValid(G.Get()) || ToDestroy.Contains(G.Get());
+	});
+	WaitingQueue.RemoveAll([&ToDestroy](const TObjectPtr<AGuestCharacter>& G)
+	{
+		return !IsValid(G.Get()) || ToDestroy.Contains(G.Get());
+	});
+}
+
+void AGuestManager::CheckClosingFinished()
+{
+	if (!bClosingPending)
+	{
+		return;
+	}
+	if (GetPendingClosingGuestCount() > 0)
+	{
+		// 还有已点菜的客人没处理完（等玩家上菜 / 等待超时），继续等
+		return;
+	}
+	FinishClosing();
+}
+
+void AGuestManager::FinishClosing()
+{
+	if (!bClosingPending)
+	{
+		return;
+	}
+	bClosingPending = false;
+
+	// 兜底超时定时器清掉
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(ClosingTimeoutHandle);
+	}
+
+	// 真正清场：此时不应再有需要保留的客人
+	ClearAllGuests();
+
+	UE_LOG(LogTemp, Log, TEXT("[GuestManager] 打烊收尾完成：已点菜客人全部处理完，真正打烊结束这一天"));
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 4.f, FColor::Cyan, TEXT("[Manager] 客人已全部接待完，今日打烊"));
+	}
+
+	OnClosingFinished.Broadcast();
 }
 
 void AGuestManager::ClearAllGuests()
@@ -517,4 +661,84 @@ void AGuestManager::HandleQueueTimeout(AGuestCharacter* Guest)
 			}
 		}
 	}
+}
+
+void AGuestManager::OnBusinessOpenChanged(bool bOpen)
+{
+	if (bOpen)
+	{
+		// 开门营业：恢复自动生成客人（前提是 bAutoSpawn 开启）
+		ResumeSpawning();
+		// 新一天开始：清掉上一日残留的打烊收尾状态
+		bClosingPending = false;
+		if (UWorld* World = GetWorld())
+		{
+			World->GetTimerManager().ClearTimer(ClosingTimeoutHandle);
+		}
+		return;
+	}
+
+	// 打烊：先停止生成新客人（不再有新客进场）
+	PauseSpawning();
+
+	// 保留"已点菜"的客人：等玩家把菜上完，或客人等待超时离场，才真正打烊结束这一天
+	if (bKeepOrderedGuestsOnClose)
+	{
+		TArray<AGuestCharacter*> KeepList;
+		for (AGuestCharacter* G : ActiveGuests)
+		{
+			if (IsGuestNeedKeepOnClose(G))
+			{
+				KeepList.Add(G);
+			}
+		}
+		// 排队中但已点单的（理论上不会，保险起见也保留）
+		for (AGuestCharacter* Q : WaitingQueue)
+		{
+			if (IsGuestNeedKeepOnClose(Q) && !KeepList.Contains(Q))
+			{
+				KeepList.Add(Q);
+			}
+		}
+
+		if (KeepList.Num() > 0)
+		{
+			bClosingPending = true;
+
+			// 清走不需要保留的客人（未点单/排队/进场中），已点菜的留在座位上继续等餐
+			ClearGuestsExcept(KeepList);
+
+			UE_LOG(LogTemp, Log, TEXT("[GuestManager] 已打烊：保留 %d 位已点菜客人，等上完菜或等待超时后才真正结束这一天"),
+				KeepList.Num());
+			if (GEngine)
+			{
+				GEngine->AddOnScreenDebugMessage(-1, 4.f, FColor::Yellow,
+					FString::Printf(TEXT("[Manager] 打烊：还有 %d 位客人等餐，上完菜才能收工"), KeepList.Num()));
+			}
+
+			// 兜底：避免客人异常卡住导致永远打不了烊
+			if (ClosingMaxWaitTime > 0.f)
+			{
+				if (UWorld* World = GetWorld())
+				{
+					World->GetTimerManager().SetTimer(ClosingTimeoutHandle,
+						FTimerDelegate::CreateWeakLambda(this, [this]()
+						{
+							if (bClosingPending)
+							{
+								UE_LOG(LogTemp, Warning,
+									TEXT("[GuestManager] 打烊收尾超时(%.0fs)，强制结束这一天"), ClosingMaxWaitTime);
+								FinishClosing();
+							}
+						}),
+						ClosingMaxWaitTime, false);
+				}
+			}
+			return;
+		}
+	}
+
+	// 没有需要保留的客人：直接真正清场完成打烊
+	bClosingPending = true;
+	FinishClosing();
 }

@@ -144,3 +144,57 @@ void UBaseGameInstance::UnlockIngredients(const TArray<int32>& IngredientIDs)
 		OnIngredientsUnlocked.Broadcast(IngredientIDs);
 	}
 }
+
+bool UBaseGameInstance::IsRecipeUnlocked(int32 FoodID) const
+{
+	if (FoodID < 0)
+	{
+		return true; // ID<0 表示无需解锁，默认可用
+	}
+	return UnlockedRecipeIDs.Contains(FoodID);
+}
+
+void UBaseGameInstance::UnlockRecipes(const TArray<int32>& FoodIDs)
+{
+	TArray<int32> NewlyUnlocked;
+	for (int32 FoodID : FoodIDs)
+	{
+		if (FoodID < 0)
+		{
+			continue;
+		}
+		if (!UnlockedRecipeIDs.Contains(FoodID))
+		{
+			UnlockedRecipeIDs.Add(FoodID);
+			NewlyUnlocked.Add(FoodID);
+			UE_LOG(LogTemp, Log, TEXT("[GameInstance] 解锁新菜谱：FoodID=%d"), FoodID);
+		}
+	}
+
+	if (NewlyUnlocked.Num() > 0)
+	{
+		OnRecipesUnlocked.Broadcast(NewlyUnlocked);
+	}
+}
+
+int32 UBaseGameInstance::GetSpawnerRemaining(const FGuid& SpawnerGuid) const
+{
+	if (!curSaveGameData)
+	{
+		return -1;
+	}
+	if (const int32* Found = curSaveGameData->SpawnerRemaining.Find(SpawnerGuid.ToString()))
+	{
+		return *Found;
+	}
+	return -1;
+}
+
+void UBaseGameInstance::SetSpawnerRemaining(const FGuid& SpawnerGuid, int32 Value)
+{
+	if (!curSaveGameData)
+	{
+		return;
+	}
+	curSaveGameData->SpawnerRemaining.FindOrAdd(SpawnerGuid.ToString()) = Value;
+}

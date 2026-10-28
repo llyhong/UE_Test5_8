@@ -53,8 +53,9 @@ void APlant::BeginPlay()
 	const FPlantInfo* Info = GetPlantInfo();
 	if (Info)
 	{
-		// 初始水分：需要浇水则满水，否则置 0（不影响生长）
-		WaterLevel = Info->bRequiresWater ? Info->WaterMax : 0.f;
+		// 初始水分：需要浇水（bRequiresWater）的植物初始为 0，必须先由玩家浇水才能开始生长；
+		// 不需要浇水的植物水分无关紧要，同样置 0。
+		WaterLevel = 0.f;
 		PestTimer = 0.f;
 	}
 	else
@@ -240,6 +241,31 @@ void APlant::AdvanceStage()
 	}
 }
 
+void APlant::ResetToSeedStage()
+{
+	// 摘取后回到第一阶段（种子期）：清空收获/害虫/计时状态，恢复生长，使植被重新生长并再次结果
+	CurrentStageIndex = 0;
+	StageTimer = 0.f;
+	WaterLevel = 0.f;
+	bPest = false;
+	PestTimer = 0.f;
+	bHarvested = false;
+
+	// 取消任何残留的逐个重结果定时器
+	GetWorldTimerManager().ClearTimer(RefruitTimerHandle);
+
+	ApplyStageMesh(CurrentStageIndex);
+	OnStageChanged(CurrentStageIndex, GetCurrentStageName());
+	OnPlantStageChanged.Broadcast(CurrentStageIndex, GetCurrentStageName());
+
+	// 单阶段配置（第 0 阶段即结果阶段）：直接重新挂果，否则由 Tick 正常推进阶段直到再次结果
+	if (IsFruiting() && SpawnedFruits.Num() == 0)
+	{
+		SpawnFruit();
+		OnReadyToHarvest();
+	}
+}
+
 void APlant::Water(float Amount)
 {
 	const FPlantInfo* Info = GetPlantInfo();
@@ -248,6 +274,12 @@ void APlant::Water(float Amount)
 		return;
 	}
 	WaterLevel = FMath::Min(Info->WaterMax, WaterLevel + Amount);
+}
+
+bool APlant::NeedsWater() const
+{
+	const FPlantInfo* Info = GetPlantInfo();
+	return Info && Info->bRequiresWater && WaterLevel < Info->WaterMax;
 }
 
 void APlant::RemovePest()
@@ -275,13 +307,13 @@ bool APlant::Harvest()
 		return false;
 	}
 
-	// 新行为：按 E 直接把果实放入玩家背包，然后植被消失（一次性采摘，不再自动重结果）
+	// 新行为：按 E 直接把果实放入玩家背包；摘取后不销毁植被，而是重置回第一阶段重新生长结果
 	if (bHarvestToInventory && InteractingCharacter)
 	{
 		const int32 Yield = (HarvestYield > 0) ? HarvestYield : FMath::Max(1, Info->FruitCount);
 		const EIngredientQuality Quality = GetCurrentQuality();
 
-		// 清理树上已挂的果实，避免与入背包的果实重复（这些会随植被一起销毁）
+		// 清理树上已挂的果实，避免与入背包的果实重复
 		for (AItemActor* Fruit : SpawnedFruits)
 		{
 			if (Fruit)
@@ -291,7 +323,6 @@ bool APlant::Harvest()
 			}
 		}
 		SpawnedFruits.Empty();
-		bHarvested = true;
 
 		// 生成配置数量的果实并逐个入背包（背包按 ItemClass 堆叠为同一槽位，Quantity=Yield）
 		for (int32 i = 0; i < Yield; i++)
@@ -323,8 +354,8 @@ bool APlant::Harvest()
 		}
 		InteractingCharacter = nullptr;
 
-		// 植被消失
-		Destroy();
+		// 摘取后不销毁植被：重置回第一阶段，重新生长并再次结果
+		ResetToSeedStage();
 		return true;
 	}
 
@@ -357,26 +388,16 @@ bool APlant::Harvest()
 		}
 	}
 	SpawnedFruits.Empty();
-	bHarvested = true;
 
-	// 摘果后自动重新结果：把果实重新挂回树上（按 RefruitInterval 逐个或一次性），新果实各自从“未成熟”重新计时
+	// 摘果后：若启用自动重新结果，则重置回第一阶段重新生长（而非停留在结果阶段重结果）；
+	// 否则标记为已收获并停止生长（植被保留但不再结果）。
 	if (Info->bAutoRefruit)
 	{
-		bHarvested = false;
-		bPest = false;
-		PestTimer = 0.f;
-
-		if (Info->RefruitInterval > 0.f)
-		{
-			// 每隔 RefruitInterval 秒长出一个，直到达到 FruitCount（逐个重结果）
-			GetWorldTimerManager().SetTimer(RefruitTimerHandle, this, &APlant::RefruitOneFruit, Info->RefruitInterval, true);
-		}
-		else
-		{
-			// 立即一次性重新结满
-			SpawnFruit();
-			OnReadyToHarvest();
-		}
+		ResetToSeedStage();
+	}
+	else
+	{
+		bHarvested = true;
 	}
 
 	return true;
@@ -437,7 +458,7 @@ void APlant::SpawnSingleFruit(int32 Index)
 			}
 		}
 
-		UE_LOG(LogShoot, Log, TEXT("[%s] 果实 %d 挂点 SocketName=%s, 插槽是否存在=%s"), *GetName(), Index, *SocketName.ToString(), PlantMesh->DoesSocketExist(SocketName) ? TEXT("是") : TEXT("否"));
+		//UE_LOG(LogShoot, Log, TEXT("[%s] 果实 %d 挂点 SocketName=%s, 插槽是否存在=%s"), *GetName(), Index, *SocketName.ToString(), PlantMesh->DoesSocketExist(SocketName) ? TEXT("是") : TEXT("否"));
 
 		// 复用 ItemActor 的挂点逻辑，挂到植物模型上对应的插槽
 		if (SocketName != NAME_None)

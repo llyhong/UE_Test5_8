@@ -86,6 +86,23 @@ void UHUDWidget::NativeDestruct()
 	Super::NativeDestruct();
 }
 
+void UHUDWidget::SetClock(float CurrentHour, bool bIsOpen)
+{
+	OnClockChanged(CurrentHour, bIsOpen);
+}
+
+FString UHUDWidget::FormatClock(float CurrentHour)
+{
+	// 取当天 0~24 范围内的小时（处理跨 24 的边界）
+	const float Hour = FMath::Fmod(FMath::Max(CurrentHour, 0.f), 24.f);
+	// 四舍五入到最近的 30 分钟，使显示只在整点 / 半点（如 8:00、8:30、9:00）
+	int32 TotalMinutes = FMath::RoundToInt(Hour * 60.f);
+	TotalMinutes = FMath::RoundToInt(static_cast<float>(TotalMinutes) / 30.f) * 30;
+	const int32 H = TotalMinutes / 60;
+	const int32 M = TotalMinutes % 60;
+	return FString::Printf(TEXT("%02d:%02d"), H, M);
+}
+
 int32 UHUDWidget::GetReputation() const
 {
 	return Economy ? Economy->GetReputation() : 0;
@@ -94,6 +111,24 @@ int32 UHUDWidget::GetReputation() const
 int32 UHUDWidget::GetMoney() const
 {
 	return Economy ? Economy->GetMoney() : 0;
+}
+
+void UHUDWidget::SetSpawnerRemaining(int32 Remaining)
+{
+	if (Remaining < 0)
+	{
+		// 无限模式：隐藏提示
+		OnSpawnerRemainingChanged(0, false);
+	}
+	else
+	{
+		OnSpawnerRemainingChanged(Remaining, true);
+	}
+}
+
+void UHUDWidget::HideSpawnerRemaining()
+{
+	OnSpawnerRemainingChanged(0, false);
 }
 
 void UHUDWidget::HandleReputationChanged(int32 NewValue, int32 Delta)

@@ -10,6 +10,8 @@
 #include "ItemActor.generated.h"
 class USphereComponent;
 class ABaseFoodActor;
+class AChairSeat;
+class AShootCharacter;
 
 UENUM(BlueprintType)
 enum class EItemState : uint8
@@ -20,18 +22,8 @@ enum class EItemState : uint8
 	EIS_Cooking UMETA(DisplayName = "Cooking"),
 	EIS_Pickup UMETA(DisplayName = "Pickup"), // 用来标志是不是碟子，用来装菜
 };
-UENUM(BlueprintType)
-enum class EItemType : uint8
-{
-	EIT_Normal UMETA(DisplayName = "Normal"),
-	EIT_Spawn UMETA(DisplayName = "Spawn"), //生成食物的箱子，
-	EIT_Dish UMETA(DisplayName = "Dish"), // 碟子
-	EIT_Desk UMETA(DisplayName = "Desk"),
-	EIT_SpawnOther UMETA(DisplayName = "SpawnOther"), //从raw经过切菜生成切好的状态
-};
-
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FSpawnActorEvent);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE(FRemoveActorEvent); //移除碟子的时候触发事件
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FRemoveActorEvent); //移除碟子的时候触发事件（由 ADish 使用）
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FChangeAttachActorEvent);
 
 /** 食材解锁状态变化广播（true=已解锁可交互；false=已锁定） */
@@ -65,6 +57,7 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	bool CanInteract();
 	
 private:
@@ -94,6 +87,11 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category="Item")
 	FORCEINLINE int32 GetMenuFoodID() const { return MenuFoodID; }
+
+	/** 读取物品 ID（取自 ItemInfoRow / DT_ItemInfo 的 ItemID）；未配置或取不到返回 -1。
+	 *  研究炉按此 ID 匹配研究配方。 */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Item")
+	int32 GetItemID() const;
 
 	UFUNCTION(BlueprintCallable, Category="Item")
 	FORCEINLINE void SetMenuFoodID(int32 InID) { MenuFoodID = InID; }
@@ -132,9 +130,6 @@ public:
 
 	UPROPERTY(EditAnywhere,BlueprintReadWrite)
 	TObjectPtr<AActor> PreAttachActor;
-	
-	UPROPERTY(EditAnywhere,BlueprintReadWrite)
-	EItemType ItemType = EItemType::EIT_Normal;
 
 	/** 该成品对应的菜单菜品 ID（由烹饪机生成成品时写入），供上菜台校验是否在菜单中（-1 表示未设置） */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item")
@@ -202,17 +197,7 @@ public:
     void OnGiveEffectEvent();
 
 	UPROPERTY(BlueprintAssignable, Category = "Events")
-	FSpawnActorEvent OnSpawnActor;
-
-	UPROPERTY(BlueprintAssignable, Category = "Events")
-	FSpawnActorEvent FRemoveActorEvent;
-
-	UPROPERTY(BlueprintAssignable, Category = "Events")
 	FChangeAttachActorEvent OnChangeAttachActorEvent;
-	
-	void OnSpawnActorEvent();
-
-	void OnRemoveActorEvent();
 
 	// ========== 食材解锁（关卡达成目标后解锁场景上预先放置的食材，如玉米田里的玉米） ==========
 	/** 食材解锁 ID：>=0 表示需要对应 ID 解锁后才能交互（如玉米田里的玉米）；<0 表示无需解锁，默认可交互。
@@ -289,4 +274,33 @@ public:
 	/** 熟度子阶段变化广播（供 UI 绑定单个果实做文字/进度刷新） */
 	UPROPERTY(BlueprintAssignable, Category = "Item|Ripeness")
 	FRipenessStageChanged OnRipenessChanged;
+
+	// ========== 空碟 / 脏碟（方案B 用餐闭环 + 洗碗机回收） ==========
+	/** 是否为“桌上空碟”：客人吃完后留下的，占据座位直到玩家按 E 收走 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item|Plate")
+	bool bIsEmptyPlate = false;
+
+	/** 是否为“脏碟”：玩家从桌上收走、拿在手上待交还洗碗机的碟子 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item|Plate")
+	bool bIsDirtyPlate = false;
+
+	/** 空碟所占据的座位（客人进食结束后写入；玩家收走时释放该座位） */
+	UPROPERTY()
+	TObjectPtr<AChairSeat> OwningSeat = nullptr;
+
+	/** 回收交互球：仅在 bIsEmptyPlate=true 时启用，玩家靠近即注册为可回收目标 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Item|Plate")
+	TObjectPtr<USphereComponent> CollectSphere;
+
+	/** 玩家按 E 从桌上收走空碟：释放所占座位，并把碟子拿在手上（变成脏碟）。返回是否成功 */
+	UFUNCTION(BlueprintCallable, Category = "Item|Plate")
+	bool PickUpByPlayer(AShootCharacter* Player);
+
+	UFUNCTION()
+	void OnCollectOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
+		UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
+
+	UFUNCTION()
+	void OnCollectEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
+		UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
 };

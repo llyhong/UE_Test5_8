@@ -9,6 +9,9 @@
 
 class AGuestCharacter;
 
+/** 打烊收尾完成广播：已点菜的客人都处理完（上完菜 / 等待超时离场）后才触发，表示"真正打烊、可以结束这一天" */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnClosingFinishedSignature);
+
 /**
  * 客人统一管理器：负责按配置周期性生成 / 销毁 GuestCharacter，
  * 维护在场客人列表，并约束最大同时在场数量（避免抢占过多座位）。
@@ -62,9 +65,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GuestManager")
 	bool bShowDebugInfo = true;
 
-	/** 接单方式：自动接单 / 需要玩家接单（会统一覆盖下发给每个生成出的客人） */
+	/** 接单方式：自动接单 / 需要玩家接单（会统一覆盖下发给每个生成出的客人）。
+	 *  默认“需要玩家接单”：客人坐下后等待玩家靠近按 E 接单，接单后才真正出现订单。 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GuestManager|Order")
-	EGuestOrderAcceptMode OrderAcceptMode = EGuestOrderAcceptMode::AutoAccept;
+	EGuestOrderAcceptMode OrderAcceptMode = EGuestOrderAcceptMode::NeedPlayerAccept;
 
 	/** 生成特殊客人的概率（0~1）。特殊客人完成订单会获得额外声誉（见 AGuestCharacter::SpecialReputationBonus） */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GuestManager", meta = (ClampMin = "0.0", ClampMax = "1.0"))
@@ -105,6 +109,16 @@ public:
 	/** 座位占用情况自动打印间隔（秒）；<=0 表示不自动打印，可随时调用 PrintSeatStatus 手动打印 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GuestManager|Debug", meta = (ClampMin = "0.0"))
 	float SeatStatusLogInterval = 0.f;
+
+	// ========== 打烊收尾（延迟真正打烊） ==========
+	/** 打烊时是否保留"已点菜"的客人：等玩家把菜上完，或客人等待超时离场，才真正打烊结束这一天。
+	 *  关闭则退回旧行为（打烊立刻清走所有客人）。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GuestManager|Closing")
+	bool bKeepOrderedGuestsOnClose = true;
+
+	/** 打烊收尾的最长等待时间（秒）：兜底防止客卡住导致永远打不了烊。<=0 表示不设上限。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GuestManager|Closing", meta = (ClampMin = "0.0"))
+	float ClosingMaxWaitTime = 120.f;
 
 	/** 调试球半径（cm） */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GuestManager|Debug", meta = (ClampMin = "1.0"))
@@ -157,14 +171,43 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "GuestManager|Queue")
 	void OnSeatFreed();
 
+	// —— 打烊收尾（延迟真正打烊） ——
+	/** 是否处于"打烊收尾中"：已打烊但还有已点菜客人未处理完 */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "GuestManager|Closing")
+	bool IsClosingPending() const { return bClosingPending; }
+
+	/** 该客人是否需要在打烊时保留（已点菜 / 正在进食：等上菜或超时后才算处理完） */
+	UFUNCTION(BlueprintCallable, Category = "GuestManager|Closing")
+	bool IsGuestNeedKeepOnClose(const AGuestCharacter* Guest) const;
+
+	/** 统计当前仍需保留（未处理完）的客人数 */
+	UFUNCTION(BlueprintCallable, Category = "GuestManager|Closing")
+	int32 GetPendingClosingGuestCount() const;
+
+	/** 真正完成打烊：清掉剩余客人并广播 OnClosingFinished（由收尾检测/兜底超时调用） */
+	UFUNCTION(BlueprintCallable, Category = "GuestManager|Closing")
+	void FinishClosing();
+
 	/** 打印场景上所有座位的占用情况（占用/空闲及占用者），用于调试；蓝图/控制台可随时调用 */
 	UFUNCTION(BlueprintCallable, Category = "GuestManager|Debug")
 	void PrintSeatStatus();
+
+	/** 打烊收尾完成：已点菜的客人都处理完（上完菜 / 等待超时离场），可以真正结束这一天。
+	 *  蓝图/关卡可监听此事件做结算、切下一天等。 */
+	UPROPERTY(BlueprintAssignable, Category = "GuestManager|Closing")
+	FOnClosingFinishedSignature OnClosingFinished;
 
 	/** 排队等待超时：移出队列并扣除声誉（由客人调用） */
 	void HandleQueueTimeout(AGuestCharacter* Guest);
 
 private:
+	/** 营业状态变化：开营恢复自动生成，打烊停生成并清场 */
+	UFUNCTION()
+	void OnBusinessOpenChanged(bool bOpen);
+
+	/** 是否已绑定 TimeSystem 营业委托（懒绑定，避免 BeginPlay 顺序问题） */
+	bool bBoundBusiness = false;
+
 	/** 自动生成用的定时器 */
 	FTimerHandle AutoSpawnTimerHandle;
 
@@ -182,4 +225,16 @@ private:
 
 	/** 绘制生成点/离场点（仅在 bDrawSpawnLeaveDebug 时生效） */
 	void DrawSpawnLeaveDebug() const;
+
+	/** 打烊时清走"不需要保留"的客人（保留已点菜的），用于延迟打烊 */
+	void ClearGuestsExcept(const TArray<AGuestCharacter*>& KeepList);
+
+	/** 收尾检测：若已无待处理客人则真正完成打烊 */
+	void CheckClosingFinished();
+
+	/** 是否处于打烊收尾中（已打烊但仍有已点菜客人未处理完） */
+	bool bClosingPending = false;
+
+	/** 打烊收尾兜底超时定时器 */
+	FTimerHandle ClosingTimeoutHandle;
 };

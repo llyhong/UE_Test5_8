@@ -24,6 +24,9 @@
 /** 食材解锁广播：参数 = 本次新解锁的食材 ID 列表（对应 AItemActor::IngredientUnlockID） */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnIngredientsUnlocked, const TArray<int32>&, UnlockedIDs);
 
+/** 菜谱解锁广播：参数 = 本次新解锁的菜品 FoodID 列表（由研究炉研究成功后解锁） */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnRecipesUnlocked, const TArray<int32>&, UnlockedFoodIDs);
+
 UCLASS()
 class SHOOT_API UBaseGameInstance : public UGameInstance
 {
@@ -92,6 +95,31 @@ public:
 	/** 解锁一批食材 ID，并广播 OnIngredientsUnlocked（已解锁的集合不变时不会重复广播/存盘） */
 	UFUNCTION(BlueprintCallable, Category = "Ingredient")
 	void UnlockIngredients(const TArray<int32>& IngredientIDs);
+
+	// ========== 菜谱（菜品）解锁：由研究炉研究成功后解锁 ==========
+	/** 已解锁的菜谱（菜品 FoodID 集合） */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Recipe")
+	TArray<int32> UnlockedRecipeIDs;
+
+	/** 菜谱解锁广播（研究炉研究成功时触发） */
+	UPROPERTY(BlueprintAssignable, Category = "Recipe")
+	FOnRecipesUnlocked OnRecipesUnlocked;
+
+	/** 菜品 FoodID 是否已解锁（ID<0 视为无需解锁，永远返回 true） */
+	UFUNCTION(BlueprintCallable, Category = "Recipe")
+	bool IsRecipeUnlocked(int32 FoodID) const;
+
+	/** 解锁一批菜谱（菜品 FoodID），并广播 OnRecipesUnlocked（全部已解锁时不广播） */
+	UFUNCTION(BlueprintCallable, Category = "Recipe")
+	void UnlockRecipes(const TArray<int32>& FoodIDs);
+
+	/** 读取某食物箱已存档的剩余数量；无记录返回 -1（表示用 Actor 自身默认值） */
+	UFUNCTION(BlueprintCallable, Category = "Spawner")
+	int32 GetSpawnerRemaining(const FGuid& SpawnerGuid) const;
+
+	/** 写入某食物箱的剩余数量到存档（不立即落盘，调用方决定是否 SaveGameData） */
+	UFUNCTION(BlueprintCallable, Category = "Spawner")
+	void SetSpawnerRemaining(const FGuid& SpawnerGuid, int32 Value);
 
 	/** 当前已解锁的食材 ID 集合（运行时） */
 	TSet<int32> UnlockedIngredientIDs;

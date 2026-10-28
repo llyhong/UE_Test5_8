@@ -8,6 +8,7 @@
 #include "Game/OrderSystem.h"
 #include "Game/PlateSystem.h"
 #include "Game/EconomySystem.h"
+#include "Game/BusinessSimulation.h"
 #include "Game/LevelGoalData.h"
 #include "NPC/ChairSeat.h"
 #include "BaseLevelBP.generated.h"
@@ -47,9 +48,21 @@ protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
-public:
+public:	
 	UPROPERTY(BlueprintReadOnly, Category = "Gameplay")
 	bool IsPlaying = false;
+
+	/**
+	 * 经营模拟类（可选）：在关卡实例的 Details 里指向你在编辑器创建的 BP_BusinessSimulation（UBusinessSimulation 蓝图子类），
+	 * 即可在该蓝图里可视化调整经营参数（每日租金 / 维护 / 赛事奖金 / TimeSystemClass 等），无需改 C++。
+	 * 留空则使用 GameInstance 默认的 UBusinessSimulation。仅在首次进入且类不匹配时重建，不会跨关卡重复重置日期。
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Business")
+	TSubclassOf<UBusinessSimulation> BusinessSimulationClass;
+
+	/** 便捷引用：返回当前生效的经营模拟（实际由 GameInstance 持有）；未就绪时返回 nullptr */
+	UFUNCTION(BlueprintCallable, Category = "Business")
+	UBusinessSimulation* GetBusinessSimulation() const;
 	// Called every frame
 	UPROPERTY(BlueprintReadOnly, Category = "Gameplay")
 	float StartTime = 0;
@@ -65,6 +78,10 @@ public:
 	void RebuildOrderSystem();
 	UFUNCTION(BlueprintCallable)
 	void InitPlateSystem(int PlateCount, float SpawnPlateTime);
+
+	/** 每秒把当前时间与营业状态推给 HUD（白天/傍晚/打烊一目了然） */
+	UFUNCTION()
+	void RefreshClock();
 	UPROPERTY(BlueprintReadOnly, Category = "Gameplay")
 	TObjectPtr<AOrderSystem> orderSystem;
 
@@ -196,6 +213,12 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Level")
 	float LevelTransitionDuration = 3.0f;
 
+	/** 打烊收尾完成（已点菜客人全部处理完）时，是否自动结束这一天、进入下一关。
+	 *  默认 false：保持原有流程（由升级 NPC 对话触发进入下一关）；
+	 *  置 true 则客人接待完就自动收工进入下一天。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Level")
+	bool bAutoEndDayOnClosingFinished = false;
+
 	// —— 进入下一关的内部两阶段实现 ——
 	/** 阶段一：停单 + 清空上一关订单与客人（打烊），广播打烊提示，并启动倒计时 */
 	void BeginLevelTransition(int32 NewLevelID);
@@ -211,6 +234,9 @@ public:
 
 	/** 打烊倒计时句柄 */
 	FTimerHandle ClosingTimerHandle;
+
+	/** 时钟刷新定时器句柄 */
+	FTimerHandle ClockTimerHandle;
 	UPROPERTY(BlueprintReadOnly, Category = "Gameplay")
 	int Score = 0;
 	UPROPERTY(EditAnywhere,BlueprintReadWrite, Category = "Gameplay")
@@ -252,4 +278,8 @@ public:
 	/** 订单失败（超时）回调：驱动经济系统（扣声誉） */
 	UFUNCTION()
 	void HandleOrderFailed(const UOrderHandle* Handle, const FOrderData& Order);
+
+	/** 打烊收尾完成回调（已点菜客人全部处理完）：按开关决定是否自动结束这一天 */
+	UFUNCTION()
+	void HandleClosingFinished();
 };

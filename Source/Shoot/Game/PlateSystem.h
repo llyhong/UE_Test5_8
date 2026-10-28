@@ -23,6 +23,14 @@ public:
 
 	UFUNCTION(BlueprintCallable)
 	void InitParam(int PlateCount,float SpawnPlateTime);
+
+	/** 设置本关碟子总数（洗碗机可配置）；并把当前可用碟子数钳制在总数内 */
+	UFUNCTION(BlueprintCallable)
+	void SetTotalCount(int32 NewTotal);
+
+	/** 当前可用碟子数（= CurOrderIndex） */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Gameplay")
+	int32 GetAvailablePlates() const { return CurOrderIndex; }
 	
 	UPROPERTY(BlueprintReadOnly, Category = "Gameplay")
 	int CurOrderIndex = 3;
@@ -38,6 +46,11 @@ public:
 	
 	UPROPERTY(BlueprintReadOnly, Category = "Gameplay")
 	bool IsStarted = false;
+
+	/** 是否自动补充碟子（每隔 TotalTime 自动 +1 直到 TotalCount）。
+	 *  洗碗机模式下应关闭（默认 false）：碟子只能通过玩家把脏碟交还给洗碗机来回收。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Gameplay")
+	bool bAutoRegenPlates = false;
 
 
 	UFUNCTION(BlueprintCallable)

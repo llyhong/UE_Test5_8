@@ -11,6 +11,9 @@
 #include "Blueprint/UserWidget.h"
 #include "UI/OrderWidget.h"
 #include "UI/HUDWidget.h"
+#include "Game/BusinessTime.h"
+#include "Engine/DirectionalLight.h"
+#include "EngineUtils.h"
 #include "Kismet/GameplayStatics.h"
 #include "UObject/ConstructorHelpers.h"
 
@@ -19,7 +22,15 @@ ABaseLevelBP::ABaseLevelBP()
 {
  	// Set this actor to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
 	PrimaryActorTick.bCanEverTick = true;
-	
+
+	// HUD 类回退默认值：若关卡实例未显式配置 HUDWidgetClass，则使用项目内置的 WBP_HUD，
+	// 避免“启动后 HUD 不显示”。关卡蓝图中若显式指定了其它 HUD 类，会覆盖此默认值。
+	static ConstructorHelpers::FClassFinder<UHUDWidget> HUDClassFinder(
+		TEXT("/Game/_Demo/Blueprints/UI_2D/WBP_HUD.WBP_HUD_C"));
+	if (HUDClassFinder.Succeeded())
+	{
+		HUDWidgetClass = HUDClassFinder.Class;
+	}
 }
 
 // Called when the game starts or when spawned
@@ -73,6 +84,20 @@ void ABaseLevelBP::BeginPlay()
 		}
 	}
 
+	// 绑定客人管理器的“打烊收尾完成”事件：
+	// 已点菜客人全部处理完（玩家上完菜 / 客人等待超时离场）后才真正打烊、结束这一天。
+	{
+		TArray<AActor*> GuestManagers;
+		UGameplayStatics::GetAllActorsOfClass(GetWorld(), AGuestManager::StaticClass(), GuestManagers);
+		for (AActor* Actor : GuestManagers)
+		{
+			if (AGuestManager* GM = Cast<AGuestManager>(Actor))
+			{
+				GM->OnClosingFinished.AddDynamic(this, &ABaseLevelBP::HandleClosingFinished);
+			}
+		}
+	}
+
 // 关卡目标：先解析本关通过条件并订阅经济变化，确保 HUD 绑定（BindLevel）触发首次 RefreshHUD 时目标数据已就绪
 if (UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetGameInstance()))
 {
@@ -86,7 +111,7 @@ if (UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetGameInstance()))
 	CheckLevelGoal();
 }
 
-// 创建常驻 HUD（显示声誉/金钱），绑定经济系统自动刷新（与关卡同生命周期）
+// 创建常驻 HUD（显示声誉/金钱/时钟），绑定经济系统自动刷新（与关卡同生命周期）
 if (HUDWidgetClass)
 {
 		// CreateWidget 的 OwningObject 仅接受具体支持类型（APlayerController / UWorld 等），故分支创建
@@ -109,9 +134,74 @@ if (HUDWidgetClass)
 			}
 			// 绑定本关卡，使 HUD 自动刷新关卡目标 UI（描述/进度/明细/达成）
 			HUDWidget->BindLevel(this);
-	}
+		}
+		else
+		{
+			// 类已配置但创建失败：通常是该蓝图（如 WBP_HUD）存在编译错误，需在编辑器里重新编译
+			UE_LOG(LogTemp, Error,
+				TEXT("[BaseLevelBP] HUD 创建失败：HUDWidgetClass=%s 可能未编译或存在蓝图错误，请在编辑器重新编译该 HUD 蓝图。"),
+				*HUDWidgetClass->GetPathName());
+		}
+}
+else
+{
+		UE_LOG(LogTemp, Error,
+			TEXT("[BaseLevelBP] HUDWidgetClass 为空，HUD 未创建。请在关卡 BaseLevelBP 实例的 \"UI|HUD\" 分类下指定 HUD 类（如 WBP_HUD）。"));
 }
 
+	// 启动时钟刷新：每秒把当前时间与营业状态推给 HUD（白天/傍晚/打烊一目了然）
+	if (UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetGameInstance()))
+	{
+		// 若关卡指定了 BusinessSimulation 蓝图子类，则确保 GameInstance 使用的是该类的实例。
+		// 仅在类不匹配时重建（避免每次进关都重置）；重建后从存档恢复日期 / 员工名册。
+		if (GI->businessSimulation && BusinessSimulationClass && !GI->businessSimulation->IsA(BusinessSimulationClass))
+		{
+			UBusinessSimulation* NewSim = NewObject<UBusinessSimulation>(GI, BusinessSimulationClass.Get());
+			if (GI->economySystem)
+			{
+				NewSim->Init(GI->economySystem);
+			}
+			NewSim->Load();
+			GI->businessSimulation = NewSim;
+		}
+
+		if (GI->businessSimulation && GI->businessSimulation->TimeSystem)
+		{
+			UTimeSystem* TS = GI->businessSimulation->TimeSystem;
+			// 诊断：确认实际生效的 TimeSystem 类与开关状态（排查“一进游戏就营业”）
+			UE_LOG(LogTemp, Log,
+				TEXT("[BaseLevelBP] 生效 TimeSystem=%s | bAutoOpenBusiness=%d | OpenHour=%.1f CloseHour=%.1f | DayStart=%.1f DayEnd=%.1f | DayProgress=%.3f | 当前小时=%.2f | bIsBusinessOpen=%d | BusinessSim=%s"),
+				*TS->GetClass()->GetName(), TS->bAutoOpenBusiness,
+				TS->OpenHour, TS->CloseHour, TS->DayStartHour, TS->DayEndHour,
+				TS->DayProgress, TS->GetCurrentHour(), TS->bIsBusinessOpen,
+				*GI->businessSimulation->GetClass()->GetName());
+			GetWorld()->GetTimerManager().SetTimer(ClockTimerHandle, this, &ABaseLevelBP::RefreshClock, 1.f, true);
+
+			// 自动绑定太阳：若 TimeSystem 未指定 SunLight，则按标签"Sun"优先、否则首个 DirectionalLight 绑定，并立即应用一次
+			if (TS->bDriveSun && TS->SunLight == nullptr)
+			{
+				ADirectionalLight* FoundSun = nullptr;
+				for (TActorIterator<ADirectionalLight> It(GetWorld()); It; ++It)
+				{
+					if (It->ActorHasTag(FName("Sun")))
+					{
+						FoundSun = *It;
+						break;
+					}
+				}
+				if (!FoundSun)
+				{
+					for (TActorIterator<ADirectionalLight> It(GetWorld()); It; ++It)
+					{
+						FoundSun = *It;
+						break;
+					}
+				}
+				TS->SunLight = FoundSun;
+			}
+			TS->UpdateSun();
+		}
+	}
 }
 
 void ABaseLevelBP::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -129,7 +219,38 @@ void ABaseLevelBP::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		HUDWidget = nullptr;
 	}
 	Super::EndPlay(EndPlayReason);
-	Cast<UBaseGameInstance>(GetGameInstance())->curLevelBP = nullptr;
+	if (UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetGameInstance()))
+	{
+		// 退出关卡时统一落盘：箱内剩余数量等已在内存中更新，这里一次性写入存档（避免每次摘取都写盘）
+		GI->SaveGameData();
+		GI->curLevelBP = nullptr;
+		// 解除太阳引用，避免关卡卸载后悬空指针跨关残留
+		if (GI->businessSimulation && GI->businessSimulation->TimeSystem)
+		{
+			GI->businessSimulation->TimeSystem->SunLight = nullptr;
+		}
+	}
+}
+
+UBusinessSimulation* ABaseLevelBP::GetBusinessSimulation() const
+{
+	if (UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetGameInstance()))
+	{
+		return GI->businessSimulation;
+	}
+	return nullptr;
+}
+
+void ABaseLevelBP::RefreshClock()
+{
+	if (UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetGameInstance()))
+	{
+		if (GI->businessSimulation && GI->businessSimulation->TimeSystem && HUDWidget)
+		{
+			UTimeSystem* TS = GI->businessSimulation->TimeSystem;
+			HUDWidget->SetClock(TS->GetCurrentHour(), TS->IsBusinessOpen());
+		}
+	}
 }
 
 void ABaseLevelBP::ResolveLevelGoal()
@@ -480,6 +601,21 @@ void ABaseLevelBP::BeginLevelTransition(int32 NewLevelID)
 		// 无世界（极端情况）直接提交
 		CommitLevelTransition();
 	}
+}
+
+void ABaseLevelBP::HandleClosingFinished()
+{
+	UE_LOG(LogTemp, Log, TEXT("[BaseLevelBP] 收到“打烊收尾完成”：已点菜客人全部处理完（bAutoEndDayOnClosingFinished=%d）"),
+		bAutoEndDayOnClosingFinished);
+
+	if (!bAutoEndDayOnClosingFinished)
+	{
+		// 保持原有流程：由升级 NPC 对话触发进入下一关
+		return;
+	}
+
+	// 已上完菜 / 客人等待超时 → 真正结束这一天，进入下一天（下一关）
+	AdvanceToNextLevel();
 }
 
 void ABaseLevelBP::CommitLevelTransition()

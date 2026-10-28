@@ -7,9 +7,15 @@
 #include "Machine/CookingMachine.h"
 #include "Machine/ServingCounter.h"
 #include "Machine/AttractCounter.h"
+#include "Machine/Dishwasher.h"
+#include "Machine/ResearchStove.h"
 #include "NPC/GuestCharacter.h"
 #include "Dialogue/DialogueComponent.h"
 #include "Item/Plant.h"
+#include "Item/FoodSpawner.h"
+#include "Item/Dish.h"
+#include "Item/Desk.h"
+#include "Item/FoodSpawnOther.h"
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/BoxComponent.h"
@@ -24,6 +30,9 @@
 #include "Animation/ShootAnimInstance.h"
 #include "Components/PostProcessComponent.h"
 #include "Game/BaseGameInstance.h"
+#include "Game/BaseLevelBP.h"
+#include "UI/HUDWidget.h"
+#include "Machine/GateCounter.h"
 #include "Kismet/GameplayStatics.h"
 #include "Kismet/GameplayStaticsTypes.h"
 #include "Blueprint/AIBlueprintHelperLibrary.h"
@@ -51,6 +60,20 @@ bool AShootCharacter::PlayGatheringMontage()
 		if (AnimInstance && GatheringMontage)
 		{
 			AnimInstance->Montage_Play(GatheringMontage);
+			return true;
+		}
+	}
+	return false;
+}
+
+bool AShootCharacter::PlayWateringMontage()
+{
+	if (CharacterActionState == ECharacterActionState::EAS_Unoccupied)
+	{
+		UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
+		if (AnimInstance && WateringMontage)
+		{
+			AnimInstance->Montage_Play(WateringMontage);
 			return true;
 		}
 	}
@@ -85,36 +108,29 @@ bool AShootCharacter::IsHolding()
  	{
  		return false;
  	}
- 	if(OverlappingItem != nullptr && OverlappingItem->ItemType == EItemType::EIT_Desk)
- 	{
- 		return false;
- 	}
- 	return true;
+	if (Cast<ADesk>(OverlappingItem))//Desk（上菜台）不可被拾取
+	{
+		return false;
+	}
+	return true;
  }
 
- bool AShootCharacter::IsSpawner()
- {
- 	if(OverlappingItem == nullptr)
- 	{
- 		return false;
- 	}
- 	if(OverlappingItem != nullptr && OverlappingItem->ItemType == EItemType::EIT_Spawn)
- 	{
- 		return true;
- 	}
- 	return false;
- }
+bool AShootCharacter::IsSpawner()
+{
+	// 生成箱现已抽取为独立的 AFoodSpawner 类：直接按类型判断（取代原 EIT_Spawn 枚举分支）
+	return Cast<AFoodSpawner>(OverlappingItem) != nullptr;
+}
 
  bool AShootCharacter::IsSpawnOther()
  {
  	//GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::White, FString::Printf(TEXT("切好菜了，生成一个对应切换的item %d"),CookingMachine->FoodActors.Num()));
  	for (int32 i = 0; i < CookingMachine->FoodActors.Num(); i++)
  	{
- 		AItemActor* CurrentActor = CookingMachine->FoodActors[i];
- 		if (CurrentActor->ItemType == EItemType::EIT_SpawnOther)
- 		{
- 			return true;
- 		}
+		AItemActor* CurrentActor = CookingMachine->FoodActors[i];
+		if (Cast<AFoodSpawnOther>(CurrentActor))//切菜生成物（原 EIT_SpawnOther）
+		{
+			return true;
+		}
  	}
  	return false;
  }
@@ -128,8 +144,8 @@ bool AShootCharacter::IsHolding()
  {
 	return CharacterState == ECharacterState::ECS_Holding && CookingMachine!= nullptr &&
 			CharacterState != ECharacterState::ECS_Repairing &&
-				PickingItem->ItemType != EItemType::EIT_Dish;
- }
+				Cast<ADish>(PickingItem) == nullptr;//碟子不能丢进机器
+}
 
  bool AShootCharacter::NeedRepairMachine()
  {
@@ -162,12 +178,12 @@ bool AShootCharacter::IsHolding()
  	if (PickingItem->FoodIdArray.Num()==0)
  	{
  		return false;	 	}
- 	if (OverlappingItem->ItemType != EItemType::EIT_Desk)
- 	{
- 		return false;	
- 	}
- 	return true;
- }
+	if (Cast<ADesk>(OverlappingItem) == nullptr)//上菜目标必须是 Desk（上菜台）
+	{
+		return false;	
+	}
+	return true;
+}
 
  AShootCharacter::AShootCharacter()
 {
@@ -222,6 +238,45 @@ void AShootCharacter::SetOverlappingItem(AItemActor* Item)
  		OverlappingItem->SetItemState(EItemState::EIS_Idle);
  	}
 	OverlappingItem = Item;
+
+	// 驱动 HUD：对准食物箱时显示其剩余数量，否则隐藏（带缓存，避免每帧重复推送）
+	if (UHUDWidget* HUD = GetHUDWidget())
+	{
+		if (AFoodSpawner* Spawner = Cast<AFoodSpawner>(Item))
+		{
+			const int32 Cnt = Spawner->RemainingCount;
+			if (Spawner != LastSpawnerForHUD || Cnt != LastSpawnerCount)
+			{
+				HUD->SetSpawnerRemaining(Cnt);
+				LastSpawnerForHUD = Spawner;
+				LastSpawnerCount = Cnt;
+			}
+		}
+		else if (LastSpawnerForHUD != nullptr)
+		{
+			HUD->HideSpawnerRemaining();
+			LastSpawnerForHUD = nullptr;
+			LastSpawnerCount = -2;
+		}
+	}
+}
+
+UHUDWidget* AShootCharacter::GetHUDWidget()
+{
+	if (CachedHUD && IsValid(CachedHUD))
+	{
+		return CachedHUD;
+	}
+	CachedHUD = nullptr;
+	// 通过 GameInstance 上的关卡管理器指针获取常驻 HUD（更可靠，且自动随关卡切换刷新）
+	if (UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetWorld()->GetGameInstance()))
+	{
+		if (GI->curLevelBP)
+		{
+			CachedHUD = GI->curLevelBP->HUDWidget;
+		}
+	}
+	return CachedHUD;
 }
 
  void AShootCharacter::SetCookMachineItem(ACookingMachine* Item)
@@ -256,9 +311,29 @@ void AShootCharacter::SetOverlappingAttractCounter(AAttractCounter* Counter)
 	OverlappingAttractCounter = Counter;
 }
 
+void AShootCharacter::SetOverlappingGate(AGateCounter* Gate)
+{
+	OverlappingGate = Gate;
+}
+
 void AShootCharacter::SetOverlappingGuest(AGuestCharacter* Guest)
 {
 	OverlappingGuest = Guest;
+}
+
+void AShootCharacter::SetOverlappingDishwasher(ADishwasher* Dishwasher)
+{
+	OverlappingDishwasher = Dishwasher;
+}
+
+void AShootCharacter::SetOverlappingEmptyPlate(AItemActor* Plate)
+{
+	OverlappingEmptyPlate = Plate;
+}
+
+void AShootCharacter::SetOverlappingResearchStove(AResearchStove* Stove)
+{
+	OverlappingResearchStove = Stove;
 }
 
 void AShootCharacter::SetOverlappingDialogue(UInteractionDialogueComponent* Comp)
@@ -319,9 +394,23 @@ void AShootCharacter::InteractWithPlant()
 			}
 		}
 	}
-	else
+	else if (OverlappingPlant->NeedsWater())
 	{
+		// 浇水时朝向植被（复用采集时的开关控制）：仅水平转向，让角色面对待浇水的植物
+		if (bFacePlantWhenGathering && OverlappingPlant)
+		{
+			FVector ToPlant = OverlappingPlant->GetActorLocation() - GetActorLocation();
+			ToPlant.Z = 0.f;
+			if (!ToPlant.IsNearlyZero())
+			{
+				const FRotator FaceRot = ToPlant.Rotation();
+				SetActorRotation(FaceRot);
+			}
+		}
+
+		// 触发浇水：先补水，再播放浇水动画（动画与补水解耦，浇水本身即时生效）
 		OverlappingPlant->Water();
+		PlayWateringMontage();
 	}
 }
 
@@ -418,6 +507,13 @@ void AShootCharacter::Pick(const FInputActionValue& Value)
 		return;
 	}
 
+	// 大门交互台：靠近时按 E 开门营业（明确的开门动作，优先于招揽/接单）
+	if (OverlappingGate)
+	{
+		OverlappingGate->OpenBusiness();
+		return;
+	}
+
  	// 招揽顾客：合并到拾取键 (PickAction)，在招揽台范围内按下即触发招揽
  	if (OverlappingAttractCounter)
  	{
@@ -425,10 +521,91 @@ void AShootCharacter::Pick(const FInputActionValue& Value)
  		return;
  	}
  	
-	// 客人接单：靠近“等待接单”的客人按 E 接单，接单后才产生订单
+	// 客人接单：靠近"等待接单"的客人按 E 接单，接单后才产生订单
 	if (OverlappingGuest && OverlappingGuest->CanAcceptOrderByPlayer())
 	{
 		OverlappingGuest->AcceptOrderByPlayer();
+		return;
+	}
+
+	// 手上拿着脏碟：唯一出路是走到洗碗机按 E 交还（可用碟子数 +1）。
+	// 禁止放下/丢弃/拿去做菜，否则碟子会丢失导致可用碟子数永远无法恢复。
+	if (PickingItem && PickingItem->bIsDirtyPlate)
+	{
+		if (OverlappingDishwasher && OverlappingDishwasher->SubmitPlate(PickingItem))
+		{
+			// 交还成功：碟子已被洗碗机销毁，清空手持状态
+			SetPickingItem(nullptr);
+			CharacterActionState = ECharacterActionState::EAS_Unoccupied;
+			CharacterState = ECharacterState::ECS_Idle;
+			FBIK_Alpha = 0;
+			HandIK_LPoint = nullptr;
+			HandIK_RPoint = nullptr;
+			return;
+		}
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Yellow, TEXT("[脏碟] 请走到洗碗机旁按 E 交还清洗"));
+		}
+		return; // 未靠近洗碗机：不做任何处理（也不允许放下脏碟）
+	}
+
+	// 研究炉：手上拿着食材/食物时靠近研究炉按 E 投入，凑齐配方后自动开始研究并解锁新菜谱
+	if (OverlappingResearchStove && PickingItem && !PickingItem->bIsDirtyPlate)
+	{
+		if (OverlappingResearchStove->AddFood(PickingItem))
+		{
+			// 投入成功：食材已被研究炉销毁，清空手持状态
+			SetPickingItem(nullptr);
+			CharacterActionState = ECharacterActionState::EAS_Unoccupied;
+			CharacterState = ECharacterState::ECS_Idle;
+			FBIK_Alpha = 0;
+			HandIK_LPoint = nullptr;
+			HandIK_RPoint = nullptr;
+			return;
+		}
+		// 投入失败（研究中/无效食材）：不消耗物品，继续后续逻辑
+	}
+
+	// 方案B：玩家手上有菜且靠近"正在等餐"的客人 → 直接端菜上菜给该客人
+	// （脏碟不是菜，不能上菜）
+	if (PickingItem && !PickingItem->bIsDirtyPlate
+		&& OverlappingGuest && OverlappingGuest->CanPlayerServeDish())
+	{
+		if (OverlappingGuest->TryServeDish(this, PickingItem))
+		{
+			// 成功上菜：成品已摆上桌，清空手持状态
+			SetPickingItem(nullptr);
+			CharacterActionState = ECharacterActionState::EAS_Unoccupied;
+			CharacterState = ECharacterState::ECS_Idle;
+			FBIK_Alpha = 0;
+			HandIK_LPoint = nullptr;
+			HandIK_RPoint = nullptr;
+			return;
+		}
+		// 上菜失败（菜不对/订单不匹配）：不消耗菜品，继续后续逻辑
+	}
+
+	// 方案B：玩家空手靠近空碟 → 按 E 收走空碟：释放座位（下一位客人可入座），
+	// 碟子变成手上的“脏碟”，需走到洗碗机按 E 交还才能回收成可用碟子。
+	if (OverlappingEmptyPlate && !PickingItem)
+	{
+		if (OverlappingEmptyPlate->PickUpByPlayer(this))
+		{
+			SetOverlappingEmptyPlate(nullptr);
+			return;
+		}
+	}
+
+	// 空手靠近研究炉且炉内还残留食材、又没在研究 → 按 E 清空炉内食材（防止投错食材后卡住）
+	if (OverlappingResearchStove && !PickingItem
+		&& !OverlappingResearchStove->bResearching && OverlappingResearchStove->StoredItemIDs.Num() > 0)
+	{
+		OverlappingResearchStove->ClearFoods();
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Yellow, TEXT("[研究炉] 已清空炉内食材"));
+		}
 		return;
 	}
 
@@ -662,18 +839,20 @@ void AShootCharacter::DoPick()
  	//GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, TEXT("DoPick"));
  	if(OverlappingItem->GetItemState() != EItemState::EIS_Cooking && OverlappingItem->GetItemState() != EItemState::EIS_Equipped) //手上没有食物
  	{
- 		if (OverlappingItem->ItemType == EItemType::EIT_Spawn && OverlappingItem->SpawnItemActorClass)//如果是需要生成食物的类型，如番茄树，要从番茄树生成一个番茄到手上
- 		{
- 			//这一个放在他的蓝图里处理
- 			//OverlappingItem->OnSpawnActorEvent();
- 			//PlayPickMontage( FName("Pick0")); //pick1 是摘，摘完后应该切到抬
- 			
- 			//原本在c++处理
- 			UWorld* World = GetWorld();
- 			AItemActor* Spawned = World->SpawnActor<AItemActor>(OverlappingItem->SpawnItemActorClass, GetActorLocation(), GetActorRotation());
- 			SetOverlappingItem(Spawned);
- 			SetPickingItemStatus();
- 		}
+ 		if (AFoodSpawner* FoodSpawner = Cast<AFoodSpawner>(OverlappingItem))//如果是需要生成食物的类型，如番茄树，要从箱子生成一个番茄到手上
+		{
+			//箱内还有食材才生成；为空(RemainingCount==0)则不再生成
+			if (FoodSpawner->CanSpawn() && FoodSpawner->SpawnItemActorClass)
+			{
+				//原本在c++处理
+				UWorld* World = GetWorld();
+				AItemActor* Spawned = World->SpawnActor<AItemActor>(FoodSpawner->SpawnItemActorClass, GetActorLocation(), GetActorRotation());
+				SetOverlappingItem(Spawned);
+				SetPickingItemStatus();
+				FoodSpawner->OnSpawnActorEvent();//广播给蓝图（特效/音效等）
+				FoodSpawner->ConsumeOne();//消耗一个数量（空了就不会再生成）
+			}
+		}
  	}
 
  	//IsPicking = false;
@@ -687,16 +866,19 @@ void AShootCharacter::DoPick()
  	CookingMachine->GetMenuFood();
  	for (int32 i = 0; i < CookingMachine->FoodActors.Num(); i++)
  	{
- 		AItemActor* CurrentActor = CookingMachine->FoodActors[i];
- 		if (CurrentActor->ItemType == EItemType::EIT_SpawnOther && CurrentActor->SpawnItemActorClass)//如果是需要生成食物的类型，如牛排，要从牛排变成切好的牛排
- 		{
- 			UWorld* World = GetWorld();
- 			AItemActor* Spawned = World->SpawnActor<AItemActor>(CurrentActor->SpawnItemActorClass, GetActorLocation(), GetActorRotation());
- 			SetOverlappingItem(Spawned);
- 			SetPickingItemStatus();
- 		}
- 		CurrentActor->Destroy();
- 	}
+		AItemActor* CurrentActor = CookingMachine->FoodActors[i];
+		if (AFoodSpawnOther* SpawnOther = Cast<AFoodSpawnOther>(CurrentActor))//如果是需要生成食物的类型，如牛排，要从牛排变成切好的牛排
+		{
+			if (SpawnOther->SpawnItemActorClass)
+			{
+				UWorld* World = GetWorld();
+				AItemActor* Spawned = World->SpawnActor<AItemActor>(SpawnOther->SpawnItemActorClass, GetActorLocation(), GetActorRotation());
+				SetOverlappingItem(Spawned);
+				SetPickingItemStatus();
+			}
+		}
+		CurrentActor->Destroy();
+	}
  	CookingMachine->FoodActors.Empty();
  	GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, TEXT("切好菜"));
  	SetOverlappingItem(nullptr);
@@ -785,7 +967,7 @@ void AShootCharacter::HoldItemInHand(AItemActor* Item, bool bSetAsPickingItem)
 	Item->AttachMeshToSocket(RetargetMesh, ItemSocketName);
 	Item->SetItemState(EItemState::EIS_Equipped);
 
-	// 设为手持主物体并切换到“手持”状态（仅主物体需要，多个果实时其它只挂手上）
+	// 设为手持主物体并切换到"手持"状态（仅主物体需要，多个果实时其它只挂手上）
 	if (bSetAsPickingItem)
 	{
 		SetPickingItem(Item);
@@ -831,10 +1013,9 @@ bool AShootCharacter::AddItemToInventory(AItemActor* Item)
 		}
 	}
 
-	// 记录物体的“类型/信息”，随后销毁世界中的物体(背包只保留轻量记录)
+	// 记录物体的"类型/信息"，随后销毁世界中的物体(背包只保留轻量记录)
 	FInventorySlot Slot;
-	Slot.ItemClass = InClass;            // 取出时按此类重新生成(保留蓝图子类)
-	Slot.ItemType = Item->ItemType;
+	Slot.ItemClass = InClass;            // 取出时按此类重新生成(保留蓝图子类)；类型已由 ItemClass 体现，无需单独枚举
 	Slot.ItemInfoRow = Item->ItemInfoRow;
 	Slot.FoodIdArray = Item->FoodIdArray;
 	// 显示名优先取自数据表行的 ItemDes
@@ -930,7 +1111,6 @@ AItemActor* AShootCharacter::TakeOutInventoryItem(int32 SlotIndex)
 	}
 
 	// 回填记录的信息
-	Spawned->ItemType = Slot.ItemType;
 	Spawned->ItemInfoRow = Slot.ItemInfoRow;
 	Spawned->FoodIdArray = Slot.FoodIdArray;
 
@@ -1189,8 +1369,11 @@ void AShootCharacter::DoRepairEnd()
  	{
  		GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, TEXT("成功上菜给客人"));
 		OverlappingItem->OnGiveEffectEvent();//上菜的时候显示特效
-		PickingItem->OnRemoveActorEvent();//移除一个碟子,放在蓝图
- 		PickingItem->OnClear();
+		if (ADish* Dish = Cast<ADish>(PickingItem))//移除一个碟子（碟子类持有 OnRemoveActorEvent）
+		{
+			Dish->OnRemoveActorEvent();
+		}
+		PickingItem->OnClear();
  		PickingItem->Destroy();
  		PickingItem = nullptr;
  		CharacterState = ECharacterState::ECS_Idle;

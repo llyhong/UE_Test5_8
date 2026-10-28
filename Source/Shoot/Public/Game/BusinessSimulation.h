@@ -56,7 +56,15 @@ class SHOOT_API UBusinessSimulation : public UObject
 	GENERATED_BODY()
 
 public:
-	/** 时钟（Init 时自动创建） */
+	/**
+	 * 时钟类：默认 UTimeSystem。可在继承 UBusinessSimulation 的蓝图（或本类实例的 Class Defaults）里
+	 * 替换为 UTimeSystem 的蓝图子类，从而在不改 C++ 的情况下调参（一天时长、营业时段、太阳颜色/强度等）。
+	 * 留空则回退到 UTimeSystem。
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Business|Time")
+	TSubclassOf<UTimeSystem> TimeSystemClass;
+
+	/** 时钟（Init 时按 TimeSystemClass 自动创建） */
 	UPROPERTY(BlueprintReadOnly, Category = "Business")
 	TObjectPtr<UTimeSystem> TimeSystem;
 

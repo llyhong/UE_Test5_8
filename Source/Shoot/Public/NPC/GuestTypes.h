@@ -17,4 +17,6 @@ enum class EGuestState : uint8
 	Eating UMETA(DisplayName = "Eating"),
 	Leaving UMETA(DisplayName = "Leaving"),
 	Dead UMETA(DisplayName = "Dead"),
+	/** 落座但尚未被玩家接单（仅“需要玩家接单”模式）：头上提示“请按E点单”，玩家接单后转入 WaitingFood */
+	WaitingOrder UMETA(DisplayName = "WaitingOrder"),
 };

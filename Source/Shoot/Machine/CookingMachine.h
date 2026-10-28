@@ -11,6 +11,7 @@ class UWidgetComponent;
 class UBoxComponent;
 class AItemActor;
 class USceneComponent;
+class APlateSystem;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FNoParmaEvent);
 
@@ -119,6 +120,17 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
 	bool bSpawnOnCookingFinish = false;
 
+	/** 生成成品时是否消耗一个可用碟子。
+	 *  洗碗机闭环：只有存在"空闲碟子"时才自动生成成品；
+	 *  没有空闲碟子则本次不出成品，走回原始逻辑（保持完成状态继续加热 → 煮糊/着火），
+	 *  需玩家把桌上的脏碟收走并交还洗碗机清洗（+1）后，下一次烹饪才能正常出菜。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
+	bool bConsumePlateOnFinish = true;
+
+	/** 没有空闲碟子、本次不出成品时通知（蓝图可播放提示/冒烟等）。同一锅只触发一次。 */
+	UFUNCTION(BlueprintImplementableEvent, Category = "Spawn")
+	void OnNoPlateAvailable();
+
 	/** 烹饪完成后生成的默认 Actor 类（菜品行的 CookedActorClass 未配置时兜底使用） */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
 	TSubclassOf<AActor> CookedActorClass;
@@ -161,6 +173,12 @@ protected:
 
 	/** 烹饪完成后生成成品 Actor（受 bSpawnOnCookingFinish 开关控制） */
 	void SpawnCookedActor();
+
+	/** 取盘子系统：优先关卡蓝图上的实例，否则在场景中查找第一个 */
+	APlateSystem* FindPlateSystem() const;
+
+	/** “没有空闲碟子”提示是否已提示过（同一锅只提示一次，避免刷屏；ResetFoodData 时复位） */
+	bool bNoPlateNotified = false;
 
 private:
 	ULocalPlayer* LocalPlayer;

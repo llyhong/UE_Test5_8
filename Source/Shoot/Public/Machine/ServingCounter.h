@@ -51,6 +51,14 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Serve")
 	bool bUseMenuControll = true;
 
+	/** 上菜是否把成品送到客人座位处（false 则维持旧行为：菜在柜台即销毁） */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Serve")
+	bool bDeliverToSeat = true;
+
+	/** 成品送到客人位置后停留时长（秒）：停留结束才销毁，让玩家看到“菜到了客人面前” */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Serve", meta = (ClampMin = "0.1"))
+	float ServeArriveDelay = 1.0f;
+
 	/**
 	 * 提交菜品：玩家把手上的成品交到上菜台。
 	 * @param Dish 玩家当前手持的成品（AItemActor，需带有效的 MenuFoodID）
@@ -87,4 +95,10 @@ protected:
 
 	/** 找到一个正在等餐（WaitingFood）的客人，找不到返回 nullptr */
 	AGuestCharacter* FindWaitingGuest() const;
+
+	/**
+	 * 把成品送到客人座位处：移动到客人位置（略抬高），停用碰撞，停留 ServeArriveDelay 后销毁。
+	 * 视觉上“上菜到客人位置”；传入空客人则直接销毁（退回旧行为）。
+	 */
+	void DeliverDishToSeat(AItemActor* Dish, AGuestCharacter* Guest);
 };

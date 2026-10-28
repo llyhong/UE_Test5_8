@@ -8,10 +8,15 @@
 
 class UStaticMeshComponent;
 class AGuestCharacter;
+class AItemActor;
+
+/** 座位被“空碟”回收而释放时广播（由客人管理器监听以安排下一位客人入座） */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnSeatFreedSignature);
 
 /**
  * 独立的凳子类，表示客人可坐下的座位。
  * 提供座位插槽位置（SitSocket）与占用状态管理，避免多个客人抢占同一座位。
+ * 方案B：客人吃完离座后，空碟会临时占据座位（bHasDirtyPlate），直到玩家按 E 回收空碟才真正释放。
  */
 UCLASS()
 class SHOOT_API AChairSeat : public AActor
@@ -41,13 +46,33 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Chair")
 	bool Occupy(AGuestCharacter* Guest);
 
-	/** 释放座位 */
+	/** 释放座位（清空占用者、空碟标记，但不广播委托） */
 	UFUNCTION(BlueprintCallable, Category = "Chair")
 	void Release();
+
+	/** 客人离座后，由空碟临时占据本座位（bIsOccupied 仍为真，直到空碟被回收） */
+	UFUNCTION(BlueprintCallable, Category = "Chair")
+	void SetDirtyPlate(AItemActor* Plate);
+
+	/** 回收空碟时调用：真正释放座位并广播 OnSeatFreedSignature */
+	UFUNCTION(BlueprintCallable, Category = "Chair")
+	void ClearDirtyPlate();
 
 	/** 返回坐下时的世界坐标与朝向 */
 	UFUNCTION(BlueprintCallable, Category = "Chair")
 	FTransform GetSitTransform() const;
+
+	/** 当前占据本座位的空碟（无则为 nullptr）。仅空碟模式下有效 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chair")
+	TObjectPtr<AItemActor> DirtyPlate = nullptr;
+
+	/** 是否被空碟占用（客人已离座，但空碟尚未被回收） */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chair")
+	bool bHasDirtyPlate = false;
+
+	/** 座位被“空碟回收”释放时广播（客人管理器监听以安排下一位客人入座） */
+	UPROPERTY(BlueprintAssignable, Category = "Chair")
+	FOnSeatFreedSignature OnSeatFreedDelegate;
 
 	/** 是否绘制调试信息：从本座位到当前占用客人(Occupant)画一条连线，并在两端做标记，方便排查占座/卡座 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Chair|Debug")

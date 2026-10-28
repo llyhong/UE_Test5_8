@@ -277,6 +277,92 @@ bool AOrderSystem::PushFoods(const TArray<int>& FoodIDs)
 	GEngine->AddOnScreenDebugMessage(-1, 2, FColor::Red, TEXT("完成订单(优先最短剩余时间)"));
 
 	// 通知点餐客人开始进食（订单与客人绑定）
+	LastServedGuest = OrderedGuest;
+	if (OrderedGuest)
+	{
+		OrderedGuest->OnOrderServed();
+	}
+	return true;
+}
+
+bool AOrderSystem::PushFoodsForGuest(const TArray<int>& FoodIDs, AGuestCharacter* TargetGuest)
+{
+	if (!IsStarted)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("上菜失败，游戏已经结束"));
+		return false;
+	}
+	if (!TargetGuest)
+	{
+		return false;
+	}
+
+	const int Num = FoodIDs.Num();
+
+	// 1. 在绑定到该客人的订单里，找出菜品集合完全匹配的候选
+	TArray<UOrderHandle*> Candidates;
+	for (UOrderHandle* handle : waitList)
+	{
+		if (!handle || handle->Guest != TargetGuest)
+		{
+			continue;
+		}
+		const FOrderData& order = handle->OrderData;
+		if (order.FoodIDs.Num() != Num)
+		{
+			continue;
+		}
+		// 统计 Foods 中每个 ID 的出现次数，与订单比对
+		TMap<int, int> NeedCount;
+		for (int id : order.FoodIDs)
+		{
+			NeedCount.FindOrAdd(id)++;
+		}
+		bool bMatch = true;
+		for (int id : FoodIDs)
+		{
+			int* p = NeedCount.Find(id);
+			if (!p || *p <= 0)
+			{
+				bMatch = false;
+				break;
+			}
+			(*p)--;
+		}
+		if (bMatch)
+		{
+			Candidates.Add(handle);
+		}
+	}
+	if (Candidates.Num() == 0)
+	{
+		return false;
+	}
+
+	// 2. 在该客人的候选订单中选剩余时间比例最少（最紧急）的优先完成
+	UOrderHandle* BestHandle = Candidates[0];
+	float BestPercent = BestHandle->GetPercent();
+	for (UOrderHandle* handle : Candidates)
+	{
+		const float Percent = handle->GetPercent();
+		if (Percent < BestPercent)
+		{
+			BestPercent = Percent;
+			BestHandle = handle;
+		}
+	}
+
+	// 3. 完成该订单
+	const FOrderData& order = BestHandle->OrderData;
+	AGuestCharacter* OrderedGuest = BestHandle->Guest;
+
+	ABaseLevelBP::AddScore(this, order.Price);
+	OnFinishOrder.Broadcast(BestHandle, BestHandle->OrderData);
+	waitList.Remove(BestHandle);
+	GEngine->AddOnScreenDebugMessage(-1, 2, FColor::Red, TEXT("完成订单(针对性上菜)"));
+
+	// 通知点餐客人开始进食（订单与客人绑定）
+	LastServedGuest = OrderedGuest;
 	if (OrderedGuest)
 	{
 		OrderedGuest->OnOrderServed();

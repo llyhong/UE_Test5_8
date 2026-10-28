@@ -121,6 +121,10 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Plant")
 	float GetWater() const { return WaterLevel; }
 
+	/** 是否需要浇水：配置了需要浇水（bRequiresWater）且当前水位尚未满 */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Plant")
+	bool NeedsWater() const;
+
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Plant")
 	bool HasPest() const { return bPest; }
 
@@ -167,6 +171,8 @@ protected:
 
 	void ApplyStageMesh(int32 StageIndex);
 	void AdvanceStage();
+	/** 摘取后重置回第一阶段（种子期）：清空收获/害虫状态并恢复生长，使植被重新生长结果（不再销毁植被） */
+	void ResetToSeedStage();
 	void SpawnFruit();
 
 	/** 在指定挂点索引处生出一个果实（供一次性结满与逐个重结果共用） */

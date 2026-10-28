@@ -29,6 +29,28 @@ void AChairSeat::Release()
 {
 	bIsOccupied = false;
 	Occupant = nullptr;
+	DirtyPlate = nullptr;
+	bHasDirtyPlate = false;
+}
+
+void AChairSeat::SetDirtyPlate(AItemActor* Plate)
+{
+	// 客人已离座但空碟暂占座位：保持 bIsOccupied 为真，避免新客人抢占，
+	// 直到玩家按 E 回收空碟后 ClearDirtyPlate 才真正释放。
+	bIsOccupied = true;
+	Occupant = nullptr;
+	DirtyPlate = Plate;
+	bHasDirtyPlate = true;
+}
+
+void AChairSeat::ClearDirtyPlate()
+{
+	bIsOccupied = false;
+	Occupant = nullptr;
+	DirtyPlate = nullptr;
+	bHasDirtyPlate = false;
+	// 真正释放座位：通知客人管理器安排下一位客人入座
+	OnSeatFreedDelegate.Broadcast();
 }
 
 FTransform AChairSeat::GetSitTransform() const

@@ -55,6 +55,13 @@ public:
 	FOrderData* GetRandomOrder();
 	UFUNCTION(BlueprintCallable)
 	bool PushFoods(const TArray<int>& FoodIDs);
+
+	/**
+	 * 针对性上菜：仅完成绑定到指定客人的、且菜品集合匹配的订单（方案B 玩家端菜走到客人面前上菜）。
+	 * @return 是否成功完成该客人的订单
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Order")
+	bool PushFoodsForGuest(const TArray<int>& FoodIDs, AGuestCharacter* TargetGuest);
 	UFUNCTION(BlueprintCallable)
 	void InitCfg(ULevelOrderCfg* cfg);
 	UFUNCTION(BlueprintCallable)
@@ -96,6 +103,12 @@ public:
 	FOrderEvent2 OnStartOrder;
 	UPROPERTY(BlueprintAssignable, Category = "Events")
 	FOrderEvent2 OnFailOrder;
+
+	/** 最近一次 PushFoods 成功时实际服务的客人（供上菜台把成品送到客人位置；调用后立即读取，非持久状态） */
+	AGuestCharacter* LastServedGuest = nullptr;
+
+	/** 读取最近一次 PushFoods 服务的客人（无则为 nullptr） */
+	AGuestCharacter* GetLastServedGuest() const { return LastServedGuest; }
 
 private:
 	/** 订单 ID 自增器（原先是文件作用域全局变量，改为成员以避免多实例/多世界共享状态与外部链接污染） */

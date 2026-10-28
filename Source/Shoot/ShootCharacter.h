@@ -16,7 +16,12 @@ class UCameraComponent;
 class UInputAction;
 class UAnimMontage;
 class AItemActor;
+class AFoodSpawner;
+class ADish;
+class ADesk;
+class AFoodSpawnOther;
 class ACookingMachine;
+class UHUDWidget;
 class UInventoryWidget;
 class UShopWidget;
 class AAnimalCharacter;
@@ -24,6 +29,7 @@ class UShootAnimInstance;
 class APlant;
 class AAttractCounter;
 class AGuestCharacter;
+class ADishwasher;
 class UInteractionDialogueComponent;
 struct FInputActionValue;
 
@@ -32,7 +38,7 @@ struct FInputActionValue;
 // 背包发生变化时广播(供 UI 刷新)
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnInventoryChanged);
 
-// 背包槽位：仅记录物体的“类型/信息”。入包后世界中的物体会被销毁，
+// 背包槽位：仅记录物体的"类型/信息"。入包后世界中的物体会被销毁，
 // 取出时根据 ItemClass 重新生成到角色手上(AItemActor 及其子类)。
 USTRUCT(BlueprintType)
 struct FInventorySlot
@@ -43,10 +49,6 @@ public:
 	// 取出时用于生成对应 Actor 的类(保留蓝图子类)
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory")
 	TSubclassOf<AItemActor> ItemClass = nullptr;
-
-	// 物体类型枚举
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory")
-	EItemType ItemType = EItemType::EIT_Normal;
 
 	// 物品信息数据表行(取出时回填到新生成的 Actor)
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory", meta = (RowType = "ItemActorInfo"))
@@ -108,13 +110,29 @@ private:
 	UPROPERTY(VisibleInstanceOnly)
 	TObjectPtr<class AServingCounter> OverlappingCounter;
 
+	// 当前可交还碟子的洗碗机（靠近时由洗碗机的重叠球注册）
+	UPROPERTY(VisibleInstanceOnly)
+	TObjectPtr<class ADishwasher> OverlappingDishwasher;
+
 	// 当前可招揽顾客的招揽台（靠近时由招揽台的重叠球注册）
 	UPROPERTY(VisibleInstanceOnly)
 	TObjectPtr<class AAttractCounter> OverlappingAttractCounter;
 
+	// 当前可开门营业的大门交互台（靠近时由大门的重叠球注册）
+	UPROPERTY(VisibleInstanceOnly)
+	TObjectPtr<class AGateCounter> OverlappingGate;
+
 	// 当前可接单的客人（靠近时由客人的交互球注册；仅"需要玩家接单"模式使用）
 	UPROPERTY(VisibleInstanceOnly)
 	TObjectPtr<class AGuestCharacter> OverlappingGuest;
+
+	// 当前可收走的空碟（靠近空碟时由空碟的回收球注册；方案B 上菜闭环，收走后变成手上脏碟）
+	UPROPERTY(VisibleInstanceOnly)
+	TObjectPtr<class AItemActor> OverlappingEmptyPlate;
+
+	// 当前可投入食材的研究炉（靠近时由研究炉的重叠球注册；用于 E 键投入食材研究新菜谱）
+	UPROPERTY(VisibleInstanceOnly)
+	TObjectPtr<class AResearchStove> OverlappingResearchStove;
 
 	// 当前可对话的交互对象（靠近时由 UInteractionDialogueComponent 注册；通用对话系统）
 	UPROPERTY(VisibleInstanceOnly)
@@ -155,6 +173,9 @@ private:
 
 	/** 播放采集（摘取植被）动画，返回是否成功开始播放 */
 	bool PlayGatheringMontage();
+
+	/** 播放浇水动画，返回是否成功开始播放 */
+	bool PlayWateringMontage();
 
 	/** 采集蒙太奇结束回调：此时才真正收获并删除植物 */
 	UFUNCTION()
@@ -257,12 +278,41 @@ public:
 	UFUNCTION(BlueprintCallable, Category="ShootCharacter")
 	FORCEINLINE AAttractCounter* GetOverlappingAttractCounter() const { return OverlappingAttractCounter; }
 
+	// 大门交互：靠近时由 AGateCounter 注册/反注册（用于 E 键开门营业）
+	UFUNCTION(BlueprintCallable, Category="Gate")
+	void SetOverlappingGate(class AGateCounter* Gate);
+
+	UFUNCTION(BlueprintCallable, Category="ShootCharacter")
+	FORCEINLINE AGateCounter* GetOverlappingGate() const { return OverlappingGate; }
+
 	// 客人交互：靠近时由 AGuestCharacter 的交互球注册/反注册（用于 E 键接单）
 	UFUNCTION(BlueprintCallable, Category="Guest")
 	void SetOverlappingGuest(AGuestCharacter* Guest);
 
 	UFUNCTION(BlueprintCallable, Category="ShootCharacter")
 	FORCEINLINE AGuestCharacter* GetOverlappingGuest() const { return OverlappingGuest; }
+
+	// 洗碗机交互：靠近时由洗碗机的重叠球注册/反注册（用于 E 键交还脏碟）
+	UFUNCTION(BlueprintCallable, Category="Dishwasher")
+	void SetOverlappingDishwasher(ADishwasher* Dishwasher);
+
+	UFUNCTION(BlueprintCallable, Category="ShootCharacter")
+	FORCEINLINE ADishwasher* GetOverlappingDishwasher() const { return OverlappingDishwasher; }
+
+	// 空碟回收：靠近空碟时由空碟的回收球注册/反注册（用于 E 键收走空碟，方案B）
+	UFUNCTION(BlueprintCallable, Category="Dish")
+	void SetOverlappingEmptyPlate(AItemActor* Plate);
+
+	UFUNCTION(BlueprintCallable, Category="ShootCharacter")
+	FORCEINLINE AItemActor* GetOverlappingEmptyPlate() const { return OverlappingEmptyPlate; }
+
+	// 研究炉交互：靠近时由研究炉的重叠球注册/反注册（用于 E 键投入食材研究新菜谱）
+	UFUNCTION(BlueprintCallable, Category="Research")
+	void SetOverlappingResearchStove(AResearchStove* Stove);
+
+	UFUNCTION(BlueprintCallable, Category="ShootCharacter")
+	FORCEINLINE AResearchStove* GetOverlappingResearchStove() const { return OverlappingResearchStove; }
+
 
 	// 通用对话交互：靠近时由 UInteractionDialogueComponent 注册/反注册（用于 E 键对话）
 	UFUNCTION(BlueprintCallable, Category="Dialogue")
@@ -292,7 +342,7 @@ public:
 
 	// ============ 背包系统 API ============
 	// 将手中/世界中的物品记录进背包，并销毁该物体(节省世界实例)；成功广播 OnInventoryChanged。
-	// 注意：这里记录的是“类型”，取出时按 ItemClass 重新生成。
+	// 注意：这里记录的是"类型"，取出时按 ItemClass 重新生成。
 	UFUNCTION(BlueprintCallable, Category="Inventory")
 	bool AddItemToInventory(AItemActor* Item);
 
@@ -478,6 +528,10 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category="Montages")
 	UAnimMontage* GatheringMontage;
 
+	/** 浇水动画：在触发给植被浇水时播放 */
+	UPROPERTY(EditDefaultsOnly, Category="Montages")
+	UAnimMontage* WateringMontage;
+
 	/** 采集时是否让角色转向（朝向）待采摘的植被；关闭则保持原朝向。默认开启。 */
 	UPROPERTY(EditDefaultsOnly, Category="Montages")
 	bool bFacePlantWhenGathering = true;
@@ -590,5 +644,16 @@ private:
 
 	// 倒计时结束执行的函数
 	void OnCountdownFinished();
+
+	// —— 食物箱剩余数量 HUD 提示 ——
+	/** 懒获取本关卡常驻 HUD（从 ABaseLevelBP 取，缓存以避免每帧查找） */
+	UHUDWidget* GetHUDWidget();
+
+	/** 缓存的 HUD 指针 */
+	UHUDWidget* CachedHUD = nullptr;
+
+	/** 上次推送到 HUD 的食物箱与数量，避免每帧重复广播 */
+	AFoodSpawner* LastSpawnerForHUD = nullptr;
+	int32 LastSpawnerCount = -2;
 };
 
