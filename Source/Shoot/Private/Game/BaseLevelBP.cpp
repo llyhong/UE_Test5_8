@@ -16,6 +16,7 @@
 #include "EngineUtils.h"
 #include "Kismet/GameplayStatics.h"
 #include "UObject/ConstructorHelpers.h"
+#include "Machine/Dishwasher.h"
 
 // Sets default values
 ABaseLevelBP::ABaseLevelBP()
@@ -59,6 +60,20 @@ void ABaseLevelBP::BeginPlay()
 		{
 			UE_LOG(LogTemp, Error, TEXT("[BaseLevelBP] 自动创建订单系统失败：订单配置为空（LevelID=%d），请检查 LevelOrderConfigs / DefaultOrderConfig 或手动调用 InitOrderSystem"), LevelID);
 		}
+	}
+
+	// 自动创建盘子系统：若关卡蓝图尚未调用 InitPlateSystem（PlateSystem 仍为空），
+	// 则用 DefaultPlateCount 自动创建，并按场景里洗碗机配置的 TotalPlates 补满可用碟子。
+	// 否则烹饪机在 SpawnCookedActor 里找不到盘子系统，会判定"没有空闲碟子"而永远不出成品。
+	if (!PlateSystem)
+	{
+		InitPlateSystem(DefaultPlateCount, PlateSpawnTime);
+		UE_LOG(LogTemp, Log, TEXT("[BaseLevelBP] 已自动创建盘子系统（默认 %d 个碟子）"), DefaultPlateCount);
+	}
+	else
+	{
+		// 已由蓝图创建：仍要应用洗碗机配置（蓝图里的 InitPlateSystem 可能先于洗碗机 BeginPlay 执行）
+		ApplyDishwasherPlateConfig();
 	}
 
 	// 创建订单 UI（与订单系统同生命周期）：立即绑定，无需轮询
@@ -508,8 +523,55 @@ void ABaseLevelBP::InitOrderSystem(UDataAsset* MenuDataTable)
 
 void ABaseLevelBP::InitPlateSystem(int PlateCount,float SpawnPlateTime)
 {
-	PlateSystem = GetWorld()->SpawnActor<APlateSystem>();// NewObject<AOrderSystem>();
-	PlateSystem->InitParam(PlateCount,SpawnPlateTime);
+	// 已存在则复用，避免重复 Spawn 出多个盘子系统（否则烹饪机 / 洗碗机可能操作到不同实例）
+	if (PlateSystem)
+	{
+		PlateSystem->InitParam(PlateCount, SpawnPlateTime);
+	}
+	else
+	{
+		PlateSystem = GetWorld()->SpawnActor<APlateSystem>();// NewObject<AOrderSystem>();
+		PlateSystem->InitParam(PlateCount,SpawnPlateTime);
+	}
+	PlateSystem->bAutoRegenPlates = bAutoRegenPlates;
+	// 用洗碗机上配置的碟子总数覆盖，并把可用碟子补满（开局所有碟子都是干净的）
+	ApplyDishwasherPlateConfig();
+}
+
+void ABaseLevelBP::ApplyDishwasherPlateConfig()
+{
+	if (!PlateSystem)
+	{
+		return;
+	}
+
+	TArray<AActor*> Dishwashers;
+	UGameplayStatics::GetAllActorsOfClass(GetWorld(), ADishwasher::StaticClass(), Dishwashers);
+
+	int32 MaxTotal = 0;
+	for (AActor* Actor : Dishwashers)
+	{
+		if (const ADishwasher* DW = Cast<ADishwasher>(Actor))
+		{
+			if (DW->TotalPlates > MaxTotal)
+			{
+				MaxTotal = DW->TotalPlates;
+			}
+		}
+	}
+
+	if (MaxTotal > 0)
+	{
+		// 补满：开局可用碟子 = 洗碗机配置的碟子总数
+		PlateSystem->SetTotalCount(MaxTotal, true);
+		UE_LOG(LogTemp, Log, TEXT("[BaseLevelBP] 盘子系统已就绪：可用碟子 %d / 总数 %d（来自洗碗机配置）"),
+			PlateSystem->GetAvailablePlates(), PlateSystem->TotalCount);
+	}
+	else
+	{
+		UE_LOG(LogTemp, Log, TEXT("[BaseLevelBP] 盘子系统已就绪：可用碟子 %d / 总数 %d（未配置洗碗机 TotalPlates）"),
+			PlateSystem->GetAvailablePlates(), PlateSystem->TotalCount);
+	}
 }
 
 void ABaseLevelBP::AdvanceToLevel(int32 NewLevelID)

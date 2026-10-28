@@ -79,6 +79,25 @@ public:
 	UFUNCTION(BlueprintCallable)
 	void InitPlateSystem(int PlateCount, float SpawnPlateTime);
 
+	// ========== 盘子系统（碟子）==========
+	/** 开局默认碟子总数：关卡蓝图没有调用 InitPlateSystem 时，BeginPlay 用此值自动创建盘子系统。
+	 *  场景里摆放的洗碗机（BP_Dishwasher 的 TotalPlates > 0）会覆盖这个数。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Plate")
+	int32 DefaultPlateCount = 5;
+
+	/** 自动补碟间隔（秒）。洗碗机模式下应关闭自动补碟（见 bAutoRegenPlates） */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Plate")
+	float PlateSpawnTime = 10.f;
+
+	/** 是否让盘子系统自动补碟。洗碗机闭环下必须 false（碟子只能靠玩家交还脏碟回收） */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Plate")
+	bool bAutoRegenPlates = false;
+
+	/** 把场景中洗碗机（BP_Dishwasher）上配置的 TotalPlates 应用到盘子系统，并把可用碟子补满到该总数。
+	 *  BeginPlay 与 InitPlateSystem 都会调用，保证"开局就有洗碗机设定好的碟子数"。 */
+	UFUNCTION(BlueprintCallable, Category = "Plate")
+	void ApplyDishwasherPlateConfig();
+
 	/** 每秒把当前时间与营业状态推给 HUD（白天/傍晚/打烊一目了然） */
 	UFUNCTION()
 	void RefreshClock();

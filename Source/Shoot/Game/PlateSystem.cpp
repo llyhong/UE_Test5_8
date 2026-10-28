@@ -45,7 +45,7 @@ void APlateSystem::InitParam(int PlateCount, float SpawnPlateTime)
 	TimeAccumulator = 0.0f;
 }
 
-void APlateSystem::SetTotalCount(int32 NewTotal)
+void APlateSystem::SetTotalCount(int32 NewTotal, bool bFillAvailable)
 {
 	TotalCount = FMath::Max(0, NewTotal);
 	// 当前可用数不能超过新的总数
@@ -53,6 +53,18 @@ void APlateSystem::SetTotalCount(int32 NewTotal)
 	{
 		CurOrderIndex = TotalCount;
 	}
+	// 开局初始化：所有碟子都是干净的，可用数直接补满到总数
+	if (bFillAvailable)
+	{
+		RefillToFull();
+	}
+}
+
+void APlateSystem::RefillToFull()
+{
+	CurOrderIndex = TotalCount;
+	TimeAccumulator = 0.0f;
+	UE_LOG(LogTemp, Log, TEXT("[PlateSystem] 碟子已补满：可用 %d / 总数 %d"), CurOrderIndex, TotalCount);
 }
 
 void APlateSystem::AddPlate()

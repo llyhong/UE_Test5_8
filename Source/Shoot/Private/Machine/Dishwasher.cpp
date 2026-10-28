@@ -43,13 +43,19 @@ void ADishwasher::BeginPlay()
 	InteractionSphere->OnComponentBeginOverlap.AddDynamic(this, &ADishwasher::OnInteractionOverlap);
 	InteractionSphere->OnComponentEndOverlap.AddDynamic(this, &ADishwasher::OnInteractionEndOverlap);
 
-	// 在本洗碗机上直接配置本关碟子总数（>0 时覆盖盘子系统已有配置）
+	// 在本洗碗机上直接配置本关碟子总数（>0 时覆盖盘子系统已有配置）。
+	// 第二个参数 bFillAvailable=true：开局所有碟子都是干净的，把"可用碟子数"补满到总数，
+	// 否则可用数还停留在系统默认值，烹饪机会误判"没有空闲碟子"而不出成品。
 	if (TotalPlates > 0)
 	{
 		if (APlateSystem* PS = FindPlateSystem())
 		{
-			PS->SetTotalCount(TotalPlates);
+			PS->SetTotalCount(TotalPlates, true);
 			UE_LOG(LogTemp, Log, TEXT("[Dishwasher] 配置本关碟子总数 = %d（当前可用 %d）"), TotalPlates, PS->CurOrderIndex);
+		}
+		else
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[Dishwasher] TotalPlates=%d 已配置，但 BeginPlay 时还没拿到盘子系统，稍后由 ABaseLevelBP 补上"), TotalPlates);
 		}
 	}
 }

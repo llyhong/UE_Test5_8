@@ -24,9 +24,15 @@ public:
 	UFUNCTION(BlueprintCallable)
 	void InitParam(int PlateCount,float SpawnPlateTime);
 
-	/** 设置本关碟子总数（洗碗机可配置）；并把当前可用碟子数钳制在总数内 */
+	/** 设置本关碟子总数（洗碗机可配置）；并把当前可用碟子数钳制在总数内。
+	 *  @param bFillAvailable true = 同时把"当前可用碟子数"补满到总数（开局初始化用：
+	 *        开局时所有碟子都是干净的，所以可用数 = 总数）。false = 仅改上限，不补碟子。 */
 	UFUNCTION(BlueprintCallable)
-	void SetTotalCount(int32 NewTotal);
+	void SetTotalCount(int32 NewTotal, bool bFillAvailable = false);
+
+	/** 把可用碟子数直接补满到总数（开局重置用） */
+	UFUNCTION(BlueprintCallable)
+	void RefillToFull();
 
 	/** 当前可用碟子数（= CurOrderIndex） */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Gameplay")

@@ -273,13 +273,25 @@ void ACookingMachine::SpawnCookedActor()
 	if (bConsumePlateOnFinish)
 	{
 		APlateSystem* PlateSys = FindPlateSystem();
-		if (!PlateSys || PlateSys->GetAvailablePlates() <= 0)
+		if (!PlateSys)
+		{
+			// 场景/关卡里根本没有盘子系统：视为"没有碟子限制"，正常出成品（不消耗碟子），
+			// 否则会因为缺少配置而永远无法出菜。只在每锅第一次打印警告便于排查。
+			if (!bNoPlateNotified)
+			{
+				bNoPlateNotified = true;
+				UE_LOG(LogTemp, Warning,
+					TEXT("[CookingMachine] 找不到盘子系统(APlateSystem) → 本次按[无碟子限制]出成品，不消耗碟子"));
+			}
+		}
+		else if (PlateSys->GetAvailablePlates() <= 0)
 		{
 			if (!bNoPlateNotified)
 			{
 				bNoPlateNotified = true;
 				UE_LOG(LogTemp, Warning,
-					TEXT("[CookingMachine] 没有空闲碟子，本次不出成品 → 走回原始逻辑（继续加热会煮糊）"));
+					TEXT("[CookingMachine] 没有空闲碟子（可用 %d/%d），本次不出成品 → 走回原始逻辑（继续加热会煮糊）"),
+					PlateSys->GetAvailablePlates(), PlateSys->TotalCount);
 				if (GEngine)
 				{
 					GEngine->AddOnScreenDebugMessage(-1, 4.f, FColor::Red,
