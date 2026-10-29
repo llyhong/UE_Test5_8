@@ -47,6 +47,11 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Gameplay")
 	TObjectPtr<UDataTable> MenueDataTable;
+
+	/** 物品信息表（RowStruct = FItemActorInfo，如 DT_ItemInfo）：食材图标 / 描述按 ItemID 从这里取。
+	 *  未配置时菜品成品图标仍可用（菜品表 MenuIcon），但食材图标取不到。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Gameplay")
+	TObjectPtr<UDataTable> ItemInfoTable = nullptr;
 	UPROPERTY(BlueprintReadOnly, Category = "Gameplay")
 	TObjectPtr<UFoodSystem> foodSystem;
 	UPROPERTY(BlueprintReadOnly, Category = "Gameplay")

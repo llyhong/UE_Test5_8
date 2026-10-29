@@ -27,25 +27,27 @@ struct FPlayerInfo
 
 };
 
+/**
+ * 订单（一单菜单）——只描述"这一单点了哪些菜"，不存任何可派生数值。
+ *
+ * FoodIDs 的每个元素 = 菜品表 MenuDataTable（FMenuData / 菜品行 RowName）的 FoodID，
+ * 不再是"食材 ItemID"；食材由菜品行 FMenuData::MenuItems 决定。
+ *
+ * 以下信息一律实时按菜品表派生，不再另存字段：
+ *   UOrderHandle::GetOrderPrice()        = 各菜品 FMenuData::Price 之和
+ *   UOrderHandle::GetOrderMaxWaitTime()  = 各菜品 FMenuData::MaxWaitTime 的最大值
+ *   UOrderHandle::GetOrderDisplayName()  = 各菜品 FMenuData::FoodName 拼接（多菜用 "+" 连接）
+ *   UOrderHandle::GetMachineImageIDs()   = 各菜品 FMenuData::MachineID 去重列表
+ */
 USTRUCT(BlueprintType)
 struct  FOrderData 
 {
 	GENERATED_BODY()
 public:
+	/** 本单包含的菜品 ID：每一项都是菜品表（MenuDataTable / FMenuData）的 FoodID。
+	 *  一般 1 道；自定义套餐（ULevelOrderCfg::Orders）可多道。 */
 	UPROPERTY(EditAnywhere,BlueprintReadWrite)
 	TArray<int32> FoodIDs;
-	UPROPERTY(EditAnywhere,BlueprintReadWrite)
-	FString SetName;
-	UPROPERTY(EditAnywhere,BlueprintReadWrite)
-	int Price;
-	UPROPERTY(EditAnywhere,BlueprintReadWrite)
-	float MaxWaitTime;
-	UPROPERTY(EditAnywhere,BlueprintReadWrite)
-	float Probabilitys;
-	UPROPERTY(EditAnywhere,BlueprintReadWrite)
-	int IamgeID;
-	UPROPERTY(EditAnywhere,BlueprintReadWrite)
-	TArray<int32> MachineImageID;
 };
 
 USTRUCT(BlueprintType)
@@ -82,6 +84,9 @@ class ULevelOrderCfg : public UDataAsset
 {
 	GENERATED_BODY()
 public:
+	/** 可选的"自定义套餐"：需要一单多道菜时才配（只填 FoodIDs，每项 = 菜品表的 FoodID）。
+	 *  留空则订单池完全由菜品表（MenuDataTable）里 Probabilitys>0 的菜品各成一单。
+	 *  价格 / 等待时间 / 套餐名 / 机器图片 / 权重一律由菜品表派生，不再在这里配置。 */
 	UPROPERTY(EditAnywhere,BlueprintReadWrite)
 	TArray<FOrderData> Orders;
 	UPROPERTY(EditAnywhere,BlueprintReadWrite)

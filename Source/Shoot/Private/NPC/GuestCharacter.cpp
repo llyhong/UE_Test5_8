@@ -183,7 +183,7 @@ float AGuestCharacter::GetOrderRemainSeconds() const
 		return -1.f;
 	}
 
-	const float MaxWait = CurrentOrder->OrderData.MaxWaitTime;
+	const float MaxWait = CurrentOrder->GetOrderMaxWaitTime();
 	if (MaxWait <= 0.f)
 	{
 		return -1.f;
@@ -619,7 +619,7 @@ bool AGuestCharacter::PlaceOrder()
 	CurrentOrder = OS->RequestOrderForGuest(this);
 	if (!CurrentOrder)
 	{
-		LogFail(TEXT("取不到订单（orderCfg 为空或 Orders 无配置）"));
+		LogFail(TEXT("取不到订单（订单池为空：检查菜品表 Probabilitys 是否 >0，或 LevelOrderCfg::Orders 自定义套餐）"));
 		return false;
 	}
 
@@ -648,8 +648,8 @@ bool AGuestCharacter::PlaceOrder()
 
 		const FString Msg = FString::Printf(
 			TEXT("[Guest] 客人 %s 点单 → 订单#%d 【%s】菜品[%s] 价格%d 等待%.0fs（%s）"),
-			*GetName(), CurrentOrder->orderId, *OrderData.SetName, *FoodList,
-			OrderData.Price, OrderData.MaxWaitTime, ModeText);
+			*GetName(), CurrentOrder->orderId, *CurrentOrder->GetOrderDisplayName(), *FoodList,
+			CurrentOrder->GetOrderPrice(), CurrentOrder->GetOrderMaxWaitTime(), ModeText);
 
 		if (GEngine)
 		{

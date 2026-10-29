@@ -111,7 +111,7 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chair|Order")
 	TArray<int32> BoundFoodIDs;
 
-	/** 绑定订单的套餐名（仅用于提示 / UI） */
+	/** 绑定订单的显示名（由菜品表 FoodName 拼接而来；仅用于提示 / UI） */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chair|Order")
 	FString BoundSetName;
 
@@ -132,11 +132,11 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Chair|Order")
 	TArray<int32> GetMenuFoodIDs() const;
 
-	/** 当前菜单的套餐名（取自订单的 SetName）；未点单时为空 */
+	/** 当前菜单的显示名（由菜品表 FoodName 拼接而来）；未点单时为空 */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Chair|Order")
 	FString GetMenuSetName() const;
 
-	/** 当前绑定到本座位的订单句柄（未点单时为 null，可用于取 IamgeID / 剩余时间等） */
+	/** 当前绑定到本座位的订单句柄（未点单时为 null，可用于取图标 / 剩余时间等） */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Chair|Order")
 	UOrderHandle* GetMenuOrder() const { return BoundOrder; }
 

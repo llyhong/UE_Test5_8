@@ -21,7 +21,11 @@ class UEconomySystem;
  * 若此时订单系统还没创建（关卡蓝图稍后才 InitOrderSystem），会在 Tick 中按间隔轮询直到绑定成功。
  *
  * 蓝图侧取订单展示数据：
- *   - Handle->GetOrderData()  -> FOrderData（SetName / FoodIDs / Price / MaxWaitTime / IamgeID ...）
+ *   - Handle->GetOrderData()  -> FOrderData（只有 FoodIDs，每项 = 菜品表的 FoodID）
+ *   - Handle->GetOrderPrice() -> 价格（实时按菜品表 FMenuData::Price 求和）
+ *   - Handle->GetOrderMaxWaitTime() -> 最长等待时间（实时取菜品表 MaxWaitTime 的最大值）
+ *   - Handle->GetOrderDisplayName() -> 显示名（菜品表 FoodName 拼接，多菜用 "+"）
+ *   - Handle->GetMachineImageIDs()  -> 需要的机器图片 ID（菜品表 MachineID）
  *   - Handle->GetPercent()    -> 剩余时间比例（1 = 刚下单，0 = 即将超时）
  */
 UCLASS()

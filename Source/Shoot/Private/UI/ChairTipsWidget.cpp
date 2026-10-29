@@ -11,6 +11,11 @@ void UChairTipsWidget::RefreshTips()
 {
 	// 事件驱动刷新时重置累积时间，避免紧接着又自动刷一次
 	RefreshAccum = 0.f;
+
+	// 菜单内容（菜品 / 桌况）真变了才让蓝图重建列表与图标
+	CheckMenuContentChanged();
+
+	// 全量刷新：状态 / 进度（蓝图建议不再在这里重建菜单）
 	OnTipsRefreshed();
 }
 
@@ -28,8 +33,39 @@ void UChairTipsWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime
 	if (RefreshAccum >= AutoRefreshInterval)
 	{
 		RefreshAccum = 0.f;
-		OnTipsRefreshed();
+
+		// 周期刷新只推进度条 / 倒计时；只有内容真的变了才顺带让蓝图重建菜单
+		CheckMenuContentChanged();
+		OnTipsTick();
 	}
+}
+
+int32 UChairTipsWidget::GetMenuSignature() const
+{
+	// 桌况 + 菜品 ID 序列（含顺序与重复次数）决定菜单内容是否变化
+	uint32 Hash = ::GetTypeHash(static_cast<uint8>(GetSeatState()));
+	for (const int32 FoodID : GetFoodIDs())
+	{
+		Hash = HashCombine(Hash, ::GetTypeHash(FoodID));
+	}
+	return static_cast<int32>(Hash);
+}
+
+void UChairTipsWidget::InvalidateMenuCache()
+{
+	bMenuCacheValid = false;
+}
+
+void UChairTipsWidget::CheckMenuContentChanged()
+{
+	const int32 NewSignature = GetMenuSignature();
+	if (bMenuCacheValid && CachedMenuSignature == NewSignature)
+	{
+		return;
+	}
+
+	RebuildMenuCache(NewSignature);
+	OnMenuContentChanged();
 }
 
 EChairTipsState UChairTipsWidget::GetSeatState() const
@@ -85,7 +121,7 @@ TArray<int32> UChairTipsWidget::GetFoodIDs() const
 	return OwnerSeat->BoundFoodIDs.Num() > 0 ? OwnerSeat->BoundFoodIDs : GetOrderData().FoodIDs;
 }
 
-TArray<FChairMenuEntry> UChairTipsWidget::GetMenuEntries() const
+void UChairTipsWidget::RebuildMenuCache(int32 NewSignature) const
 {
 	TArray<FChairMenuEntry> Entries;
 	for (int32 FoodID : GetFoodIDs())
@@ -99,6 +135,12 @@ TArray<FChairMenuEntry> UChairTipsWidget::GetMenuEntries() const
 			Found->FoodID = FoodID;
 			Found->FoodName = GetFoodName(FoodID);
 			Found->Icon = GetFoodIcon(FoodID);
+			// 逐个食材的图标：ItemIDs 与 ItemIcons 一一对应（键与 MenuItems 的 ItemID 相同）
+			Found->ItemIDs = GetFoodItemIDs(FoodID);
+			for (int32 ItemID : Found->ItemIDs)
+			{
+				Found->ItemIcons.Add(GetFoodItemIcon(FoodID, ItemID));
+			}
 		}
 		Found->Count++;
 	}
@@ -110,7 +152,21 @@ TArray<FChairMenuEntry> UChairTipsWidget::GetMenuEntries() const
 			? FText::FromString(FString::Printf(TEXT("%s x%d"), *Entry.FoodName, Entry.Count))
 			: FText::FromString(Entry.FoodName);
 	}
-	return Entries;
+
+	CachedMenuEntries = MoveTemp(Entries);
+	CachedMenuSignature = NewSignature;
+	bMenuCacheValid = true;
+}
+
+TArray<FChairMenuEntry> UChairTipsWidget::GetMenuEntries() const
+{
+	// 签名没变就直接复用缓存：高频刷新时不会重复查菜品表 / 取图标
+	const int32 Signature = GetMenuSignature();
+	if (!bMenuCacheValid || CachedMenuSignature != Signature)
+	{
+		RebuildMenuCache(Signature);
+	}
+	return CachedMenuEntries;
 }
 
 FString UChairTipsWidget::GetSetName() const
@@ -119,12 +175,12 @@ FString UChairTipsWidget::GetSetName() const
 	{
 		return OwnerSeat->BoundSetName;
 	}
-	return GetOrderData().SetName;
+	return GetOrderHandle() ? GetOrderHandle()->GetOrderDisplayName() : FString();
 }
 
 int32 UChairTipsWidget::GetOrderPrice() const
 {
-	return GetOrderData().Price;
+	return GetOrderHandle() ? GetOrderHandle()->GetOrderPrice() : 0;
 }
 
 float UChairTipsWidget::GetRemainPercent() const
@@ -140,17 +196,18 @@ float UChairTipsWidget::GetRemainSeconds() const
 	{
 		return 0.f;
 	}
-	return FMath::Max(0.f, Handle->OrderData.MaxWaitTime - Handle->waitTime);
+	return FMath::Max(0.f, Handle->GetOrderMaxWaitTime() - Handle->waitTime);
 }
 
-int32 UChairTipsWidget::GetOrderImageID() const
+UTexture2D* UChairTipsWidget::GetOrderIcon() const
 {
-	return GetOrderData().IamgeID;
+	const TArray<int32> FoodIDs = GetFoodIDs();
+	return FoodIDs.Num() > 0 ? GetFoodIcon(FoodIDs[0]) : nullptr;
 }
 
 TArray<int32> UChairTipsWidget::GetMachineImageIDs() const
 {
-	return GetOrderData().MachineImageID;
+	return GetOrderHandle() ? GetOrderHandle()->GetMachineImageIDs() : TArray<int32>();
 }
 
 FString UChairTipsWidget::GetFoodName(int32 FoodID) const
@@ -191,6 +248,42 @@ UTexture2D* UChairTipsWidget::GetFoodIcon(int32 FoodID) const
 		}
 	}
 	return nullptr;
+}
+
+UTexture2D* UChairTipsWidget::GetFoodItemIcon(int32 FoodID, int32 ItemID) const
+{
+	if (FoodID >= 0)
+	{
+		if (const UWorld* World = GetWorld())
+		{
+			if (UBaseGameInstance* GI = Cast<UBaseGameInstance>(World->GetGameInstance()))
+			{
+				if (GI->foodSystem)
+				{
+					return GI->foodSystem->GetFoodItemIcon(FoodID, ItemID);
+				}
+			}
+		}
+	}
+	return nullptr;
+}
+
+TArray<int32> UChairTipsWidget::GetFoodItemIDs(int32 FoodID) const
+{
+	if (FoodID >= 0)
+	{
+		if (const UWorld* World = GetWorld())
+		{
+			if (UBaseGameInstance* GI = Cast<UBaseGameInstance>(World->GetGameInstance()))
+			{
+				if (GI->foodSystem)
+				{
+					return GI->foodSystem->GetFoodItemIDs(FoodID);
+				}
+			}
+		}
+	}
+	return TArray<int32>();
 }
 
 AItemActor* UChairTipsWidget::GetPlateOnSeat() const

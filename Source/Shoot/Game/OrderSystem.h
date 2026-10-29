@@ -28,9 +28,38 @@ public:
 	UFUNCTION(BlueprintCallable)
 	void Reset();
 
-	/** 订单展示数据（副本，蓝图用本函数取） */
+	/** 订单展示数据（副本，蓝图用本函数取；不含 Price / MaxWaitTime，见下方两个查询函数） */
 	UFUNCTION(BlueprintPure, Category = "Order")
 	FOrderData GetOrderData() const;
+
+	/** 订单价格：实时按菜品表（FMenuData::Price）求和，单一数据源，不存在副本不同步问题 */
+	UFUNCTION(BlueprintPure, Category = "Order")
+	int32 GetOrderPrice() const;
+
+	/** 最长等待时间（秒）：实时按菜品表（FMenuData::MaxWaitTime）取最大 */
+	UFUNCTION(BlueprintPure, Category = "Order")
+	float GetOrderMaxWaitTime() const;
+
+	/** 订单显示名：实时取自菜品表的 FoodName；多道菜用 "+" 连接（如“番茄炒蛋+米饭”） */
+	UFUNCTION(BlueprintPure, Category = "Order")
+	FString GetOrderDisplayName() const;
+
+	/** 本单需要的机器图片 ID（实时取各菜品的 FMenuData::MachineID，>0 且去重） */
+	UFUNCTION(BlueprintPure, Category = "Order")
+	TArray<int32> GetMachineImageIDs() const;
+
+	/** 强制重新汇总价格 / 等待时间 / 显示名 / 机器：换了订单内容或菜品表后调用 */
+	UFUNCTION(BlueprintCallable, Category = "Order")
+	void RefreshOrderStats();
+
+private:
+	/** 汇总结果缓存：Tick 里每帧都要读等待时间，避免每次都遍历菜品表 */
+	mutable int32 CachedPrice = 0;
+	mutable float CachedMaxWaitTime = 0.f;
+	mutable FString CachedDisplayName;
+	mutable TArray<int32> CachedMachineImageIDs;
+	mutable bool bStatsCached = false;
+	void EnsureStatsCached() const;
 };
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOrderEvent2,const UOrderHandle*, Handle,const FOrderData&,Order); 
@@ -87,6 +116,20 @@ public:
 	/** 是否仍按 AppearTimes 定时自动生成订单。关闭后订单只在客人点餐时产生 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Order")
 	bool bAutoGenerateByTime = false;
+
+	/** 订单池：只存"点了哪几道菜"（FoodIDs = MenuDataTable 的 FoodID）。
+	 *  价格 / 等待时间 / 显示名 / 机器图片由 UOrderHandle 的查询函数实时按菜品表（FMenuData）派生。
+	 *  权重（OrderWeights）来自菜品表的 Probabilitys。 */
+	UPROPERTY(BlueprintReadOnly, Category = "Order")
+	TArray<FOrderData> OrderPool;
+
+	/** 与 OrderPool 一一对应的随机权重（取自菜品 FMenuData::Probabilitys） */
+	UPROPERTY(BlueprintReadOnly, Category = "Order")
+	TArray<float> OrderWeights;
+
+	/** 重建订单池（InitCfg 自动调用一次；运行时换了菜单表也可手动调用刷新） */
+	UFUNCTION(BlueprintCallable, Category = "Order")
+	void RebuildOrderPool();
 	UPROPERTY(BlueprintReadOnly, Category = "Gameplay")
 	TObjectPtr<ULevelOrderCfg> orderCfg;
 	UPROPERTY(BlueprintReadOnly, Category = "Gameplay")

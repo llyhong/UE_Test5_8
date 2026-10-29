@@ -5,6 +5,8 @@
 
 #include "BaseGameInstance.h"
 #include "NPC/GuestCharacter.h"
+#include "Game/FoodSystem.h"
+#include "Data/MenuData.h"
 
 // Sets default values
 AOrderSystem::AOrderSystem()
@@ -49,9 +51,10 @@ void AOrderSystem::Tick(float DeltaTime)
 			}
 
 			orderHandle->waitTime += DeltaTime;
-			if (orderHandle->waitTime >= orderHandle->OrderData.MaxWaitTime)
+			const float MaxWait = orderHandle->GetOrderMaxWaitTime();
+			if (MaxWait > 0.f && orderHandle->waitTime >= MaxWait)
 			{
-				ABaseLevelBP::AddScore(this, -orderHandle->OrderData.Price);
+				ABaseLevelBP::AddScore(this, -orderHandle->GetOrderPrice());
 				OnFailOrder.Broadcast(orderHandle, orderHandle->OrderData);
 				GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, TEXT("订单超时"));
 
@@ -83,15 +86,19 @@ void AOrderSystem::Tick(float DeltaTime)
 				auto nextOrder = orderCfg->AppearTimes[CurOrderIndex];
 				if (CurTime >= nextOrder.AppearTime && waitList.Num() < orderCfg->MaxWaitOrderNum)
 				{
-					FOrderData* data = &orderCfg->Orders[nextOrder.AppearOrderID];
-					UOrderHandle* orderHandle = NewObject<UOrderHandle>(this);
-					orderHandle->orderId = OrderID;
-					OrderID++;
-					orderHandle->OrderData = *data;
-					orderHandle->waitTime = 0;
-					waitList.Add(orderHandle);
-					OnStartOrder.Broadcast(orderHandle, orderHandle->OrderData);
-					CurOrderIndex++;
+					// 定时生成的订单同样从"按菜品表构建的订单池"里随机取（不再按 AppearOrderID 索引 Orders）
+					if (FOrderData* data = GetRandomOrder())
+					{
+						UOrderHandle* orderHandle = NewObject<UOrderHandle>(this);
+						orderHandle->orderId = OrderID;
+						OrderID++;
+						orderHandle->OrderData = *data;
+						orderHandle->waitTime = 0;
+						orderHandle->RefreshOrderStats();
+						waitList.Add(orderHandle);
+						OnStartOrder.Broadcast(orderHandle, orderHandle->OrderData);
+						CurOrderIndex++;
+					}
 				}
 			}
 		}
@@ -102,9 +109,141 @@ void AOrderSystem::Tick(float DeltaTime)
 void AOrderSystem::InitCfg(ULevelOrderCfg* cfg)
 {
 	orderCfg = cfg;
-	waitList.Empty(orderCfg->Orders.Num());
+	waitList.Empty(orderCfg ? orderCfg->Orders.Num() : 0);
 	CurOrderIndex = 0;
 	OrderID = 0;
+
+	// 订单池改为按菜品表（MenuDataTable / FMenuData）构建
+	RebuildOrderPool();
+}
+
+void AOrderSystem::RebuildOrderPool()
+{
+	OrderPool.Reset();
+	OrderWeights.Reset();
+
+	UBaseGameInstance* GI = GetWorld() ? Cast<UBaseGameInstance>(GetWorld()->GetGameInstance()) : nullptr;
+	UFoodSystem* FS = GI ? GI->foodSystem : nullptr;
+	if (!FS)
+	{
+		UE_LOG(LogTemp, Error, TEXT("[OrderSystem] 构建订单池失败：找不到 UFoodSystem（GameInstance->foodSystem 为空）"));
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 8.f, FColor::Red,
+				TEXT("[订单] 构建订单池失败：GameInstance->foodSystem 为空（请检查 MenuDataTable 配置）"));
+		}
+		return;
+	}
+
+	// 价格 / 等待时间不再写进订单（FOrderData 只留"点了什么"），这里只做数据体检
+	int32 BadPrice = 0;
+	int32 BadWait = 0;
+
+	// 订单里只存 FoodIDs（菜品表 FoodID），其余信息（价格/等待/菜名/机器）全部由菜品表派生
+	auto BuildOrder = [FS, &BadPrice, &BadWait](const TArray<int32>& FoodIDs) -> FOrderData
+	{
+		FOrderData Data;
+		Data.FoodIDs = FoodIDs;
+
+		int32 TotalPrice = 0;
+		float MaxWait = 0.f;
+		for (const int32 FoodID : FoodIDs)
+		{
+			const FMenuData Menu = FS->GetMenuData(FoodID);
+			if (Menu.FoodID < 0)
+			{
+				continue;
+			}
+			TotalPrice += Menu.Price;
+			MaxWait = FMath::Max(MaxWait, Menu.MaxWaitTime);
+		}
+
+		if (TotalPrice <= 0)
+		{
+			BadPrice++;
+		}
+		if (MaxWait <= 0.f)
+		{
+			BadWait++;
+		}
+		return Data;
+	};
+
+	// 权重：自定义套餐取各菜品 Probabilitys 的平均值
+	auto WeightOf = [FS](const TArray<int32>& FoodIDs) -> float
+	{
+		float Sum = 0.f;
+		int32 Count = 0;
+		for (const int32 FoodID : FoodIDs)
+		{
+			const FMenuData Menu = FS->GetMenuData(FoodID);
+			if (Menu.FoodID < 0)
+			{
+				continue;
+			}
+			Sum += FMath::Max(Menu.Probabilitys, 0.f);
+			Count++;
+		}
+		return Count > 0 ? Sum / static_cast<float>(Count) : 0.f;
+	};
+
+	// 1) 关卡里配置的自定义套餐（一单多道菜）：只取 FoodIDs，其余全部由菜品表派生
+	if (orderCfg)
+	{
+		for (const FOrderData& Custom : orderCfg->Orders)
+		{
+			if (Custom.FoodIDs.Num() == 0)
+			{
+				continue;
+			}
+			OrderPool.Add(BuildOrder(Custom.FoodIDs));
+			OrderWeights.Add(WeightOf(Custom.FoodIDs));
+		}
+	}
+
+	// 2) 菜品表里每道 Probabilitys>0 的菜各成一单
+	for (const int32 FoodID : FS->GetFoodIDsByMachine(0))
+	{
+		const FMenuData Menu = FS->GetMenuData(FoodID);
+		if (Menu.FoodID < 0 || Menu.Probabilitys <= 0.f)
+		{
+			continue;
+		}
+
+		TArray<int32> FoodIDs;
+		FoodIDs.Add(FoodID);
+		OrderPool.Add(BuildOrder(FoodIDs));
+		OrderWeights.Add(FMath::Max(Menu.Probabilitys, 0.f));
+	}
+
+	// 菜单表可能刚变过：让在制订单按新表重算价格 / 等待时间
+	for (UOrderHandle* Handle : waitList)
+	{
+		if (Handle)
+		{
+			Handle->RefreshOrderStats();
+		}
+	}
+
+	if (OrderPool.Num() == 0)
+	{
+		UE_LOG(LogTemp, Error, TEXT("[OrderSystem] 订单池为空：菜品表里没有 Probabilitys>0 的菜，也没有自定义套餐（ULevelOrderCfg::Orders）"));
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 8.f, FColor::Red,
+				TEXT("[订单] 订单池为空！请在 MenuDataTable 给菜品配 Probabilitys>0"));
+		}
+	}
+	else
+	{
+		UE_LOG(LogTemp, Log, TEXT("[OrderSystem] 订单池已按菜品表构建：%d 条（含自定义套餐 %d 条）"),
+			OrderPool.Num(), orderCfg ? orderCfg->Orders.Num() : 0);
+		if (BadPrice > 0 || BadWait > 0)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[OrderSystem] 订单池里有 %d 条价格<=0、%d 条等待时间<=0（请在 MenuDataTable 给菜品配 Price / MaxWaitTime）"),
+				BadPrice, BadWait);
+		}
+	}
 }
 void AOrderSystem::StartSystem()
 {
@@ -129,33 +268,38 @@ void AOrderSystem::ClearAllOrders()
 
 FOrderData* AOrderSystem::GetRandomOrder()
 {
-	if (!orderCfg || orderCfg->Orders.Num() == 0)
+	// 池为空时兜底重建一次（例如菜单表比订单系统晚初始化）
+	if (OrderPool.Num() == 0)
 	{
-		return nullptr;
+		RebuildOrderPool();
+		if (OrderPool.Num() == 0)
+		{
+			return nullptr;
+		}
 	}
 
-	// 优先按 Probabilitys 加权随机；全为 0（或负）时退化为均匀随机
+	// 优先按菜品表里的 Probabilitys 加权随机；全为 0（或负）时退化为均匀随机
 	float TotalWeight = 0.f;
-	for (const FOrderData& O : orderCfg->Orders)
+	for (const float W : OrderWeights)
 	{
-		TotalWeight += FMath::Max(O.Probabilitys, 0.f);
+		TotalWeight += FMath::Max(W, 0.f);
 	}
 
 	if (TotalWeight <= 0.f)
 	{
-		return &orderCfg->Orders[FMath::RandRange(0, orderCfg->Orders.Num() - 1)];
+		return &OrderPool[FMath::RandRange(0, OrderPool.Num() - 1)];
 	}
 
 	float R = FMath::FRandRange(0.f, TotalWeight);
-	for (FOrderData& O : orderCfg->Orders)
+	for (int32 i = 0; i < OrderPool.Num(); ++i)
 	{
-		R -= FMath::Max(O.Probabilitys, 0.f);
+		R -= FMath::Max(OrderWeights.IsValidIndex(i) ? OrderWeights[i] : 0.f, 0.f);
 		if (R <= 0.f)
 		{
-			return &O;
+			return &OrderPool[i];
 		}
 	}
-	return &orderCfg->Orders.Last();
+	return &OrderPool.Last();
 }
 
 UOrderHandle* AOrderSystem::RequestOrderForGuest(AGuestCharacter* Guest)
@@ -178,13 +322,14 @@ UOrderHandle* AOrderSystem::RequestOrderForGuest(AGuestCharacter* Guest)
 	orderHandle->OrderData = *data;
 	orderHandle->waitTime = 0.f;
 	orderHandle->Guest = Guest;
+	orderHandle->RefreshOrderStats();
 
 	waitList.Add(orderHandle);
 	OnStartOrder.Broadcast(orderHandle, orderHandle->OrderData);
 
 	// 屏幕提示由客人侧（AGuestCharacter::PlaceOrder）统一打印，这里只留日志避免重复刷屏
 	UE_LOG(LogTemp, Log, TEXT("[OrderSystem] 客人 %s 点餐：%s（等待 %.0fs）"),
-		*Guest->GetName(), *data->SetName, data->MaxWaitTime);
+		*Guest->GetName(), *orderHandle->GetOrderDisplayName(), orderHandle->GetOrderMaxWaitTime());
 
 	return orderHandle;
 }
@@ -267,11 +412,10 @@ bool AOrderSystem::PushFoods(const TArray<int>& FoodIDs)
 	}
 
 	// 3. 完成该订单
-	const FOrderData& order = BestHandle->OrderData;
 	// 先取出绑定客人，避免移除句柄后访问
 	AGuestCharacter* OrderedGuest = BestHandle->Guest;
 
-	ABaseLevelBP::AddScore(this, order.Price);
+	ABaseLevelBP::AddScore(this, BestHandle->GetOrderPrice());
 	OnFinishOrder.Broadcast(BestHandle, BestHandle->OrderData);
 	waitList.Remove(BestHandle);
 	GEngine->AddOnScreenDebugMessage(-1, 2, FColor::Red, TEXT("完成订单(优先最短剩余时间)"));
@@ -353,10 +497,9 @@ bool AOrderSystem::PushFoodsForGuest(const TArray<int>& FoodIDs, AGuestCharacter
 	}
 
 	// 3. 完成该订单
-	const FOrderData& order = BestHandle->OrderData;
 	AGuestCharacter* OrderedGuest = BestHandle->Guest;
 
-	ABaseLevelBP::AddScore(this, order.Price);
+	ABaseLevelBP::AddScore(this, BestHandle->GetOrderPrice());
 	OnFinishOrder.Broadcast(BestHandle, BestHandle->OrderData);
 	waitList.Remove(BestHandle);
 	GEngine->AddOnScreenDebugMessage(-1, 2, FColor::Red, TEXT("完成订单(针对性上菜)"));
@@ -372,12 +515,103 @@ bool AOrderSystem::PushFoodsForGuest(const TArray<int>& FoodIDs, AGuestCharacter
 
 float UOrderHandle::GetPercent()
 {
-	// 按值保存后无需判空；MaxWaitTime 为 0 时避免除零（返回 1 表示“刚下单”）
-	if (OrderData.MaxWaitTime > 0.f)
+	// 按值保存后无需判空；等待时间为 0 时避免除零（返回 1 表示“刚下单”）
+	const float MaxWait = GetOrderMaxWaitTime();
+	if (MaxWait > 0.f)
 	{
-		return 1.f - waitTime / OrderData.MaxWaitTime;
+		return 1.f - waitTime / MaxWait;
 	}
 	return 1.f;
+}
+
+/** 句柄的 Outer 是 AOrderSystem（Actor），可由此拿到 World -> GameInstance -> FoodSystem */
+static UFoodSystem* GetFoodSystemForHandle(const UOrderHandle* Handle)
+{
+	UWorld* World = Handle ? Handle->GetWorld() : nullptr;
+	if (!World)
+	{
+		// 兜底：UObject::GetWorld 未解析出世界时，直接沿 Outer 找到订单系统所在世界
+		const AOrderSystem* OS = Handle ? Cast<AOrderSystem>(Handle->GetOuter()) : nullptr;
+		World = OS ? OS->GetWorld() : nullptr;
+	}
+
+	UBaseGameInstance* GI = World ? Cast<UBaseGameInstance>(World->GetGameInstance()) : nullptr;
+	return GI ? GI->foodSystem : nullptr;
+}
+
+void UOrderHandle::EnsureStatsCached() const
+{
+	if (bStatsCached)
+	{
+		return;
+	}
+
+	CachedPrice = 0;
+	CachedMaxWaitTime = 0.f;
+	CachedDisplayName.Reset();
+	CachedMachineImageIDs.Reset();
+
+	if (UFoodSystem* FS = GetFoodSystemForHandle(this))
+	{
+		for (const int32 FoodID : OrderData.FoodIDs)
+		{
+			const FMenuData Menu = FS->GetMenuData(FoodID);
+			if (Menu.FoodID < 0)
+			{
+				continue;
+			}
+			CachedPrice += Menu.Price;
+			CachedMaxWaitTime = FMath::Max(CachedMaxWaitTime, Menu.MaxWaitTime);
+
+			// 需要的机器（MachineID>0 才记，去重）
+			if (Menu.MachineID > 0)
+			{
+				CachedMachineImageIDs.AddUnique(Menu.MachineID);
+			}
+
+			// 显示名：多道菜用 "+" 连接（如“番茄炒蛋+米饭”）
+			if (!Menu.FoodName.IsEmpty())
+			{
+				if (!CachedDisplayName.IsEmpty())
+				{
+					CachedDisplayName += TEXT("+");
+				}
+				CachedDisplayName += Menu.FoodName;
+			}
+		}
+	}
+
+	bStatsCached = true;
+}
+
+int32 UOrderHandle::GetOrderPrice() const
+{
+	EnsureStatsCached();
+	return CachedPrice;
+}
+
+float UOrderHandle::GetOrderMaxWaitTime() const
+{
+	EnsureStatsCached();
+	return CachedMaxWaitTime;
+}
+
+FString UOrderHandle::GetOrderDisplayName() const
+{
+	EnsureStatsCached();
+	return CachedDisplayName;
+}
+
+TArray<int32> UOrderHandle::GetMachineImageIDs() const
+{
+	EnsureStatsCached();
+	return CachedMachineImageIDs;
+}
+
+void UOrderHandle::RefreshOrderStats()
+{
+	bStatsCached = false;
+	EnsureStatsCached();
 }
 
 void UOrderHandle::Reset()

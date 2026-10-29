@@ -226,9 +226,19 @@ int32 AItemActor::GetItemID() const
 {
 	if (const FItemActorInfo* Row = ItemInfoRow.GetRow<FItemActorInfo>(TEXT("ItemActor::GetItemID")))
 	{
-		return Row->ItemID;
+		// 以数据表行名为准（行名为纯数字即 ItemID），行名不是数字时才退回行内 ItemID 字段
+		return Row->ResolveItemID(ItemInfoRow.RowName);
 	}
 	return -1;
+}
+
+UTexture2D* AItemActor::GetItemIcon() const
+{
+	if (const FItemActorInfo* Row = ItemInfoRow.GetRow<FItemActorInfo>(TEXT("ItemActor::GetItemIcon")))
+	{
+		return Row->Icon;
+	}
+	return nullptr;
 }
 
 void AItemActor::EndPlay(const EEndPlayReason::Type EndPlayReason)

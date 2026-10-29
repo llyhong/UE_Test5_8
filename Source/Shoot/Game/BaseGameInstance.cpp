@@ -11,6 +11,7 @@ void UBaseGameInstance::Init()
 {
 	foodSystem = NewObject<UFoodSystem>(this);
 	foodSystem->InitMenuData(MenueDataTable);
+	foodSystem->InitItemInfoTable(ItemInfoTable);
 	economySystem = NewObject<UEconomySystem>(this);
 	economySystem->ConfigTable = EconomyConfigTable;
 	economySystem->ConfigRowName = EconomyConfigRowName;

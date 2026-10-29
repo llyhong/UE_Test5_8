@@ -12,6 +12,7 @@ class USphereComponent;
 class ABaseFoodActor;
 class AChairSeat;
 class AShootCharacter;
+class UTexture2D;
 
 UENUM(BlueprintType)
 enum class EItemState : uint8
@@ -88,10 +89,14 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Item")
 	FORCEINLINE int32 GetMenuFoodID() const { return MenuFoodID; }
 
-	/** 读取物品 ID（取自 ItemInfoRow / DT_ItemInfo 的 ItemID）；未配置或取不到返回 -1。
+	/** 读取物品 ID（取自数据表行名 RowName；行名不是数字时退回行内 ItemID 字段）；未配置或取不到返回 -1。
 	 *  研究炉按此 ID 匹配研究配方。 */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Item")
 	int32 GetItemID() const;
+
+	/** 读取物品图标（取自 ItemInfoRow / DT_ItemInfo 的 Icon）；未配置返回 null */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Item")
+	UTexture2D* GetItemIcon() const;
 
 	UFUNCTION(BlueprintCallable, Category="Item")
 	FORCEINLINE void SetMenuFoodID(int32 InID) { MenuFoodID = InID; }

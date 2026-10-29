@@ -203,9 +203,9 @@ void AChairSeat::BindOrder(UOrderHandle* Order)
 	if (Order)
 	{
 		// 订单数据按值拷贝，蓝图不用解析订单对象也能显示菜单
-		const FOrderData Data = Order->GetOrderData();
-		BoundFoodIDs = Data.FoodIDs;
-		BoundSetName = Data.SetName;
+		BoundFoodIDs = Order->GetOrderData().FoodIDs;
+		// 展示名由菜品表（FMenuData::FoodName）拼接而来，订单里不再单独存 SetName
+		BoundSetName = Order->GetOrderDisplayName();
 
 		SeatMessage(FString::Printf(TEXT("[餐桌] %s 已绑定订单#%d【%s】菜品[%s]"),
 			*GetName(), Order->orderId, *BoundSetName, *JoinFoodIDs(BoundFoodIDs)), FColor::Cyan);
@@ -250,7 +250,7 @@ FString AChairSeat::GetMenuSetName() const
 	}
 
 	// 兜底：直接从绑定的订单取（如蓝图手动绑了订单但没走 BindOrder）
-	return BoundOrder ? BoundOrder->GetOrderData().SetName : FString();
+	return BoundOrder ? BoundOrder->GetOrderDisplayName() : FString();
 }
 
 bool AChairSeat::AreFoodIDsMatching(const TArray<int32>& A, const TArray<int32>& B)
