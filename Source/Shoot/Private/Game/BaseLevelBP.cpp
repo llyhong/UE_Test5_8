@@ -645,7 +645,8 @@ void ABaseLevelBP::BeginLevelTransition(int32 NewLevelID)
 		{
 			if (Seat->bIsOccupied)
 			{
-				Seat->Release();
+				// 强制释放：收尾时桌面上残留的碟子（含未收走的空碟）也一并清掉，避免带到下一关
+				Seat->ForceRelease();
 			}
 		}
 	}

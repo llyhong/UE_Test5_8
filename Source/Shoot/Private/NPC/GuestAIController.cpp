@@ -2,6 +2,7 @@
 
 #include "NPC/GuestAIController.h"
 #include "NPC/GuestCharacter.h"
+#include "NPC/ChairSeat.h"
 #include "TimerManager.h"
 #include "Navigation/PathFollowingComponent.h"
 #include "NavigationSystem.h"
@@ -115,7 +116,24 @@ void AGuestAIController::MoveToSeatActor(AActor* Target, AGuestCharacter* Guest)
 	}
 	SeatMoveRetryCount = 0;
 
-	AttemptMoveToSeat(Target, Guest);
+	AttemptMoveToSeat(Target, ResolveSeatLocation(Target), Guest);
+}
+
+FVector AGuestAIController::ResolveSeatLocation(AActor* Target)
+{
+	if (!Target)
+	{
+		return FVector::ZeroVector;
+	}
+
+	// 餐桌：客人要到 SitSocket 挂点坐下（挂点可在蓝图/关卡实例里自由拖动）
+	if (const AChairSeat* Seat = Cast<AChairSeat>(Target))
+	{
+		return Seat->GetSitTransform().GetLocation();
+	}
+
+	// 其它 Actor：退回自身位置
+	return Target->GetActorLocation();
 }
 
 void AGuestAIController::BeginWander(const FVector& Center, float Radius, float PauseMin, float PauseMax)
@@ -240,15 +258,15 @@ void AGuestAIController::WanderToNextPoint()
 	World->GetTimerManager().SetTimer(WanderCheckTimerHandle, CheckDelegate, 0.2f, true);
 }
 
-bool AGuestAIController::AttemptMoveToSeat(AActor* Target, AGuestCharacter* Guest)
+bool AGuestAIController::AttemptMoveToSeat(AActor* Target, const FVector& SeatLocation, AGuestCharacter* Guest)
 {
 	if (!Target || !Guest || !Guest->IsValidLowLevel()) return false;
 
-	// 座位 Actor 的位置可能本身不落在 NavMesh 上（例如被椅子/桌子的碰撞"挖空"）。
+	// 入座挂点（SitSocket）可能本身不落在 NavMesh 上（例如被椅子/桌子的碰撞"挖空"）。
 	// 因此用 MoveToLocation 并把 bProjectDestinationToNavigation 设为 true：
-	// 引擎会先把终点投影到最近的可导航点再寻路，到达后由轮询触发 SitDown 吸附到座位。
+	// 引擎会先把终点投影到最近的可导航点再寻路，到达后由轮询触发 SitDown 吸附到挂点。
 	const EPathFollowingRequestResult::Type MoveResult =
-		MoveToLocation(Target->GetActorLocation(), 5.0f, true, true, true, false, nullptr, true);
+		MoveToLocation(SeatLocation, 5.0f, true, true, true, false, nullptr, true);
 
 	if (bShowDebugInfo && GEngine)
 	{
@@ -267,7 +285,7 @@ bool AGuestAIController::AttemptMoveToSeat(AActor* Target, AGuestCharacter* Gues
 	{
 		GetWorld()->GetTimerManager().ClearTimer(ArriveCheckTimerHandle);
 
-		FTimerDelegate TickDelegate = FTimerDelegate::CreateWeakLambda(this, [this, Guest, Target]()
+		FTimerDelegate TickDelegate = FTimerDelegate::CreateWeakLambda(this, [this, Guest, Target, SeatLocation]()
 		{
 			// 双保险：控制器或 World 已失效（如入座途中客人/控制器被销毁）时直接退出，避免悬垂指针崩溃
 			if (!IsValid(this) || !GetWorld())
@@ -279,7 +297,8 @@ bool AGuestAIController::AttemptMoveToSeat(AActor* Target, AGuestCharacter* Gues
 				GetWorld()->GetTimerManager().ClearTimer(ArriveCheckTimerHandle);
 				return;
 			}
-			const float Dist = FVector::Dist(Guest->GetActorLocation(), Target->GetActorLocation());
+			// 用 2D 距离：入座挂点通常在凳子上方，带上高度差会把“已到跟前”误判成未到达
+			const float Dist = FVector::Dist2D(Guest->GetActorLocation(), SeatLocation);
 			// 轮询打印当前距离（青色，0.25s 短显，避免刷屏）
 			if (bShowDebugInfo && GEngine)
 			{
@@ -326,7 +345,7 @@ bool AGuestAIController::AttemptMoveToSeat(AActor* Target, AGuestCharacter* Gues
 		UNavigationSystemV1* NavSys = UNavigationSystemV1::GetCurrent(GetWorld());
 		APawn* MyPawn = GetPawn();
 		const FVector StartLoc = MyPawn ? MyPawn->GetActorLocation() : FVector::ZeroVector;
-		const FVector GoalLoc = Target->GetActorLocation();
+		const FVector GoalLoc = SeatLocation;
 
 		// 用小范围投影："点本身"是否真的落在 NavMesh 上（范围过大容易把附近网格误报成"在网格上"）
 		const FVector SmallExtent(50.f, 50.f, 100.f);
@@ -374,7 +393,7 @@ bool AGuestAIController::AttemptMoveToSeat(AActor* Target, AGuestCharacter* Gues
 				GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Orange,
 					FString::Printf(TEXT("[AI] %s 座位寻路重试第 %d/%d 次"), *GetName(), AttemptNo, MaxSeatMoveRetries));
 			}
-			AttemptMoveToSeat(WeakTarget.Get(), WeakGuest.Get());
+			AttemptMoveToSeat(WeakTarget.Get(), ResolveSeatLocation(WeakTarget.Get()), WeakGuest.Get());
 		});
 		GetWorld()->GetTimerManager().SetTimer(SeatRetryTimerHandle, RetryDelegate, SeatMoveRetryInterval, false);
 		return false;

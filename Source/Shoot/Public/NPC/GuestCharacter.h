@@ -53,6 +53,8 @@ class SHOOT_API AGuestCharacter : public ACharacter
 public:
 	AGuestCharacter();
 
+	virtual void Tick(float DeltaSeconds) override;
+
 	/** 目标座位 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guest")
 	TObjectPtr<AChairSeat> SeatActor;
@@ -105,6 +107,23 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guest")
 	bool bUseDirtyPlateFlow = true;
 
+	/** 坐下后把客人钉在座位上：禁用移动与 RVO 避让、禁止被物理推挤，并在 Tick 中把位置校正回座位。
+	 *  避免玩家靠近 / 放下物品 / 其他客人经过时把坐着的客人从椅子上挤开。默认开启。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guest|Seat")
+	bool bPinToSeatWhenSitting = true;
+
+	/** 钉住时允许的位置偏差（厘米）：超过该值才把客人拉回座位，避免每帧写 Transform 抖动 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guest|Seat", meta = (ClampMin = "0.0", EditCondition = "bPinToSeatWhenSitting"))
+	float SeatPinTolerance = 1.0f;
+
+	/** 坐上 / 离开座位时切换“钉住”状态（坐下时记录座位变换并锁死移动；离座时恢复行走与避让） */
+	UFUNCTION(BlueprintCallable, Category = "Guest|Seat")
+	void SetSeatedPinned(bool bPinned);
+
+	/** 当前是否处于“钉在座位上”的状态 */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Guest|Seat")
+	bool IsSeatedPinned() const { return bSeatedPinned; }
+
 	/** 当前状态 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Guest")
 	EGuestState GuestState = EGuestState::WalkingIn;
@@ -138,15 +157,28 @@ public:
 	/** 离场兜底计时器：走向离场点若导航不可达，超时强制销毁，避免客人永久残留 */
 	FTimerHandle LeaveTimeoutTimerHandle;
 
-	/** 头顶状态气泡组件（屏幕空间，始终面向相机） */
+	/** 头顶状态气泡组件（屏幕空间，始终面向相机）。仅在“需要点餐”（WaitingOrder）与“等餐即将超时”时显示，其余状态隐藏 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Guest|Status")
 	TObjectPtr<UWidgetComponent> StatusWidgetComp;
+
+	/** 等餐时订单剩余时间不足该值（秒）才额外显示头顶气泡，提醒玩家快要超时 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guest|Status", meta = (ClampMin = "0.0"))
+	float StatusWidgetRemainSeconds = 10.f;
 
 	/** 是否已用餐：离场时据此区分“吃饱了”与“等不及走了”的台词 */
 	bool bHasEaten = false;
 
-	/** 状态变化时广播 OnGuestStatusUpdated（传出状态 + 是否已吃饱），由 GuestStatusWidget 从配置表随机抽取显示 */
+	/** 状态变化时刷新头顶气泡显隐，并广播 OnGuestStatusUpdated（传出状态 + 是否已吃饱），由 GuestStatusWidget 从配置表随机抽取显示 */
 	void UpdateStatusWidget(EGuestState NewState);
+
+	/** 按当前状态（需要点餐 / 等餐快超时）刷新头顶气泡显隐；显示时顺带把 OwnerCharacter 交给控件 */
+	void RefreshStatusWidgetVisibility();
+
+	/** 当前是否应该显示头顶气泡：需要点餐（WaitingOrder）常显；等餐（WaitingFood）仅在订单剩余时间不足阈值时显示 */
+	bool ShouldShowStatusWidget() const;
+
+	/** 当前订单剩余等待时间（秒）；尚未点单或订单数据异常时返回 -1 */
+	float GetOrderRemainSeconds() const;
 
 	/** 头顶状态变化广播（GuestStatusWidget 蓝图在 Construct 时绑定监听，从配置表按状态抽台词/颜色/贴图显示） */
 	UPROPERTY(BlueprintAssignable, Category = "Guest|Status")
@@ -239,6 +271,13 @@ protected:
 
 	UPROPERTY(BlueprintReadOnly, Category = "Guest|Anim")
 	bool bIsLeaving = false;
+
+	/** 是否处于“钉在座位上”的状态（坐下后锁死位置，离座前一直有效） */
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Guest|Seat")
+	bool bSeatedPinned = false;
+
+	/** 坐下时记录的目标世界变换：座位失效（已转为空碟流程）时仍用它把客人钉在原地 */
+	FTransform SeatedTransform = FTransform::Identity;
 
 	/** 排队等待超时：离场并（经管理器）扣除声誉 */
 	void OnQueueTimeout();

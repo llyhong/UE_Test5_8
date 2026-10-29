@@ -28,8 +28,14 @@ public:
 	
 	UPROPERTY(BlueprintReadOnly, Category = "Food")
 	TMap<int32,int32> FoodMaterial; //持有的食材
+	/** 本机器 ID：菜品表里 FMenuData::MachineID 与之匹配（或为 0 通用）的菜才能做。
+	 *  只要填了这个值，下面手填的 MenuIDsArray 就不再被读取；
+	 *  0 = 不按机器过滤，继续沿用 MenuIDsArray（旧配置兼容） */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Food")
+	int32 MachineID = 0;
+	/** 可烹饪菜单（手填兜底：MachineID>0 且菜品表已初始化时不再读取，留空即可） */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Food", meta = (RowType = "MenuData"))
-	TArray<FDataTableRowHandle> MenuIDsArray; //可烹饪菜单（限定指向 FMenuData 行结构的 DataTable，如 DT_Foods）
+	TArray<FDataTableRowHandle> MenuIDsArray;
 	UPROPERTY(BlueprintReadWrite, Category = "Food")
 	int32 TargetMenuID;//目标菜单ID
 	UPROPERTY(BlueprintReadOnly, Category = "Food")
@@ -168,6 +174,9 @@ protected:
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaTime) override;
 	void ResetFoodData();
+	/** 收集本机可做的菜品行：MachineID>0 时按菜品表的 MachineID 过滤（菜品 MachineID=0 视为通用）；
+	 *  MachineID<=0 或菜品表未就绪时退回手填的 MenuIDsArray */
+	void CollectCandidateMenus(TArray<FMenuData>& OutMenus) const;
 	bool FindMatchMenu(int32 FoodMaterialID, FMenuData& matchMenuData);
 	bool CheckMenu(int32 FoodMaterialID, FMenuData& matchMenuData);
 

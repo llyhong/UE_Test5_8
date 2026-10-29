@@ -22,9 +22,17 @@ USTRUCT(BlueprintType)
 	TMap<int,int> MenuItems; // int-int 食材ItemID-数量 ItemID查看DT_Foods
 	UPROPERTY(EditAnywhere,BlueprintReadWrite)
 	FString FoodName;
+	/** 菜品图标：UI 显示菜单时使用（按 FoodID 取，见 UFoodSystem::GetFoodIcon / UChairTipsWidget::GetMenuEntries） */
+	UPROPERTY(EditAnywhere,BlueprintReadWrite)
+	TObjectPtr<UTexture2D> Icon = nullptr;
 	//-1:err,-2:not init
+	// 行名（RowName）约定就是 FoodID（如 "3"）：行名为纯数字时以行名为准，本字段只做兼容兜底
 	UPROPERTY(EditAnywhere,BlueprintReadWrite)
 	int32 FoodID;
+	/** 可制作该菜品的机器 ID（对应 ACookingMachine::MachineID）；
+	 *  0 = 通用，任何灶台都能做（因此旧数据不填也不会被卡住） */
+	UPROPERTY(EditAnywhere,BlueprintReadWrite)
+	int32 MachineID = 0;
 	UPROPERTY(EditAnywhere,BlueprintReadWrite)
 	float CookingTime;
 	UPROPERTY(EditAnywhere,BlueprintReadWrite)
@@ -55,6 +63,20 @@ USTRUCT(BlueprintType)
 			sum += foodMat.Value;
 		}
 		return sum;
+	}
+
+	/** 从行名解析菜品 ID：行名为纯数字（约定 RowName == FoodID）时返回该值，否则返回 INDEX_NONE */
+	static int32 GetFoodIDFromRowName(FName RowName)
+	{
+		const FString RowNameStr = RowName.ToString();
+		return RowNameStr.IsNumeric() ? FCString::Atoi(*RowNameStr) : INDEX_NONE;
+	}
+
+	/** 本行的菜品 ID：行名为数字时以行名为准，否则退回 FoodID 字段（兼容未改行名的旧数据） */
+	int32 ResolveFoodID(FName RowName) const
+	{
+		const int32 RowNameID = GetFoodIDFromRowName(RowName);
+		return RowNameID != INDEX_NONE ? RowNameID : FoodID;
 	}
 };
 

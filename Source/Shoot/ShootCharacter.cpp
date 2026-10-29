@@ -10,6 +10,7 @@
 #include "Machine/Dishwasher.h"
 #include "Machine/ResearchStove.h"
 #include "NPC/GuestCharacter.h"
+#include "NPC/ChairSeat.h"
 #include "Dialogue/DialogueComponent.h"
 #include "Item/Plant.h"
 #include "Item/FoodSpawner.h"
@@ -321,6 +322,22 @@ void AShootCharacter::SetOverlappingGuest(AGuestCharacter* Guest)
 	OverlappingGuest = Guest;
 }
 
+void AShootCharacter::SetOverlappingChairSeat(AChairSeat* Seat)
+{
+	OverlappingChairSeat = Seat;
+}
+
+void AShootCharacter::ClearHeldItemState()
+{
+	// 物品已经交给别人（上菜 / 交还等）：清空手持主物体并复位动作与手部 IK
+	SetPickingItem(nullptr);
+	CharacterActionState = ECharacterActionState::EAS_Unoccupied;
+	CharacterState = ECharacterState::ECS_Idle;
+	FBIK_Alpha = 0;
+	HandIK_LPoint = nullptr;
+	HandIK_RPoint = nullptr;
+}
+
 void AShootCharacter::SetOverlappingDishwasher(ADishwasher* Dishwasher)
 {
 	OverlappingDishwasher = Dishwasher;
@@ -521,6 +538,16 @@ void AShootCharacter::Pick(const FInputActionValue& Value)
  		return;
  	}
  	
+	// 餐桌交互（优先于对客人的直接交互）：靠近餐桌按 E 完成
+	// 点单（下单并绑定菜单） / 上菜（校验菜品是否与座位绑定的菜单一致） / 收走空碟（释放座位）
+	if (OverlappingChairSeat)
+	{
+		if (OverlappingChairSeat->TryInteractByPlayer(this))
+		{
+			return;
+		}
+	}
+
 	// 客人接单：靠近"等待接单"的客人按 E 接单，接单后才产生订单
 	if (OverlappingGuest && OverlappingGuest->CanAcceptOrderByPlayer())
 	{

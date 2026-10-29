@@ -10,6 +10,7 @@
 #include "Game/BaseGameInstance.h"
 #include "Game/BaseLevelBP.h"
 #include "Game/EconomySystem.h"
+#include "Game/FoodSystem.h"
 #include "Game/PlateSystem.h"
 #include "Item/ItemActor.h"
 #include "Kismet/GameplayStatics.h"
@@ -90,19 +91,67 @@ APlateSystem* ACookingMachine::FindPlateSystem() const
 	}
 	return nullptr;
 }
+void ACookingMachine::CollectCandidateMenus(TArray<FMenuData>& OutMenus) const
+{
+	OutMenus.Reset();
+
+	// 首选：按 MachineID 从菜品表取本机可做的菜（菜品的 MachineID=0 视为通用，见 GetFoodIDsByMachine）
+	if (MachineID > 0)
+	{
+		if (const UWorld* W = GetWorld())
+		{
+			if (UBaseGameInstance* GI = Cast<UBaseGameInstance>(W->GetGameInstance()))
+			{
+				if (GI->foodSystem)
+				{
+					for (int32 FoodID : GI->foodSystem->GetFoodIDsByMachine(MachineID))
+					{
+						FMenuData Data = GI->foodSystem->GetMenuData(FoodID);
+						if (Data.FoodID >= 0)
+						{
+							OutMenus.Add(MoveTemp(Data));
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if (OutMenus.Num() > 0)
+	{
+		return;
+	}
+
+	// 兜底：MachineID 未配置（0）或菜品表还没初始化时，沿用蓝图上手填的 MenuIDsArray（兼容旧配置）
+	for (const FDataTableRowHandle& Handle : MenuIDsArray)
+	{
+		const FMenuData* Row = Handle.GetRow<FMenuData>(TEXT("CookingMachine::CollectCandidateMenus"));
+		if (!Row)
+		{
+			const FString DTName = Handle.DataTable ? Handle.DataTable->GetName() : TEXT("NULL");
+			GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red,
+				FString::Printf(TEXT("[CheckMenu] 菜品行无效 -> DataTable:%s, RowName:%s (DataTable为空或RowName不存在)"),
+					*DTName, *Handle.RowName.ToString()));
+			continue;
+		}
+
+		FMenuData Data = *Row;
+		// 行名约定为 FoodID：以行名为准，行名不是数字时退回行内字段
+		Data.FoodID = Row->ResolveFoodID(Handle.RowName);
+		OutMenus.Add(MoveTemp(Data));
+	}
+}
+
 bool ACookingMachine::FindMatchMenu(int32 FoodMaterialID,FMenuData& matchMenuData)
 {
+	TArray<FMenuData> CandidateMenus;
+	CollectCandidateMenus(CandidateMenus);
+
 	float minCookingTime = MAX_FLT;
 	int minCookingMateiralCount = 10000;
 	bool canFind = false;
-	for (int i = 0; i < MenuIDsArray.Num(); i++)
+	for (const FMenuData& menuData : CandidateMenus)
 	{
-		const FMenuData* menuDataPtr = MenuIDsArray[i].GetRow<FMenuData>(TEXT("CookingMachine::FindMatchMenu"));
-		if (!menuDataPtr)
-		{
-			continue;
-		}
-		const FMenuData& menuData = *menuDataPtr;
 		//最少食材
 		if (menuData.FoodID != -1 && menuData.MenuItems.Contains(FoodMaterialID) && menuData.MenuItems.Num() <= minCookingMateiralCount  )
 		{
@@ -128,26 +177,17 @@ bool ACookingMachine::CheckMenu(int32 FoodMaterialID,FMenuData& matchMenuData)
 		curFoodMaterialID[FoodMaterialID] += 1;
 	float minCookingTime = MAX_FLT;
 	int minCookingMateiralCount = 10000;
-	
-	for (int i = 0; i < MenuIDsArray.Num(); i++) //遍历可制作菜单
+
+	TArray<FMenuData> CandidateMenus;
+	CollectCandidateMenus(CandidateMenus);
+
+	for (const FMenuData& menuData : CandidateMenus) //遍历可制作菜单
 	{
-		// 先将 FDataTableRowHandle 拆开，取出 RowName
-		const FName RowName = MenuIDsArray[i].RowName;
-		const FMenuData* menuDataPtr = MenuIDsArray[i].GetRow<FMenuData>(*RowName.ToString());
-		if (!menuDataPtr)
-		{
-			const FString DTName = MenuIDsArray[i].DataTable ? MenuIDsArray[i].DataTable->GetName() : TEXT("NULL");
-			GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red,
-				FString::Printf(TEXT("[CheckMenu] 第%d项无效 -> DataTable:%s, RowName:%s (DataTable为空或RowName不存在)"),
-					i, *DTName, *RowName.ToString()));
-			continue;
-		}
-		const FMenuData& menuData = *menuDataPtr;
 		if (menuData.FoodID >=0 && menuData.MenuItems.Num() >= curFoodMaterialID.Num() )
 		{
 			bool match = true;
 			//找包含当前食材都包括的菜单
-			for (TPair<int, int>& foodMat : curFoodMaterialID) //遍历当前容器食材
+			for (const TPair<int, int>& foodMat : curFoodMaterialID) //遍历当前容器食材
 			{
 				int foodMatID = foodMat.Key;
 				int foodMatNum = foodMat.Value;

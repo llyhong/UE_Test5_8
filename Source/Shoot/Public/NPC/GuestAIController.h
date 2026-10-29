@@ -27,7 +27,7 @@ public:
 	/** 前往指定世界坐标，到达后自动调用 Guest->OnReachLeavePoint() */
 	void MoveToSeatLocation(const FVector& Target, AGuestCharacter* Guest);
 
-	/** 移动到某个 Actor 的位置（座位），到达后自动调用 Guest->SitDown() */
+	/** 移动到某张餐桌的入座挂点（SitSocket，取不到时退回 Actor 自身位置），到达后自动调用 Guest->SitDown() */
 	void MoveToSeatActor(AActor* Target, AGuestCharacter* Guest);
 
 	/** 座位寻路最大重试次数（应对生成点尚未落地 / 导航未就绪导致的 Failed） */
@@ -94,6 +94,10 @@ private:
 	/** 挑选一个范围内可达的随机点并走过去 */
 	void WanderToNextPoint();
 
-	/** 执行一次座位寻路：成功（已接受/已到达）则开始轮询到达，失败则按配置延迟重试。返回是否成功发起 */
-	bool AttemptMoveToSeat(AActor* Target, AGuestCharacter* Guest);
+	/** 执行一次座位寻路：成功（已接受/已到达）则开始轮询到达，失败则按配置延迟重试。返回是否成功发起。
+	 *  SeatLocation 为餐桌入座挂点的世界坐标（客人实际走到的点），也是到达判定的参照点 */
+	bool AttemptMoveToSeat(AActor* Target, const FVector& SeatLocation, AGuestCharacter* Guest);
+
+	/** 解析寻路终点：餐桌取 SitSocket 挂点的世界坐标，其它 Actor 退回自身位置 */
+	static FVector ResolveSeatLocation(AActor* Target);
 };

@@ -30,6 +30,7 @@ class APlant;
 class AAttractCounter;
 class AGuestCharacter;
 class ADishwasher;
+class AChairSeat;
 class UInteractionDialogueComponent;
 struct FInputActionValue;
 
@@ -125,6 +126,10 @@ private:
 	// 当前可接单的客人（靠近时由客人的交互球注册；仅"需要玩家接单"模式使用）
 	UPROPERTY(VisibleInstanceOnly)
 	TObjectPtr<class AGuestCharacter> OverlappingGuest;
+
+	// 当前可交互的餐桌（靠近时由餐桌 ChairSeat 的交互球注册；用于 E 键点单 / 上菜 / 收空碟）
+	UPROPERTY(VisibleInstanceOnly)
+	TObjectPtr<class AChairSeat> OverlappingChairSeat;
 
 	// 当前可收走的空碟（靠近空碟时由空碟的回收球注册；方案B 上菜闭环，收走后变成手上脏碟）
 	UPROPERTY(VisibleInstanceOnly)
@@ -292,6 +297,13 @@ public:
 	UFUNCTION(BlueprintCallable, Category="ShootCharacter")
 	FORCEINLINE AGuestCharacter* GetOverlappingGuest() const { return OverlappingGuest; }
 
+	// 餐桌交互：靠近时由 AChairSeat 的交互球注册/反注册（用于 E 键点单 / 上菜 / 收空碟）
+	UFUNCTION(BlueprintCallable, Category="Chair")
+	void SetOverlappingChairSeat(AChairSeat* Seat);
+
+	UFUNCTION(BlueprintCallable, Category="ShootCharacter")
+	FORCEINLINE AChairSeat* GetOverlappingChairSeat() const { return OverlappingChairSeat; }
+
 	// 洗碗机交互：靠近时由洗碗机的重叠球注册/反注册（用于 E 键交还脏碟）
 	UFUNCTION(BlueprintCallable, Category="Dishwasher")
 	void SetOverlappingDishwasher(ADishwasher* Dishwasher);
@@ -322,6 +334,11 @@ public:
 	FORCEINLINE UInteractionDialogueComponent* GetOverlappingDialogue() const { return OverlappingDialogue; }
 
 	FORCEINLINE void SetPickingItem(AItemActor* Item){PickingItem = Item;}
+
+	/** 交出/放下手上物品后复位手持状态（清空 PickingItem、动作状态与手部 IK）。
+	 *  上菜成功等"物品已交给别人"的分支统一调用，避免各处重复写一长串复位。 */
+	UFUNCTION(BlueprintCallable, Category="ShootCharacter")
+	void ClearHeldItemState();
 
 	UFUNCTION(BlueprintCallable, Category="ShootCharacter")
 	FORCEINLINE AItemActor* GetPickingItem() const { return PickingItem; }

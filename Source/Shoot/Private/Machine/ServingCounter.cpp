@@ -6,6 +6,7 @@
 #include "Item/ItemActor.h"
 #include "ShootCharacter.h"
 #include "NPC/GuestCharacter.h"
+#include "NPC/ChairSeat.h"
 #include "Engine/Engine.h"
 #include "Game/BaseGameInstance.h"
 #include "Game/EconomySystem.h"
@@ -53,9 +54,11 @@ bool AServingCounter::GetMenuDataForFood(int32 FoodID, FMenuData& OutMenuData) c
 	{
 		if (const FMenuData* Row = MenuDataTable->FindRow<FMenuData>(Pair.Key, TEXT("ServingCounter::GetMenuDataForFood")))
 		{
-			if (Row->FoodID == FoodID)
+			// 行名约定为 FoodID：行名或行内字段命中均可（两者不一致时以行名为准）
+			if (Row->ResolveFoodID(Pair.Key) == FoodID)
 			{
 				OutMenuData = *Row;
+				OutMenuData.FoodID = FoodID;
 				return true;
 			}
 		}
@@ -279,6 +282,17 @@ void AServingCounter::DeliverDishToSeat(AItemActor* Dish, AGuestCharacter* Guest
 		return;
 	}
 
+	// 客人有座位餐桌：把成品摆到座位的碟子挂点上（位置由该餐桌蓝图里的 PlateSocket 调整），
+	// 并交给客人记录 —— 客人吃完后由座位把它转成空碟，等玩家收走才释放座位。
+	if (Guest->SeatActor && Guest->SeatActor->PlacePlateOnSocket(Dish))
+	{
+		Guest->PlateOnTable = Dish;
+		// 订单已结算：同步清掉座位上的菜单绑定
+		Guest->SeatActor->ClearOrder();
+		return;
+	}
+
+	// 客人没有座位：旧行为，送到客人位置停留后销毁
 	// 把成品送到客人面前（座位处略抬高），停用碰撞，停留 ServeArriveDelay 后销毁，视觉上“上菜到客人位置”
 	const FVector Dest = Guest->GetActorLocation() + FVector(0.f, 0.f, 30.f);
 	Dish->SetActorLocation(Dest);

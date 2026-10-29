@@ -47,7 +47,7 @@ struct FGuestStatusRow : public FTableRowBase
  *  - 蓝图在 OnOwnerCharacterSet 里绑定 OwnerCharacter 的 OnGuestStatusUpdated，回调中调用
  *    GetRandomStatusDisplay(State, bSatisfied) 按状态从配置表随机抽取台词 / 颜色 / 贴图，
  *    再设到 TextBlock 与 IconImage 上。
- * 通用呈现：默认开启“聊天气泡”式呼吸渐隐渐显（bAutoFade），由本类统一处理整体不透明度。
+ * 通用呈现：气泡整体不透明度固定为满值（常显，不做呼吸渐隐），显隐统一由 AGuestCharacter 按状态控制。
  */
 UCLASS()
 class SHOOT_API UGuestStatusWidget : public UUserWidget
@@ -64,30 +64,6 @@ public:
 	UFUNCTION(BlueprintImplementableEvent, Category = "Guest|Status")
 	void OnOwnerCharacterSet();
 
-
-	/** 是否启用“聊天气泡”式呼吸渐隐渐显（周期性淡入淡出）；为 false 则保持常显 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guest|Status")
-	bool bAutoFade = true;
-
-	/** 一次“渐隐 + 渐显”的完整周期（秒）；若下方 Min/Max 区间无效（Max<=Min）则用作固定周期 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guest|Status", meta = (EditCondition = "bAutoFade", ClampMin = "0.5"))
-	float FadePeriod = 4.0f;
-
-	/** 呼吸周期随机区间下限（秒）：每位客人在 [Min, Max] 内随机取一个周期，避免所有气泡同步闪烁 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guest|Status", meta = (EditCondition = "bAutoFade", ClampMin = "0.5"))
-	float FadePeriodMin = 2.5f;
-
-	/** 呼吸周期随机区间上限（秒） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guest|Status", meta = (EditCondition = "bAutoFade", ClampMin = "0.5"))
-	float FadePeriodMax = 6.0f;
-
-	/** 最暗时的不透明度（0=完全隐藏，0.15=半透明呼吸） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guest|Status", meta = (EditCondition = "bAutoFade", ClampMin = "0", ClampMax = "1"))
-	float MinOpacity = 0.15f;
-
-	/** 最亮时的不透明度 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guest|Status", meta = (EditCondition = "bAutoFade", ClampMin = "0", ClampMax = "1"))
-	float MaxOpacity = 1.0f;
 
 	/** 是否自动周期性切换台词（每隔随机一段时间，通知蓝图重新抽一句，营造“聊天气泡”频繁换话的感觉） */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guest|Status")
@@ -108,20 +84,11 @@ public:
 protected:
 	virtual void NativeConstruct() override;
 
-	/** 周期性按正弦曲线调节整体不透明度，形成呼吸 / 聊天气泡效果 */
-	void TickFade();
-
 	/** 到达随机间隔后通知蓝图切换台词，并重新排定下一次（间隔再次随机） */
 	void TriggerLineSwitch();
 
 	/** 在 [LineSwitchMin, LineSwitchMax] 内取随机间隔，排定下一次切换 */
 	void ScheduleLineSwitch();
-
-	FTimerHandle FadeTimerHandle;
-	float FadeElapsed = 0.f;
-
-	/** 本次实例实际使用的呼吸周期（NativeConstruct 时按区间随机得到） */
-	float EffectiveFadePeriod = 4.0f;
 
 	FTimerHandle LineSwitchTimerHandle;
 };

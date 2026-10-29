@@ -23,7 +23,9 @@
 
 AGuestCharacter::AGuestCharacter()
 {
-	PrimaryActorTick.bCanEverTick = false;
+	// Tick 只在“钉住座位”期间需要（坐下后校正位置），默认关闭以免空跑
+	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.bStartWithTickEnabled = false;
 
 	// 由 AI 控制器自动接管
 	AIControllerClass = AGuestAIController::StaticClass();
@@ -73,6 +75,8 @@ AGuestCharacter::AGuestCharacter()
 	StatusWidgetComp->SetWidgetClass(UGuestStatusWidget::StaticClass());
 	StatusWidgetComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	StatusWidgetComp->SetGenerateOverlapEvents(false);
+	// 默认隐藏：只在“需要点餐”或“等餐快超时”时显示（见 RefreshStatusWidgetVisibility）
+	StatusWidgetComp->SetVisibility(false);
 
 	// 头顶状态气泡的台词 / 颜色 / 贴图改由 GuestStatusWidget 持有的配置表（StatusConfigTable）
 	// 按状态随机抽取，C++ 不再硬编码，便于策划在编辑器里维护。
@@ -132,30 +136,96 @@ void AGuestCharacter::SetGuestState(EGuestState NewState)
 {
 	const EGuestState OldState = GuestState;
 	GuestState = NewState;
+
+	// 等餐期间头顶气泡要按订单剩余时间动态出现：该阶段开启 Tick（钉住逻辑在 Tick 内部自行判断）
+	if (NewState == EGuestState::WaitingOrder || NewState == EGuestState::WaitingFood)
+	{
+		SetActorTickEnabled(true);
+	}
+
 	OnGuestStateChanged(NewState);
 	UpdateStatusWidget(NewState);
 }
 
 void AGuestCharacter::UpdateStatusWidget(EGuestState NewState)
 {
-	// 仅广播状态 + 是否已吃饱（离场区分“满意离开”与“等不及走了”）；
+	// 按状态（含“等餐快超时”）决定头顶气泡显隐，并把 OwnerCharacter 交给控件；
 	// 台词 / 颜色 / 贴图由 GuestStatusWidget 从配置表按状态随机抽取并显示。
-
-	// 主动把自身赋给头顶气泡的 OwnerCharacter（WidgetComponent 创建的世界空间控件
-	// 无法从控件内部反向拿到所属 Actor，故由这里补设；每次状态变化都设，覆盖控件晚创建的情况）。
-	if (UGuestStatusWidget* GSW = Cast<UGuestStatusWidget>(StatusWidgetComp->GetUserWidgetObject()))
-	{
-		const bool bWasNull = (GSW->OwnerCharacter == nullptr);
-		GSW->OwnerCharacter = this;
-		// 仅在第一次赋值时通知蓝图去绑定委托，避免重复绑出多个处理函数。
-		if (bWasNull)
-		{
-			GSW->OnOwnerCharacterSet();
-		}
-	}
+	RefreshStatusWidgetVisibility();
 
 	const bool bSatisfied = (NewState == EGuestState::Leaving && bHasEaten);
 	OnGuestStatusUpdated.Broadcast(NewState, bSatisfied);
+}
+
+bool AGuestCharacter::ShouldShowStatusWidget() const
+{
+	// 需要点餐：客人已落座等待玩家按 E 接单，一直显示提示
+	if (GuestState == EGuestState::WaitingOrder)
+	{
+		return true;
+	}
+
+	// 等餐中：订单剩余时间不足阈值时才显示，提醒玩家快要超时
+	if (GuestState == EGuestState::WaitingFood)
+	{
+		const float RemainSeconds = GetOrderRemainSeconds();
+		return RemainSeconds >= 0.f && RemainSeconds <= StatusWidgetRemainSeconds;
+	}
+
+	return false;
+}
+
+float AGuestCharacter::GetOrderRemainSeconds() const
+{
+	// 尚未点单（或订单数据异常）：无从判断，返回 -1
+	if (!CurrentOrder)
+	{
+		return -1.f;
+	}
+
+	const float MaxWait = CurrentOrder->OrderData.MaxWaitTime;
+	if (MaxWait <= 0.f)
+	{
+		return -1.f;
+	}
+
+	return FMath::Max(0.f, MaxWait - CurrentOrder->waitTime);
+}
+
+void AGuestCharacter::RefreshStatusWidgetVisibility()
+{
+	if (!StatusWidgetComp)
+	{
+		return;
+	}
+
+	const bool bShow = ShouldShowStatusWidget();
+	if (bShow)
+	{
+		// 组件隐藏时不会创建控件实例，显示前先确保建出来（InitWidget 内部幂等）
+		if (!StatusWidgetComp->GetUserWidgetObject())
+		{
+			StatusWidgetComp->InitWidget();
+		}
+
+		// 主动把自身赋给头顶气泡的 OwnerCharacter（WidgetComponent 创建的世界空间控件
+		// 无法从控件内部反向拿到所属 Actor，故由这里补设；每次刷新都设，覆盖控件晚创建的情况）。
+		if (UGuestStatusWidget* GSW = Cast<UGuestStatusWidget>(StatusWidgetComp->GetUserWidgetObject()))
+		{
+			const bool bWasNull = (GSW->OwnerCharacter == nullptr);
+			GSW->OwnerCharacter = this;
+			// 仅在第一次赋值时通知蓝图去绑定委托，避免重复绑出多个处理函数。
+			if (bWasNull)
+			{
+				GSW->OnOwnerCharacterSet();
+			}
+		}
+	}
+
+	if (StatusWidgetComp->IsVisible() != bShow)
+	{
+		StatusWidgetComp->SetVisibility(bShow);
+	}
 }
 
 AChairSeat* AGuestCharacter::FindRandomFreeSeat() const
@@ -174,7 +244,8 @@ AChairSeat* AGuestCharacter::FindRandomFreeSeat() const
 	{
 		if (AChairSeat* Seat = Cast<AChairSeat>(Actor))
 		{
-			if (!Seat->bIsOccupied)
+			// 只有既没有客人、也没有未回收碟子的座位才能入座
+			if (Seat->CanOccupy())
 			{
 				FreeSeats.Add(Seat);
 			}
@@ -361,6 +432,10 @@ void AGuestCharacter::SitDown()
 	SeatActor->Occupy(this);
 	SetActorTransform(SeatActor->GetSitTransform());
 
+	// 钉住座位：锁死移动 / 关掉避让与物理推挤，并由 Tick 持续校正，
+	// 避免玩家靠近、放下物品、其他客人经过时把坐着的客人从椅子上挤开
+	SetSeatedPinned(bPinToSeatWhenSitting);
+
 	if (AGuestAIController* AIC = Cast<AGuestAIController>(GetController()))
 	{
 		AIC->StopMovement();
@@ -397,6 +472,95 @@ void AGuestCharacter::SitDown()
 		// 等待玩家接单：进入 WaitingOrder（头上提示“请按E点单”），长时间无人接单则兜底离场
 		SetGuestState(EGuestState::WaitingOrder);
 		StartWaitFoodTimeout();
+	}
+}
+
+void AGuestCharacter::SetSeatedPinned(bool bPinned)
+{
+	if (bSeatedPinned == bPinned)
+	{
+		// 状态没变，但座位可能刚被换上：刷新一次钉住目标
+		if (bPinned && IsValid(SeatActor))
+		{
+			SeatedTransform = SeatActor->GetSitTransform();
+		}
+		return;
+	}
+
+	bSeatedPinned = bPinned;
+
+	UCharacterMovementComponent* Mov = GetCharacterMovement();
+
+	if (bPinned)
+	{
+		// 记录座位姿态：之后 Tick 以它为准把客人钉在原地
+		SeatedTransform = IsValid(SeatActor) ? SeatActor->GetSitTransform() : GetActorTransform();
+
+		// 先停掉 AI 寻路与当前速度，避免“到位后还残留移动意图”
+		if (AGuestAIController* AIC = Cast<AGuestAIController>(GetController()))
+		{
+			AIC->StopMovement();
+		}
+
+		if (Mov)
+		{
+			Mov->StopMovementImmediately();
+			// 退出行走状态：CharacterMovement 不再写 Actor 位置，也不会在重叠时做“穿透修正”把人挤离椅子
+			Mov->DisableMovement();
+			// 关掉 RVO 避让：坐着的客人若仍参与避让，附近有玩家/客人经过时会被算出避让速度而挪动
+			Mov->SetAvoidanceEnabled(false);
+			// 不再与掉落的物品（菜品 / 碟子等模拟物理物体）做物理交互
+			Mov->bEnablePhysicsInteraction = false;
+		}
+
+		SetActorTickEnabled(true);
+	}
+	else
+	{
+		// 离座：恢复正常行走与避让（离场寻路依赖 MOVE_Walking）
+		if (Mov)
+		{
+			Mov->SetMovementMode(MOVE_Walking);
+			Mov->SetAvoidanceEnabled(true);
+			Mov->bEnablePhysicsInteraction = true;
+		}
+
+		SetActorTickEnabled(false);
+	}
+}
+
+void AGuestCharacter::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+
+	// 等餐剩余时间在不停减少：每帧按状态 + 剩余时间刷新头顶气泡（内部仅在显隐变化时才改组件）
+	RefreshStatusWidgetVisibility();
+
+	if (!bSeatedPinned)
+	{
+		return;
+	}
+
+	// 钉住目标：优先取座位当前姿态（椅子被移动时客人跟着走）；
+	// 吃完转空碟流程后 SeatActor 会被清空，此时用坐下时的快照继续钉住。
+	const FTransform Target = IsValid(SeatActor) ? SeatActor->GetSitTransform() : SeatedTransform;
+
+	const bool bLocationOff = FVector::DistSquared(GetActorLocation(), Target.GetLocation())
+		> FMath::Square(FMath::Max(SeatPinTolerance, 0.f));
+	const bool bRotationOff = GetActorQuat().AngularDistance(Target.GetRotation())
+		> FMath::DegreesToRadians(1.0);
+
+	if (bLocationOff || bRotationOff)
+	{
+		// TeleportPhysics：跳过扫掠，避免校正过程又被碰撞体挤歪
+		SetActorLocationAndRotation(Target.GetLocation(), Target.GetRotation(),
+			false, nullptr, ETeleportType::TeleportPhysics);
+
+		// 顺带清掉可能残留的速度，防止下一帧再被带走
+		if (UCharacterMovementComponent* Mov = GetCharacterMovement())
+		{
+			Mov->StopMovementImmediately();
+		}
 	}
 }
 
@@ -457,6 +621,12 @@ bool AGuestCharacter::PlaceOrder()
 	{
 		LogFail(TEXT("取不到订单（orderCfg 为空或 Orders 无配置）"));
 		return false;
+	}
+
+	// 把订单（菜单）绑定到座位：玩家端菜到餐桌按 E 上菜时，由座位校验菜品是否与客人点的一致
+	if (SeatActor)
+	{
+		SeatActor->BindOrder(CurrentOrder);
 	}
 
 	// 调试信息：客人点单成功（订单号 / 套餐 / 菜品 / 价格 / 等待时长 / 接单方式）
@@ -662,16 +832,11 @@ bool AGuestCharacter::TryServeDish(AShootCharacter* Player, AItemActor* Dish)
 		return false;
 	}
 
-	// 把手上的菜从手部插槽取下，摆到客人桌前（座位处略抬高）
+	// 把手上的菜从手部插槽取下，摆到餐桌的碟子挂点上（挂点位置由 ChairSeat 蓝图里的 PlateSocket 调整）
 	Dish->DeAttachMeshToSocket();
-	if (SeatActor)
+	if (SeatActor && SeatActor->PlacePlateOnSocket(Dish))
 	{
-		const FVector Forward = SeatActor->GetActorRotation().Vector();
-		const FVector TableLoc = SeatActor->GetActorLocation()
-			+ Forward * 35.f
-			+ FVector(0.f, 0.f, SeatActor->SitSocketOffset.Z * 0.5f);
-		Dish->SetActorLocation(TableLoc);
-		Dish->SetActorRotation(SeatActor->GetActorRotation());
+		// 已吸附到挂点（内部已停用拾取/腐烂/碰撞）
 	}
 	else
 	{
@@ -692,6 +857,12 @@ bool AGuestCharacter::TryServeDish(AShootCharacter* Player, AItemActor* Dish)
 	// 记录桌上这道菜（进食结束后转为空碟）
 	PlateOnTable = Dish;
 
+	// 订单已在上菜时结算：座位上的菜单绑定同步清掉（避免座位残留旧订单）
+	if (SeatActor)
+	{
+		SeatActor->ClearOrder();
+	}
+
 	// 玩家清空手持状态（剩余手持复位由调用方在 E 分发里处理）
 	Player->SetPickingItem(nullptr);
 
@@ -705,30 +876,13 @@ bool AGuestCharacter::TryServeDish(AShootCharacter* Player, AItemActor* Dish)
 
 void AGuestCharacter::FinishEating()
 {
-	// 方案B：进食结束 → 把桌上的菜变成“空碟”并占据座位；客人离座但座位不释放，
-	// 直到玩家按 E 收走空碟（PickUpByPlayer → ClearDirtyPlate）才真正释放。
+	// 方案B：进食结束 → 把桌上的菜变成“空碟”并留在餐桌的碟子挂点上；客人离座但座位不释放，
+	// 直到玩家按 E 收走空碟（PickUpByPlayer → ChairSeat::ClearDirtyPlate）才真正释放。
+	// 空碟的清理 / 吸附挂点 / 启用回收球全部由 ChairSeat::SetDirtyPlate 统一处理。
 	if (bUseDirtyPlateFlow && SeatActor && PlateOnTable && PlateOnTable->IsValidLowLevel())
 	{
-		// 空碟相关字段（bIsEmptyPlate / OwningSeat / CollectSphere）已在基类 AItemActor 上，
-		// 因此任何成品（不论是否为 ADish）都能变成空碟并被玩家收走。
-		AItemActor* Plate = PlateOnTable;
-		Plate->bIsEmptyPlate = true;
-		Plate->bPickable = false;
-
-		// 清掉碟上的食材演员，视觉上变成真正的"空碟"（只留盘子的网格）
-		Plate->OnClear();
-
-		// 启用空碟的回收球，玩家靠近即可按 E 收走
-		if (Plate->CollectSphere)
-		{
-			Plate->CollectSphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-			Plate->CollectSphere->SetGenerateOverlapEvents(true);
-		}
-
-		// 空碟占据座位：bIsOccupied 保持为真，客人不再占用（改由空碟占座）
-		Plate->OwningSeat = SeatActor;
-		SeatActor->SetDirtyPlate(Plate);
-		SeatActor = nullptr; // 客人离座时不释放座位（Release 改由玩家收走空碟触发）
+		SeatActor->SetDirtyPlate(PlateOnTable);
+		SeatActor = nullptr; // 客人离座时不释放座位（改由玩家收走空碟触发）
 	}
 
 	PlateOnTable = nullptr;
@@ -749,6 +903,9 @@ void AGuestCharacter::GiveUpAndLeave()
 
 void AGuestCharacter::StartLeaving()
 {
+	// 离座：先解除“钉住座位”（恢复行走与避让，否则后面的离场寻路会因为 MOVE_None 走不动）
+	SetSeatedPinned(false);
+
 	// 排队 / 等餐 / 离场兜底计时器（若在等待中被触发离场）先清掉
 	GetWorld()->GetTimerManager().ClearTimer(QueueTimerHandle);
 	GetWorld()->GetTimerManager().ClearTimer(GuestTimerHandle);
