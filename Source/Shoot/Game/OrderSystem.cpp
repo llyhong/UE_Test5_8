@@ -111,6 +111,8 @@ void AOrderSystem::InitCfg(ULevelOrderCfg* cfg)
 	orderCfg = cfg;
 	waitList.Empty(orderCfg ? orderCfg->Orders.Num() : 0);
 	CurOrderIndex = 0;
+	// 关卡（重新）开始：配置订单的顺序游标从第一单重新开始
+	CurConfigOrderIndex = 0;
 	OrderID = 0;
 
 	// 订单池改为按菜品表（MenuDataTable / FMenuData）构建
@@ -302,6 +304,47 @@ FOrderData* AOrderSystem::GetRandomOrder()
 	return &OrderPool.Last();
 }
 
+bool AOrderSystem::GetNextConfigOrder(FOrderData& OutOrder)
+{
+	if (!orderCfg || orderCfg->Orders.Num() == 0)
+	{
+		return false;
+	}
+
+	const int32 NumOrders = orderCfg->Orders.Num();
+
+	// 按 Orders 数组顺序依次发单：一轮最多尝试 NumOrders 次，避免全是空配置时死循环
+	for (int32 Tried = 0; Tried < NumOrders; ++Tried)
+	{
+		if (CurConfigOrderIndex >= NumOrders)
+		{
+			if (!bLoopConfigOrders)
+			{
+				// 配置里的订单已发完且不循环：不再出单（客人会因点不到单而离场）
+				return false;
+			}
+			CurConfigOrderIndex = 0;
+		}
+
+		const FOrderData& Config = orderCfg->Orders[CurConfigOrderIndex];
+		const int32 ServedIndex = CurConfigOrderIndex;
+		++CurConfigOrderIndex;
+
+		// 没填菜品的配置项跳过，继续取下一项
+		if (Config.FoodIDs.Num() == 0)
+		{
+			continue;
+		}
+
+		OutOrder = Config;
+		UE_LOG(LogTemp, Log, TEXT("[OrderSystem] 按关卡配置出单：第 %d/%d 单"), ServedIndex + 1, NumOrders);
+		return true;
+	}
+
+	UE_LOG(LogTemp, Warning, TEXT("[OrderSystem] 关卡订单配置（ULevelOrderCfg::Orders）里没有填菜品的订单，请检查 LevelOrderConfigs 指向的资产"));
+	return false;
+}
+
 UOrderHandle* AOrderSystem::RequestOrderForGuest(AGuestCharacter* Guest)
 {
 	if (!IsStarted || !Guest)
@@ -309,17 +352,33 @@ UOrderHandle* AOrderSystem::RequestOrderForGuest(AGuestCharacter* Guest)
 		return nullptr;
 	}
 
-	FOrderData* data = GetRandomOrder();
-	if (!data)
+	// 点餐来源：优先按关卡订单配置（Level_01_Order 等）的顺序依次取；
+	// 关闭顺序出单或配置里没有订单时，才退回按菜品表 Probabilitys 的随机订单池
+	FOrderData OrderData;
+	if (bUseConfigOrderSequence && orderCfg && orderCfg->Orders.Num() > 0)
 	{
-		return nullptr;
+		if (!GetNextConfigOrder(OrderData))
+		{
+			// 配置订单已按顺序发完（bLoopConfigOrders=false）：不再随机塞单，保持关卡节奏可控
+			UE_LOG(LogTemp, Warning, TEXT("[OrderSystem] 关卡订单已发完（不循环），客人 %s 点不到单"), *Guest->GetName());
+			return nullptr;
+		}
+	}
+	else
+	{
+		const FOrderData* RandomData = GetRandomOrder();
+		if (!RandomData)
+		{
+			return nullptr;
+		}
+		OrderData = *RandomData;
 	}
 
 	// 客人点餐：生成订单并绑定该客人（订单生命周期 = 客人的等餐周期）
 	UOrderHandle* orderHandle = NewObject<UOrderHandle>(this);
 	orderHandle->orderId = OrderID;
 	OrderID++;
-	orderHandle->OrderData = *data;
+	orderHandle->OrderData = OrderData;
 	orderHandle->waitTime = 0.f;
 	orderHandle->Guest = Guest;
 	orderHandle->RefreshOrderStats();
@@ -590,14 +649,45 @@ int32 UOrderHandle::GetOrderPrice() const
 	return CachedPrice;
 }
 
-float UOrderHandle::GetOrderMaxWaitTime() const
+float UOrderHandle::GetOrderMaxWaitTime(int32 MenuID) const
 {
+	// 传了菜单 ID：只查这一道菜（单菜直查菜品表，不参与整单缓存）
+	if (MenuID >= 0)
+	{
+		if (UFoodSystem* FS = GetFoodSystemForHandle(this))
+		{
+			const FMenuData Menu = FS->GetMenuData(MenuID);
+			if (Menu.FoodID >= 0)
+			{
+				return Menu.MaxWaitTime;
+			}
+		}
+		return 0.f;
+	}
+
+	// 未传：整单最长等待时间（各菜取最大）
 	EnsureStatsCached();
 	return CachedMaxWaitTime;
 }
 
-FString UOrderHandle::GetOrderDisplayName() const
+FString UOrderHandle::GetOrderDisplayName(int32 MenuID) const
 {
+	// 传了菜单 ID：只查这一道菜的菜名
+	if (MenuID >= 0)
+	{
+		if (UFoodSystem* FS = GetFoodSystemForHandle(this))
+		{
+			const FMenuData Menu = FS->GetMenuData(MenuID);
+			if (Menu.FoodID >= 0 && !Menu.FoodName.IsEmpty())
+			{
+				return Menu.FoodName;
+			}
+		}
+		// 查不到菜名时退化成“菜品<ID>”，避免 UI 出现空白（与 UChairTipsWidget::GetFoodName 一致）
+		return FString::Printf(TEXT("菜品%d"), MenuID);
+	}
+
+	// 未传：整单显示名（多道菜用 "+" 连接）
 	EnsureStatsCached();
 	return CachedDisplayName;
 }
@@ -606,6 +696,45 @@ TArray<int32> UOrderHandle::GetMachineImageIDs() const
 {
 	EnsureStatsCached();
 	return CachedMachineImageIDs;
+}
+
+TArray<UTexture2D*> UOrderHandle::GetOrderFoodIcons() const
+{
+	TArray<UTexture2D*> Icons;
+
+	UFoodSystem* FS = GetFoodSystemForHandle(this);
+	if (!FS)
+	{
+		return Icons;
+	}
+
+	// 菜品表 MenuItems 的 key = 食材 ItemID：到 DT_FoodID（FItemActorInfo::Icon）按 ItemID 取图
+	TSet<int32> CollectedItems;
+	for (const int32 FoodID : OrderData.FoodIDs)
+	{
+		const FMenuData Menu = FS->GetMenuData(FoodID);
+		if (Menu.FoodID < 0)
+		{
+			continue;
+		}
+
+		for (const TPair<int32, int32>& Item : Menu.MenuItems)
+		{
+			// 同一食材在多道菜里重复出现时只出一张图
+			if (CollectedItems.Contains(Item.Key))
+			{
+				continue;
+			}
+
+			if (UTexture2D* Icon = FS->GetItemFoodIcon(Item.Key))
+			{
+				CollectedItems.Add(Item.Key);
+				Icons.Add(Icon);
+			}
+		}
+	}
+
+	return Icons;
 }
 
 void UOrderHandle::RefreshOrderStats()

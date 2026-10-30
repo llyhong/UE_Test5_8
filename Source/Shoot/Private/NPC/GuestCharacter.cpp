@@ -619,7 +619,7 @@ bool AGuestCharacter::PlaceOrder()
 	CurrentOrder = OS->RequestOrderForGuest(this);
 	if (!CurrentOrder)
 	{
-		LogFail(TEXT("取不到订单（订单池为空：检查菜品表 Probabilitys 是否 >0，或 LevelOrderCfg::Orders 自定义套餐）"));
+		LogFail(TEXT("取不到订单（关卡订单配置已按顺序发完，或随机订单池为空：检查 LevelOrderConfigs 里该关卡的 Orders / 菜品表 Probabilitys）"));
 		return false;
 	}
 

@@ -206,9 +206,6 @@ void AChairSeat::BindOrder(UOrderHandle* Order)
 		BoundFoodIDs = Order->GetOrderData().FoodIDs;
 		// 展示名由菜品表（FMenuData::FoodName）拼接而来，订单里不再单独存 SetName
 		BoundSetName = Order->GetOrderDisplayName();
-
-		SeatMessage(FString::Printf(TEXT("[餐桌] %s 已绑定订单#%d【%s】菜品[%s]"),
-			*GetName(), Order->orderId, *BoundSetName, *JoinFoodIDs(BoundFoodIDs)), FColor::Cyan);
 	}
 
 	OnOrderBound(Order ? Order->orderId : -1, BoundFoodIDs);
@@ -572,8 +569,6 @@ bool AChairSeat::TryTakeOrderByPlayer(AShootCharacter* Player)
 	// 兜底再绑定一次，保证座位上的菜单与刚生成的订单一致
 	BindOrder(Occupant->CurrentOrder);
 
-	SeatMessage(FString::Printf(TEXT("[餐桌] 已为客人下单【%s】菜品[%s]"),
-		*BoundSetName, *JoinFoodIDs(BoundFoodIDs)), FColor::Green);
 	return true;
 }
 

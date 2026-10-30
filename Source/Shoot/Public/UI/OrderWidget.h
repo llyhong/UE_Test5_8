@@ -26,6 +26,7 @@ class UEconomySystem;
  *   - Handle->GetOrderMaxWaitTime() -> 最长等待时间（实时取菜品表 MaxWaitTime 的最大值）
  *   - Handle->GetOrderDisplayName() -> 显示名（菜品表 FoodName 拼接，多菜用 "+"）
  *   - Handle->GetMachineImageIDs()  -> 需要的机器图片 ID（菜品表 MachineID）
+ *   - Handle->GetOrderFoodIcons()   -> 本单食材图标列表（MenuItems 的 key → DT_FoodID 的 Icon，已去重）
  *   - Handle->GetPercent()    -> 剩余时间比例（1 = 刚下单，0 = 即将超时）
  */
 UCLASS()

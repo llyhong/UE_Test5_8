@@ -20,7 +20,7 @@ class SHOOT_API UFoodSystem : public UObject
 	/** 菜品表：键为 FoodID（优先取行名，行名不是数字时取行内的 FoodID 字段） */
 	TMap<int32,FMenuData*> MenuTables;
 
-	/** 物品表（DT_ItemInfo，RowStruct = FItemActorInfo）：键为 ItemID（优先取行名）。
+	/** 物品表（DT_FoodID / DT_ItemInfo，RowStruct = FItemActorInfo）：键为 ItemID（优先取行名）。
 	 *  食材图标 / 描述都从这里取，菜品表只配成品图标 MenuIcon。 */
 	TMap<int32,FItemActorInfo*> ItemTables;
 
@@ -34,22 +34,26 @@ public:
 
 	void InitMenuData(UDataTable* MenuDataTable);
 
-	/** 初始化物品表（DT_ItemInfo）；传 null 时清空索引（食材图标会取不到） */
+	/** 初始化物品表（DT_FoodID / DT_ItemInfo）；传 null 时清空索引（食材图标会取不到） */
 	UFUNCTION(BlueprintCallable)
 	void InitItemInfoTable(UDataTable* ItemDataTable);
 
 	UFUNCTION(BlueprintCallable)
 	FMenuData GetMenuData(int32 FoodID);
 
-	/** 按 ItemID 取物品/食材图标（DT_ItemInfo 的 Icon）；取不到时返回 null */
+	/** 按 ItemID 取物品/食材图标（DT_FoodID / DT_ItemInfo 的 Icon）；取不到时返回 null */
 	UFUNCTION(BlueprintCallable, BlueprintPure)
 	UTexture2D* GetItemIcon(int32 ItemID);
+
+	/** 按 ItemID 取食材图标（FItemActorInfo::Icon，与 GetItemIcon 同一字段）；取不到时返回 null */
+	UFUNCTION(BlueprintCallable, BlueprintPure)
+	UTexture2D* GetItemFoodIcon(int32 ItemID);
 
 	/** 按 FoodID 取菜品成品图标（菜品表 MenuIcon）；没配 MenuIcon 时退回第一个食材的图标 */
 	UFUNCTION(BlueprintCallable, BlueprintPure)
 	UTexture2D* GetFoodIcon(int32 FoodID);
 
-	/** 按 FoodID + 食材 ItemID 取该食材的图标（取自物品表 DT_ItemInfo，按 ItemID 查）；取不到时返回 null */
+	/** 按 FoodID + 食材 ItemID 取该食材的图标（FItemActorInfo::Icon）；取不到时返回 null */
 	UFUNCTION(BlueprintCallable, BlueprintPure)
 	UTexture2D* GetFoodItemIcon(int32 FoodID, int32 ItemID);
 
@@ -62,4 +66,8 @@ public:
 	TArray<int32> GetFoodIDsByMachine(int32 MachineID) const;
 	UFUNCTION(BlueprintCallable)
 	ABaseFoodActor* CreateFoodActor(int32 FoodID);
+
+private:
+	/** 按 ItemID 取物品行（ItemInfoTable 被换掉会自动重建索引）；取不到返回 null */
+	FItemActorInfo* FindItemRow(int32 ItemID);
 };

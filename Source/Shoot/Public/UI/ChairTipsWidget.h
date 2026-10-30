@@ -34,7 +34,7 @@ struct FChairMenuEntry
 	UPROPERTY(BlueprintReadOnly, Category = "Chair|Tips")
 	TArray<int32> ItemIDs;
 
-	/** 各食材的图标（与 ItemIDs 一一对应，取自菜单表 FoodIcon；某食材没配图标则为 null，蓝图先 IsValid 再设 Image） */
+	/** 各食材的图标（与 ItemIDs 一一对应，取自物品表的 Icon；某食材没配图标则为 null，蓝图先 IsValid 再设 Image） */
 	UPROPERTY(BlueprintReadOnly, Category = "Chair|Tips")
 	TArray<TObjectPtr<UTexture2D>> ItemIcons;
 

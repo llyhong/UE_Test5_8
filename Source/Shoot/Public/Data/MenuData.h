@@ -94,7 +94,7 @@ USTRUCT(BlueprintType)
 		return INDEX_NONE;
 	}
 
-	/** MenuItems 的食材 ItemID 列表（与 FoodIcon 的键一一对应） */
+	/** MenuItems 的食材 ItemID 列表（与 FItemActorInfo::Icon 的键一一对应） */
 	TArray<int32> GetItemIDs() const
 	{
 		TArray<int32> Out;

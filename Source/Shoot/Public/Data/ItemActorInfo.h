@@ -30,7 +30,8 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	FString ItemDes;
 
-	/** 物品图标：食材 / 物品在 UI 上显示的图标（DT_ItemInfo 按行配置） */
+	/** 物品图标：食材 / 物品在 UI 上显示的图标（DT_ItemInfo / DT_FoodID 按行配置）。
+	 *  菜品 / 订单 UI 也按 FMenuData::MenuItems 的 key（食材 ItemID）到这里查同一张图 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	TObjectPtr<UTexture2D> Icon = nullptr;
 

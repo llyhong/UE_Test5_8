@@ -1283,17 +1283,10 @@ void AShootCharacter::DoThrow()
 		
 		if (CookingMachine)
 		{
-			//
-			//GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, TEXT("CookingMachine"));
-			// 从数据表行获取物品信息
-			const FItemActorInfo* ItemRow = PickingItem->ItemInfoRow.GetRow<FItemActorInfo>(TEXT("ItemInfo"));
-			if (ItemRow)
-			{
-				//2.
-				//GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, FString::Printf(TEXT("PickingItem->ItemID: %d"), ItemRow->ItemID));
-			}
-
-			if (ItemRow && CookingMachine->AddFoodMateral(ItemRow->ItemID))
+			// 食材 ID 以数据表行名为准（与 AItemActor::GetItemID 同一套解析）：行名为纯数字即 ItemID，
+			// 行内 ItemID 字段只做兜底。直接读字段时，行内未填（默认 -1）会永远匹配不到菜品
+			const int32 FoodMaterialID = PickingItem->GetItemID();
+			if (CookingMachine->AddFoodMateral(FoodMaterialID))
 			{
 				PickingItem->DeAttachMeshToSocket();
 				CookingMachine->FoodActors.Add(PickingItem);
@@ -1314,6 +1307,16 @@ void AShootCharacter::DoThrow()
 				HandIK_LPoint = nullptr;
 				HandIK_RPoint = nullptr;
 				//GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, TEXT("CookingMachine？？？"));
+			}
+			else
+			{
+				// 失败诊断：区分"物品 ID 无效"与"菜品/机器配置不匹配"，只进 Output Log，不刷屏幕
+				const UDataTable* ItemTable = PickingItem->ItemInfoRow.DataTable;
+				UE_LOG(LogTemp, Warning,
+					TEXT("[CookingMachine] 食材 ItemID=%d 无法下锅（%s，本机 MachineID=%d）；物品数据表=%s，行名=%s：请检查 DT_FoodID 行名/ItemID、菜品 MenuItems 是否含该食材、菜品 MachineID 是否与本机匹配（0=通用），以及锅是否着火/维修中"),
+					FoodMaterialID, *CookingMachine->GetName(), CookingMachine->MachineID,
+					ItemTable ? *ItemTable->GetName() : TEXT("NULL"),
+					*PickingItem->ItemInfoRow.RowName.ToString());
 			}
 
 		}

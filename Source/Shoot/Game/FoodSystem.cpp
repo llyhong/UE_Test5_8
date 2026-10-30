@@ -91,7 +91,7 @@ void UFoodSystem::InitItemInfoTable(UDataTable* ItemDataTable)
 	return Row;
 }
 
-UTexture2D* UFoodSystem::GetItemIcon(int32 ItemID)
+FItemActorInfo* UFoodSystem::FindItemRow(int32 ItemID)
 {
 	if (ItemID < 0)
 	{
@@ -105,7 +105,22 @@ UTexture2D* UFoodSystem::GetItemIcon(int32 ItemID)
 	}
 
 	FItemActorInfo* const* Row = ItemTables.Find(ItemID);
-	return (Row && *Row) ? (*Row)->Icon.Get() : nullptr;
+	return Row ? *Row : nullptr;
+}
+
+UTexture2D* UFoodSystem::GetItemIcon(int32 ItemID)
+{
+	if (FItemActorInfo* Row = FindItemRow(ItemID))
+	{
+		return Row->Icon.Get();
+	}
+	return nullptr;
+}
+
+UTexture2D* UFoodSystem::GetItemFoodIcon(int32 ItemID)
+{
+	// 食材图标与物品图标已合并为 Icon（DT_FoodID / DT_ItemInfo 同一字段）
+	return GetItemIcon(ItemID);
 }
 
 UTexture2D* UFoodSystem::GetFoodIcon(int32 FoodID)
@@ -120,7 +135,7 @@ UTexture2D* UFoodSystem::GetFoodIcon(int32 FoodID)
 	{
 		return Icon;
 	}
-	return GetItemIcon((*data)->GetFirstItemID());
+	return GetItemFoodIcon((*data)->GetFirstItemID());
 }
 
 UTexture2D* UFoodSystem::GetFoodItemIcon(int32 FoodID, int32 ItemID)
@@ -130,8 +145,8 @@ UTexture2D* UFoodSystem::GetFoodItemIcon(int32 FoodID, int32 ItemID)
 	{
 		return nullptr;
 	}
-	// 食材图标统一在物品表 DT_ItemInfo 里按 ItemID 配置
-	return GetItemIcon(ItemID);
+	// 食材图标：菜品 MenuItems 的 key 就是食材 ItemID，直接到 DT_FoodID（FItemActorInfo）按 ItemID 取
+	return GetItemFoodIcon(ItemID);
 }
 
 TArray<int32> UFoodSystem::GetFoodItemIDs(int32 FoodID) const

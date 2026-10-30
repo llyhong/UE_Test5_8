@@ -8,6 +8,7 @@
 #include "OrderSystem.generated.h"
 
 class AGuestCharacter;
+class UTexture2D;
 
  UCLASS(BlueprintType, Blueprintable)
 class UOrderHandle : public UObject
@@ -36,17 +37,24 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Order")
 	int32 GetOrderPrice() const;
 
-	/** 最长等待时间（秒）：实时按菜品表（FMenuData::MaxWaitTime）取最大 */
+	/** 单道菜的最长等待时间（秒）：传入菜单 ID（MenuDataTable 的 FoodID）取该菜的 FMenuData::MaxWaitTime。
+	 *  不传（MenuID < 0）时返回整单最长等待时间（各菜取最大），供订单超时判定 / 倒计时沿用 */
 	UFUNCTION(BlueprintPure, Category = "Order")
-	float GetOrderMaxWaitTime() const;
+	float GetOrderMaxWaitTime(int32 MenuID = -1) const;
 
-	/** 订单显示名：实时取自菜品表的 FoodName；多道菜用 "+" 连接（如“番茄炒蛋+米饭”） */
+	/** 单道菜的菜名：传入菜单 ID（MenuDataTable 的 FoodID）取该菜的 FMenuData::FoodName。
+	 *  不传（MenuID < 0）时返回整单显示名（多道菜用 "+" 连接，如“番茄炒蛋+米饭”） */
 	UFUNCTION(BlueprintPure, Category = "Order")
-	FString GetOrderDisplayName() const;
+	FString GetOrderDisplayName(int32 MenuID = -1) const;
 
 	/** 本单需要的机器图片 ID（实时取各菜品的 FMenuData::MachineID，>0 且去重） */
 	UFUNCTION(BlueprintPure, Category = "Order")
 	TArray<int32> GetMachineImageIDs() const;
+
+	/** 本单的食材图标：取各菜 FMenuData::MenuItems 的 key（食材 ItemID）到 DT_FoodID（FItemActorInfo::Icon）
+	 *  查图标；同一食材只出一次（保持首次出现顺序）。实时查表不缓存，换菜品表 / 插表后仍然生效 */
+	UFUNCTION(BlueprintPure, Category = "Order")
+	TArray<UTexture2D*> GetOrderFoodIcons() const;
 
 	/** 强制重新汇总价格 / 等待时间 / 显示名 / 机器：换了订单内容或菜品表后调用 */
 	UFUNCTION(BlueprintCallable, Category = "Order")
@@ -82,6 +90,13 @@ protected:
 public:	
 	// Called every frame
 	FOrderData* GetRandomOrder();
+
+	/**
+	 * 按关卡订单配置（ULevelOrderCfg::Orders，如 Level_01_Order）的顺序取下一单：
+	 * 按数组顺序依次发放，跳过 FoodIDs 为空的配置项；一轮发完按 bLoopConfigOrders 决定回卷还是停发。
+	 * @return 是否取到订单；orderCfg 为空 / 已发完且不循环时返回 false
+	 */
+	bool GetNextConfigOrder(FOrderData& OutOrder);
 	UFUNCTION(BlueprintCallable)
 	bool PushFoods(const TArray<int>& FoodIDs);
 
@@ -103,8 +118,9 @@ public:
 	void ClearAllOrders();
 
 	/**
-	 * 供客人点餐调用：从订单池随机取一个订单，绑定到该客人并入队（产生一个等待订单）。
-	 * @return 新订单句柄；订单系统未启动 / 无可用订单配置时返回 nullptr
+	 * 供客人点餐调用：优先按关卡订单配置（Level_01_Order 等 ULevelOrderCfg::Orders）的顺序取下一单；
+	 * 未开启顺序出单或配置里没有订单时，才从随机订单池取。绑定到该客人并入队（产生一个等待订单）。
+	 * @return 新订单句柄；订单系统未启动 / 无可用订单时返回 nullptr
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Order")
 	UOrderHandle* RequestOrderForGuest(AGuestCharacter* Guest);
@@ -116,6 +132,19 @@ public:
 	/** 是否仍按 AppearTimes 定时自动生成订单。关闭后订单只在客人点餐时产生 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Order")
 	bool bAutoGenerateByTime = false;
+
+	/** 客人点餐是否按关卡订单配置（ULevelOrderCfg::Orders，例如 Level_01_Order）的顺序依次发放。
+	 *  开启且配置里有订单时只按顺序出单，不再随机；配置为空时仍退回菜品表概率随机池 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Order")
+	bool bUseConfigOrderSequence = true;
+
+	/** 配置里的订单发完一轮后是否回到第一单继续发；false 则发完即不再出单（客人点不到单会离场） */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Order")
+	bool bLoopConfigOrders = true;
+
+	/** 配置订单的顺序游标：下一个客人领取 Orders[CurConfigOrderIndex]；InitCfg 时归零 */
+	UPROPERTY(BlueprintReadOnly, Category = "Order")
+	int32 CurConfigOrderIndex = 0;
 
 	/** 订单池：只存"点了哪几道菜"（FoodIDs = MenuDataTable 的 FoodID）。
 	 *  价格 / 等待时间 / 显示名 / 机器图片由 UOrderHandle 的查询函数实时按菜品表（FMenuData）派生。
