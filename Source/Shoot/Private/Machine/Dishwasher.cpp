@@ -132,7 +132,7 @@ int32 ADishwasher::GetAvailablePlates() const
 {
 	if (const APlateSystem* PS = FindPlateSystem())
 	{
-		return PS->CurOrderIndex;
+		return PS->GetAvailablePlates();
 	}
 	return 0;
 }

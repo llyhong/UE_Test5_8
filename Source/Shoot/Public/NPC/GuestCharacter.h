@@ -102,8 +102,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guest|Order")
 	EGuestOrderAcceptMode OrderAcceptMode = EGuestOrderAcceptMode::NeedPlayerAccept;
 
-	/** 方案B：客人吃完离座后留下“空碟”继续占据座位，玩家按 E 回收空碟才释放座位。
-	 *  关闭则退回旧行为（客人离座即释放座位）。默认开启。 */
+	/** 客人吃完后是否留下空碟占据座位（玩家按 E 回收才释放）。
+	 *  落座时会被 UBaseGameInstance::bUseDirtyPlateFlow（全局总开关）覆盖；
+	 *  这里单独设 true/false 可让某类客人强制启用/关闭（用于特殊客人）。默认 true。 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guest")
 	bool bUseDirtyPlateFlow = true;
 

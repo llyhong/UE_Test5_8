@@ -32,6 +32,7 @@
 #include "Components/PostProcessComponent.h"
 #include "Game/BaseGameInstance.h"
 #include "Game/BaseLevelBP.h"
+#include "Machine/StorageWarehouse.h"
 #include "UI/HUDWidget.h"
 #include "Machine/GateCounter.h"
 #include "Kismet/GameplayStatics.h"
@@ -351,6 +352,11 @@ void AShootCharacter::SetOverlappingEmptyPlate(AItemActor* Plate)
 void AShootCharacter::SetOverlappingResearchStove(AResearchStove* Stove)
 {
 	OverlappingResearchStove = Stove;
+}
+
+void AShootCharacter::SetOverlappingWarehouse(AStorageWarehouse* Warehouse)
+{
+	OverlappingWarehouse = Warehouse;
 }
 
 void AShootCharacter::SetOverlappingDialogue(UInteractionDialogueComponent* Comp)
@@ -694,6 +700,13 @@ void AShootCharacter::Pick(const FInputActionValue& Value)
 	{
 		DoThrow();
 	}
+	// 仓库：靠近仓库按 E 把背包里的物品存入仓库并清空背包（手上物品不受影响；背包为空时按 E 无副作用）。
+	// 必须排在 NeedDropDown 之前：否则手上拿着物品时按 E 会先把手上物品丢掉，到不了仓库分支，背包也就不会被清空。
+	else if (OverlappingWarehouse)
+	{
+		OverlappingWarehouse->DepositFromInventory(this);
+		return;
+	}
  	else if (NeedDropDown())
  	{
  		DoDropDown();
@@ -826,6 +839,28 @@ void AShootCharacter::DoPick()
  	{
  		return;
  	}
+
+	// 打烊（未营业）期间：按全局开关把“拾取”重定向为“直接收进背包”，玩家手上不残留物品；
+	// 营业时仍走原逻辑（拿在手上）。取不到时钟时按“营业中”处理，不特判。
+	if (UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetGameInstance()))
+	{
+		const bool bBusinessOpen = (GI->businessSimulation && GI->businessSimulation->TimeSystem)
+			? GI->businessSimulation->TimeSystem->IsBusinessOpen()
+			: true;
+		if (!bBusinessOpen && GI->bAutoStoreToBackpackWhileClosed)
+		{
+			AddItemToInventory(OverlappingItem); // 内部销毁世界物体并记入背包
+			PlayGatheringMontage(); // 收进背包时播放采集动画（此时动作状态为空闲，可正常播放）
+			if (GEngine)
+			{
+				GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Green,
+					TEXT("[拾取] 打烊期间已自动收进背包"));
+			}
+			SetOverlappingItem(nullptr);
+			return;
+		}
+	}
+
  	IsPicking = true;
 	//GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, TEXT("DoPick"));
  	if(OverlappingItem->GetItemState() != EItemState::EIS_Cooking && OverlappingItem->GetItemState() != EItemState::EIS_Equipped) //手上没有食物
@@ -1061,6 +1096,35 @@ bool AShootCharacter::AddItemToInventory(AItemActor* Item)
 	return true;
 }
 
+bool AShootCharacter::AddSlotToInventory(const FInventorySlot& Slot)
+{
+	if (IsInventoryFull())
+	{
+		UE_LOG(LogShoot, Warning, TEXT("[%s] 背包已满，无法放入 %s"),
+			*GetName(), *Slot.DisplayName);
+		return false;
+	}
+
+	// 同类物品堆叠：已存在相同 ItemClass 的槽位则数量+1，不再新增槽位
+	for (FInventorySlot& Existing : InventoryItems)
+	{
+		if (Existing.ItemClass == Slot.ItemClass)
+		{
+			Existing.Quantity += Slot.Quantity;
+			OnInventoryChanged.Broadcast();
+			UE_LOG(LogShoot, Log, TEXT("[%s] 物品 %s 已堆叠回背包，当前数量 %d(槽位数 %d)"),
+				*GetName(), *Slot.DisplayName, Existing.Quantity, InventoryItems.Num());
+			return true;
+		}
+	}
+
+	InventoryItems.Add(Slot);
+	OnInventoryChanged.Broadcast();
+	UE_LOG(LogShoot, Log, TEXT("[%s] 物品 %s 已放回背包，当前槽位数 %d"),
+		*GetName(), *Slot.DisplayName, InventoryItems.Num());
+	return true;
+}
+
 bool AShootCharacter::RemoveItemFromInventory(int32 SlotIndex)
 {
 	if (!InventoryItems.IsValidIndex(SlotIndex))
@@ -1088,6 +1152,7 @@ void AShootCharacter::StoreHeldItemToInventory()
 	{
 		return;
 	}
+
 	// 先解除手持状态(从手上/插槽分离)，再记录进背包(AddItemToInventory 内部会销毁物体)
 	// 注意：先保存局部指针，因为 SetPickingItem(nullptr) 会把成员 PickingItem 置空，
 	// 否则下面 AddItemToInventory(PickingItem) 传进去的是 null，导致物体不会被销毁。
@@ -1101,6 +1166,7 @@ void AShootCharacter::StoreHeldItemToInventory()
 	HandIK_LPoint = nullptr;
 	HandIK_RPoint = nullptr;
 
+	PlayGatheringMontage(); // 收进背包时播放采集动画（上方已复位为 EAS_Unoccupied，可正常播放）
 	AddItemToInventory(ItemToStore); // ItemToStore 在内部被销毁，注意之后不要再访问它
 }
 

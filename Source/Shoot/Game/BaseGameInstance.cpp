@@ -5,6 +5,45 @@
 
 #include "MySaveGame.h"
 #include "Kismet/GameplayStatics.h"
+#include "EngineUtils.h"
+#include "Engine/Engine.h"
+#include "NPC/GuestCharacter.h"
+#include "Machine/StorageWarehouse.h"
+
+/** 控制台命令：切换空碟玩法开关，方便 A/B 对比两种玩法（运行时输入：Game.ToggleDirtyPlateFlow） */
+static FAutoConsoleCommand CmdToggleDirtyPlateFlow(
+	TEXT("Game.ToggleDirtyPlateFlow"),
+	TEXT("切换空碟玩法：true=客人吃完留空碟（需按E收走）/ false=吃完直接离座桌面清空。用于对比两种玩法。"),
+	FConsoleCommandDelegate::CreateLambda([]()
+	{
+		UBaseGameInstance* GI = nullptr;
+		if (GEngine)
+		{
+			for (const FWorldContext& Ctx : GEngine->GetWorldContexts())
+			{
+				UWorld* W = Ctx.World();
+				if (W && (Ctx.WorldType == EWorldType::PIE || Ctx.WorldType == EWorldType::Game))
+				{
+					GI = Cast<UBaseGameInstance>(W->GetGameInstance());
+					if (GI)
+					{
+						break;
+					}
+				}
+			}
+		}
+
+		if (GI)
+		{
+			GI->SetDirtyPlateFlow(!GI->bUseDirtyPlateFlow);
+			UE_LOG(LogTemp, Log, TEXT("[Plate] 空碟玩法已切换为：%s"),
+				GI->bUseDirtyPlateFlow ? TEXT("留空碟（需按E收走）") : TEXT("不留空碟（吃完即清桌）"));
+		}
+		else
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[Plate] 未找到运行中的 GameInstance，无法切换空碟玩法"));
+		}
+	}));
 
 
 void UBaseGameInstance::Init()
@@ -115,6 +154,68 @@ bool UBaseGameInstance::IsIngredientUnlocked(int32 IngredientID) const
 		return true; // ID<0 表示无需解锁，默认可交互
 	}
 	return UnlockedIngredientIDs.Contains(IngredientID);
+}
+
+void UBaseGameInstance::SetDirtyPlateFlow(bool bEnable)
+{
+	if (bUseDirtyPlateFlow == bEnable)
+	{
+		return;
+	}
+	bUseDirtyPlateFlow = bEnable;
+
+	// 立即让在场的客人应用新值（已坐下的也即时切换；进行到一半的空碟流程保持不变）
+	if (UWorld* World = GetWorld())
+	{
+		for (TActorIterator<AGuestCharacter> It(World); It; ++It)
+		{
+			It->bUseDirtyPlateFlow = bEnable;
+		}
+
+		// 切换碟子模式：不收空碟 → 无限碟子；收空碟 → 有限（自动补满到总数）
+		if (curLevelBP && curLevelBP->PlateSystem)
+		{
+			curLevelBP->PlateSystem->SetInfinite(!bEnable);
+		}
+	}
+
+	OnDirtyPlateFlowChanged.Broadcast(bEnable);
+}
+
+int32 UBaseGameInstance::GetWarehouseStock(TSubclassOf<AItemActor> ItemClass) const
+{
+	int32 Total = 0;
+	if (!ItemClass)
+	{
+		return 0;
+	}
+	if (UWorld* World = GetWorld())
+	{
+		for (TActorIterator<AStorageWarehouse> It(World); It; ++It)
+		{
+			Total += It->GetStoredQuantity(ItemClass);
+		}
+	}
+	return Total;
+}
+
+bool UBaseGameInstance::ConsumeWarehouseItem(TSubclassOf<AItemActor> ItemClass)
+{
+	if (!ItemClass)
+	{
+		return false;
+	}
+	if (UWorld* World = GetWorld())
+	{
+		for (TActorIterator<AStorageWarehouse> It(World); It; ++It)
+		{
+			if (It->ConsumeOne(ItemClass))
+			{
+				return true;
+			}
+		}
+	}
+	return false;
 }
 
 void UBaseGameInstance::UnlockIngredients(const TArray<int32>& IngredientIDs)

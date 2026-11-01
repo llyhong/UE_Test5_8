@@ -2,6 +2,7 @@
 
 #include "Item/FoodSpawner.h"
 #include "Game/BaseGameInstance.h"
+#include "Machine/StorageWarehouse.h"
 #include "Engine/World.h"
 
 namespace
@@ -66,11 +67,25 @@ FGuid AFoodSpawner::GetSpawnerSaveGuid()
 	return SpawnerGuid;
 }
 
+bool AFoodSpawner::CanSpawn() const
+{
+	// 仓库驱动模式：能否生成取决于仓库中该食材是否有库存（取一件扣一件）
+	if (UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetWorld()->GetGameInstance()))
+	{
+		if (GI->bLinkSpawnerToWarehouse && SpawnItemActorClass)
+		{
+			return GI->GetWarehouseStock(SpawnItemActorClass) > 0;
+		}
+	}
+	// 原逻辑：无限(-1)或剩余>0 均可生成；0 表示已空
+	return RemainingCount != 0;
+}
+
 void AFoodSpawner::BeginPlay()
 {
 	Super::BeginPlay();
 
-	// 仅有限模式参与存档；无限(-1)不需要持久化
+	// 仅有限模式参与存档；无限(-1)不需要持久化（仓库驱动模式由仓库库存决定，也不走此处）
 	if (RemainingCount < 0)
 	{
 		return;
@@ -95,6 +110,16 @@ void AFoodSpawner::BeginPlay()
 
 void AFoodSpawner::ConsumeOne()
 {
+	// 仓库驱动模式：从仓库库存取料（取一件仓库减一件），不再动自身 RemainingCount
+	if (UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetWorld()->GetGameInstance()))
+	{
+		if (GI->bLinkSpawnerToWarehouse && SpawnItemActorClass)
+		{
+			GI->ConsumeWarehouseItem(SpawnItemActorClass);
+			return;
+		}
+	}
+
 	// 仅在有限模式下递减；无限(-1)保持不动
 	if (RemainingCount > 0)
 	{

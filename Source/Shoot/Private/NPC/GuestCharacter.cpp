@@ -423,6 +423,13 @@ void AGuestCharacter::SitDown()
 	{
 		return;
 	}
+
+	// 空碟玩法：以 GameInstance 的总开关为准（客人落座时读取一次，运行时改开关会同步到在场客人）
+	if (UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetGameInstance()))
+	{
+		bUseDirtyPlateFlow = GI->bUseDirtyPlateFlow;
+	}
+
 	// 已成功入座：取消“走向座位超时”兜底（避免它随后误触发离场）
 	if (UWorld* World = GetWorld())
 	{
@@ -876,13 +883,19 @@ bool AGuestCharacter::TryServeDish(AShootCharacter* Player, AItemActor* Dish)
 
 void AGuestCharacter::FinishEating()
 {
-	// 方案B：进食结束 → 把桌上的菜变成“空碟”并留在餐桌的碟子挂点上；客人离座但座位不释放，
-	// 直到玩家按 E 收走空碟（PickUpByPlayer → ChairSeat::ClearDirtyPlate）才真正释放。
-	// 空碟的清理 / 吸附挂点 / 启用回收球全部由 ChairSeat::SetDirtyPlate 统一处理。
-	if (bUseDirtyPlateFlow && SeatActor && PlateOnTable && PlateOnTable->IsValidLowLevel())
+	// 两种玩法在此分叉：
+	//   - 留空碟（bUseDirtyPlateFlow）：把桌上的成品变成空碟留在挂点；客人离座但座位不释放，
+	//     直到玩家按 E 收走空碟（PickUpByPlayer → ChairSeat::ClearDirtyPlate）才真正释放。
+	//   - 不留空碟（关）：桌面直接清空（销毁成品），客人离座并立即释放座位，没有收碟环节。
+	const bool bUseDirty = bUseDirtyPlateFlow && SeatActor && PlateOnTable && PlateOnTable->IsValidLowLevel();
+	if (bUseDirty)
 	{
 		SeatActor->SetDirtyPlate(PlateOnTable);
-		SeatActor = nullptr; // 客人离座时不释放座位（改由玩家收走空碟触发）
+		SeatActor = nullptr; // 离座时不释放座位（改由玩家收走空碟触发）
+	}
+	else if (PlateOnTable && PlateOnTable->IsValidLowLevel())
+	{
+		PlateOnTable->Destroy();
 	}
 
 	PlateOnTable = nullptr;

@@ -28,9 +28,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
 	int32 RemainingCount = -1;
 
-	/** 是否还能生成（无限或剩余>0） */
+	/** 是否还能生成：仓库驱动模式下取决于仓库是否有该食材库存；否则原逻辑（无限或剩余>0） */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Spawn")
-	bool CanSpawn() const { return RemainingCount != 0; }
+	bool CanSpawn() const;
 
 	/** 成功生成一次后消耗一个数量（无限模式不影响），并写回存档 */
 	UFUNCTION(BlueprintCallable, Category = "Spawn")

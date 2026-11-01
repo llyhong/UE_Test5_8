@@ -34,10 +34,22 @@ public:
 	UFUNCTION(BlueprintCallable)
 	void RefillToFull();
 
-	/** 当前可用碟子数（= CurOrderIndex） */
+	/** 当前可用碟子数：无限模式返回极大值（UI 可显示为 ∞）；有限模式返回 CurOrderIndex */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Gameplay")
-	int32 GetAvailablePlates() const { return CurOrderIndex; }
-	
+	int32 GetAvailablePlates() const { return bInfinitePlates ? TNumericLimits<int32>::Max() : CurOrderIndex; }
+
+	/** 是否无限碟子（由空碟玩法总开关 bUseDirtyPlateFlow 取反驱动：不收空碟=false → 无限） */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Gameplay")
+	bool IsInfinitePlates() const { return bInfinitePlates; }
+
+	/** 切换无限碟子模式：true=无限（RemovePlate/AddPlate 皆为 no-op，无需回收）；
+	 *  false=恢复有限，并把可用碟子补满到总数（恢复收碟闭环） */
+	UFUNCTION(BlueprintCallable, Category = "Gameplay")
+	void SetInfinite(bool bInfinite);
+
+	UPROPERTY(BlueprintReadOnly, Category = "Gameplay")
+	bool bInfinitePlates = false;
+
 	UPROPERTY(BlueprintReadOnly, Category = "Gameplay")
 	int CurOrderIndex = 3;
 	

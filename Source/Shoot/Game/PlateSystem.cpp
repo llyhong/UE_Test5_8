@@ -67,8 +67,23 @@ void APlateSystem::RefillToFull()
 	UE_LOG(LogTemp, Log, TEXT("[PlateSystem] 碟子已补满：可用 %d / 总数 %d"), CurOrderIndex, TotalCount);
 }
 
+void APlateSystem::SetInfinite(bool bInfinite)
+{
+	bInfinitePlates = bInfinite;
+	// 切回有限时恢复：可用碟子补满到总数，重新启用收碟闭环
+	if (!bInfinitePlates)
+	{
+		RefillToFull();
+	}
+}
+
 void APlateSystem::AddPlate()
 {
+	// 无限模式：无需回收，AddPlate 是 no-op（也不广播）
+	if (bInfinitePlates)
+	{
+		return;
+	}
 	if (CurOrderIndex>=TotalCount)
 	{
 		CurOrderIndex = TotalCount;
@@ -80,6 +95,11 @@ void APlateSystem::AddPlate()
 
 void APlateSystem::RemovePlate()
 {
+	// 无限模式：始终“有碟子”，RemovePlate 是 no-op（烹饪机/上菜不会因没碟子卡住）
+	if (bInfinitePlates)
+	{
+		return;
+	}
 	if (CurOrderIndex<=0)
 	{
 		CurOrderIndex = 0;

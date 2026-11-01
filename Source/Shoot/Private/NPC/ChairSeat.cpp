@@ -138,13 +138,29 @@ void AChairSeat::Release()
 	ClearOrder();
 	Occupant = nullptr;
 
-	// 桌上还摆着一道没吃过的成品（客人被强制清场 / 异常销毁）：转成空碟交给玩家收走，
-	// 避免座位被一道永远收不走的菜永久占住。
+	// 桌上还摆着一道没吃过的成品（客人被强制清场 / 异常销毁）：
+	//   - 留空碟模式 → 转成空碟交给玩家收走，避免座位被一道永远收不走的菜永久占住；
+	//   - 不留空碟模式 → 直接销毁成品并继续释放座位。
 	if (IsValid(PlateOnSeat) && !PlateOnSeat->bIsEmptyPlate)
 	{
-		SetDirtyPlate(PlateOnSeat);
-		RefreshTipsWidget();
-		return;
+		bool bUseDirty = true;
+		if (const UWorld* World = GetWorld())
+		{
+			if (const UBaseGameInstance* GI = Cast<UBaseGameInstance>(World->GetGameInstance()))
+			{
+				bUseDirty = GI->bUseDirtyPlateFlow;
+			}
+		}
+
+		if (bUseDirty)
+		{
+			SetDirtyPlate(PlateOnSeat);
+			RefreshTipsWidget();
+			return;
+		}
+
+		PlateOnSeat->Destroy();
+		PlateOnSeat = nullptr;
 	}
 
 	// 空碟未回收：座位保持占用，等玩家按 E 收走空碟由 ClearDirtyPlate 释放

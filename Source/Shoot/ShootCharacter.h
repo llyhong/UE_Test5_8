@@ -139,6 +139,10 @@ private:
 	UPROPERTY(VisibleInstanceOnly)
 	TObjectPtr<class AResearchStove> OverlappingResearchStove;
 
+	// 当前可存物/取物的仓库（靠近时由仓库的重叠球注册；用于 E 键把背包物品存入仓库）
+	UPROPERTY(VisibleInstanceOnly)
+	TObjectPtr<class AStorageWarehouse> OverlappingWarehouse;
+
 	// 当前可对话的交互对象（靠近时由 UInteractionDialogueComponent 注册；通用对话系统）
 	UPROPERTY(VisibleInstanceOnly)
 	TObjectPtr<class UInteractionDialogueComponent> OverlappingDialogue;
@@ -325,6 +329,13 @@ public:
 	UFUNCTION(BlueprintCallable, Category="ShootCharacter")
 	FORCEINLINE AResearchStove* GetOverlappingResearchStove() const { return OverlappingResearchStove; }
 
+	// 仓库交互：靠近时由 AStorageWarehouse 的重叠球注册/反注册（用于 E 键把背包物品存入仓库）
+	UFUNCTION(BlueprintCallable, Category="Warehouse")
+	void SetOverlappingWarehouse(AStorageWarehouse* Warehouse);
+
+	UFUNCTION(BlueprintCallable, Category="ShootCharacter")
+	FORCEINLINE AStorageWarehouse* GetOverlappingWarehouse() const { return OverlappingWarehouse; }
+
 
 	// 通用对话交互：靠近时由 UInteractionDialogueComponent 注册/反注册（用于 E 键对话）
 	UFUNCTION(BlueprintCallable, Category="Dialogue")
@@ -362,6 +373,11 @@ public:
 	// 注意：这里记录的是"类型"，取出时按 ItemClass 重新生成。
 	UFUNCTION(BlueprintCallable, Category="Inventory")
 	bool AddItemToInventory(AItemActor* Item);
+
+	// 直接把一条背包槽位记录追加进背包（按 ItemClass 堆叠），并广播 OnInventoryChanged。
+	// 用于仓库取回等场景（不需要一个真实 Actor，仅搬运轻量记录）。
+	UFUNCTION(BlueprintCallable, Category="Inventory")
+	bool AddSlotToInventory(const FInventorySlot& Slot);
 
 	// 按槽位索引从背包移除(仅删记录，不会生成物体)；索引无效则失败。
 	UFUNCTION(BlueprintCallable, Category="Inventory")

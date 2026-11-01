@@ -15,6 +15,9 @@
 #include "MySaveGame.h"
 #include "BaseGameInstance.generated.h"
 
+class AItemActor;
+class AStorageWarehouse;
+
 /**
  * 
  */
@@ -26,6 +29,9 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnIngredientsUnlocked, const TArray
 
 /** 菜谱解锁广播：参数 = 本次新解锁的菜品 FoodID 列表（由研究炉研究成功后解锁） */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnRecipesUnlocked, const TArray<int32>&, UnlockedFoodIDs);
+
+/** 空碟玩法开关变化（true=留空碟，false=不留） */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDirtyPlateFlowChanged, bool, bEnabled);
 
 UCLASS()
 class SHOOT_API UBaseGameInstance : public UGameInstance
@@ -60,6 +66,43 @@ public:
 	/** 经济/声誉系统（声誉、金钱、购买/升级） */
 	UPROPERTY(BlueprintReadOnly, Category = "Gameplay")
 	TObjectPtr<UEconomySystem> economySystem;
+
+	/** 空碟玩法总开关（一键切换 A/B 对比）：
+	 *   true  = 客人吃完后留下空碟，玩家需按 E 收走（原方案B）；
+	 *   false = 客人吃完直接离座、桌面立即清空，无需收碟环节。
+	 *  客人落座时会读取此值；运行时调用 SetDirtyPlateFlow 可立即影响在场客人。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Gameplay|Plate")
+	bool bUseDirtyPlateFlow = false;
+
+	/** 空碟玩法开关变化广播（参数 = 新值），蓝图可据此刷新提示 */
+	UPROPERTY(BlueprintAssignable, Category = "Gameplay|Plate")
+	FOnDirtyPlateFlowChanged OnDirtyPlateFlowChanged;
+
+	/** 运行时切换空碟玩法（通知所有在场客人立即应用新值） */
+	UFUNCTION(BlueprintCallable, Category = "Gameplay|Plate")
+	void SetDirtyPlateFlow(bool bEnable);
+
+	/** 打烊（未营业）期间“拾取物品”的行为路由开关：
+	 *   true  = 打烊时拾取物品自动收进背包（玩家手上不残留物品）；营业时仍正常拿在手上（默认）；
+	 *   false = 不论营业与否，拾取都拿在手上（原行为，不做打烊特判）。
+	 *   用于对比“打烊后拾取是直接入包、还是拿在手上”的玩法差异。运行时可在蓝图 Class Defaults 调整。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Gameplay|Inventory")
+	bool bAutoStoreToBackpackWhileClosed = true;
+
+	/** 食材生成箱是否由仓库库存驱动：
+	 *   false = 食材箱各自独立，可无限(-1)/有限(>0)生成，与仓库无关（默认，原行为）；
+	 *   true  = 食材箱改为从仓库库存取料：箱内“剩余数量”= 仓库中该食材的存量，取一件仓库减一件，仓库为空则箱不出料。
+	 *   用于对比“食材箱独立供料”与“中央仓库统一供料”两种玩法。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Gameplay|Spawner")
+	bool bLinkSpawnerToWarehouse = false;
+
+	/** 仓库驱动模式下：所有仓库中某物品类的总存量（无仓库返回 0）。由 AFoodSpawner 取料时查询。 */
+	UFUNCTION(BlueprintCallable, Category = "Gameplay|Spawner")
+	int32 GetWarehouseStock(TSubclassOf<AItemActor> ItemClass) const;
+
+	/** 仓库驱动模式下：从仓库消耗一件某物品类（库存 -1）。成功返回 true（所有仓库都缺货则 false）。 */
+	UFUNCTION(BlueprintCallable, Category = "Gameplay|Spawner")
+	bool ConsumeWarehouseItem(TSubclassOf<AItemActor> ItemClass);
 
 	/** 开罗式经营模拟核心（时钟 / 员工 / 日-月-年结算 / 经营星级） */
 	UPROPERTY(BlueprintReadOnly, Category = "Gameplay")

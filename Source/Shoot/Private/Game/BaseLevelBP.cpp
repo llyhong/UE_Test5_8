@@ -76,6 +76,16 @@ void ABaseLevelBP::BeginPlay()
 		ApplyDishwasherPlateConfig();
 	}
 
+	// 与空碟玩法总开关对接：不收空碟（bUseDirtyPlateFlow=false）时碟子无限，无需回收环节；
+	// 收空碟（true）时恢复有限（数量由 TotalCount 决定，仍需玩家回收）
+	if (PlateSystem)
+	{
+		if (UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetGameInstance()))
+		{
+			PlateSystem->SetInfinite(!GI->bUseDirtyPlateFlow);
+		}
+	}
+
 	// 创建订单 UI（与订单系统同生命周期）：立即绑定，无需轮询
 	if (orderSystem && OrderWidgetClass)
 	{
