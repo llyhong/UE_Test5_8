@@ -13,6 +13,7 @@
 #include "NPC/ChairSeat.h"
 #include "Dialogue/DialogueComponent.h"
 #include "Item/Plant.h"
+#include "Item/ItemActor.h"
 #include "Item/FoodSpawner.h"
 #include "Item/Dish.h"
 #include "Item/Desk.h"
@@ -90,6 +91,24 @@ void AShootCharacter::GatheringMontageEnded(UAnimMontage* Montage, bool bInterru
 		PendingGatherPlant->Harvest();
 	}
 	PendingGatherPlant = nullptr;
+}
+
+void AShootCharacter::WateringMontageEnded(UAnimMontage* Montage, bool bInterrupted)
+{
+	// 浇水动画播完（无论是否被中断，或由定时器兜底触发）才真正补水；
+	// 描边由 APlant::UpdateHarvestHintOutline 在补水后（不再需要浇水时）自动清除，此处不再手动处理
+	if (PendingWaterPlant && IsValid(PendingWaterPlant))
+	{
+		PendingWaterPlant->Water();
+		PendingWaterPlant->SetWaterHintSuppressed(true); // 浇完后取消高亮（植株变干或离开范围后恢复）
+	}
+	PendingWaterPlant = nullptr;
+
+	// 蒙太奇若被误配为“循环”，此处强制停止，避免角色一直停留在浇水动画
+	if (UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance())
+	{
+		AnimInstance->Montage_Stop(0.25f, WateringMontage);
+	}
 }
 
  bool AShootCharacter::CanAttack()
@@ -431,9 +450,39 @@ void AShootCharacter::InteractWithPlant()
 			}
 		}
 
-		// 触发浇水：先补水，再播放浇水动画（动画与补水解耦，浇水本身即时生效）
-		OverlappingPlant->Water();
-		PlayWateringMontage();
+		// 同一株植物正在等待浇水动画时不再重复触发
+		if (PendingWaterPlant == nullptr)
+		{
+			// 注：植被高亮改由 APlant::UpdateHarvestHintOutline 在“玩家靠近且需要浇水”时处理（浇水前置指示），
+			// 此处不再手动描边，避免与植物自身描边缓存冲突。
+
+			// 触发浇水：先播放浇水动画，待动画播完（OnWateringMontageEnded）后才真正补水
+			if (PlayWateringMontage())
+			{
+				PendingWaterPlant = OverlappingPlant;
+				if (UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance())
+				{
+					OnWateringMontageEnded.BindUObject(this, &AShootCharacter::WateringMontageEnded);
+					AnimInstance->Montage_SetEndDelegate(OnWateringMontageEnded, WateringMontage);
+				}
+
+				// 兜底定时器：以蒙太奇一轮时长为准到点强制完成浇水。
+				// 作用：即使浇水蒙太奇被误配为“循环”（自然结束事件永不触发），
+				// 也能在播放一轮后补水并停止蒙太奇，避免角色一直停留在浇水状态。
+				const float Duration = (WateringMontage && WateringMontage->GetPlayLength() > 0.f)
+					? WateringMontage->GetPlayLength()
+					: 1.f;
+				FTimerDelegate WateringDoneDel;
+				WateringDoneDel.BindUObject(this, &AShootCharacter::WateringMontageEnded, (UAnimMontage*)nullptr, false);
+				GetWorldTimerManager().SetTimer(WateringDoneTimerHandle, WateringDoneDel, Duration, false);
+			}
+			else
+			{
+				// 蒙太奇未播放（未配置或角色忙碌）：直接补水（描边由植物自身逻辑管理）
+				OverlappingPlant->Water();
+				OverlappingPlant->SetWaterHintSuppressed(true);
+			}
+		}
 	}
 }
 
@@ -457,7 +506,9 @@ void AShootCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComp
 		EnhancedInputComponent->BindAction(AttackAction, ETriggerEvent::Triggered, this, &AShootCharacter::Attack);
 
 		// Pick：拾取；靠近植物时 Pick 内部会转为浇水/驱虫/收获（见 AShootCharacter::Pick）
-		EnhancedInputComponent->BindAction(PickAction, ETriggerEvent::Triggered, this, &AShootCharacter::Pick);
+		// 注意：使用 Started（按下瞬间触发一次），不要用 Triggered（按住期间每帧都触发），
+		// 否则按住 E 时浇水/采集动画播完会立刻被重新触发，表现为“一直循环”，对话也会反复开关。
+		EnhancedInputComponent->BindAction(PickAction, ETriggerEvent::Started, this, &AShootCharacter::Pick);
 
 		//PushFood
 		EnhancedInputComponent->BindAction(PushFoodAction, ETriggerEvent::Started, this, &AShootCharacter::PushFoodStart);

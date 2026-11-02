@@ -138,8 +138,8 @@ void APlant::Tick(float DeltaTime)
 		return;
 	}
 
-	// 浇水消耗
-	if (Info->bRequiresWater)
+	// 浇水消耗：仅在尚未浇满（幼苗期）时按消耗率下降；浇满后保持满水，无需补浇，直接长到结果
+	if (Info->bRequiresWater && !bWatered)
 	{
 		WaterLevel = FMath::Max(0.f, WaterLevel - Info->WaterConsumeRate * DeltaTime);
 	}
@@ -172,12 +172,21 @@ void APlant::Tick(float DeltaTime)
 	const bool bHasWater = !Info->bRequiresWater || WaterLevel > 0.f;
 	if (bHasWater && !bPest)
 	{
-		StageTimer += DeltaTime * FMath::Max(0.0001f, Info->GrowthSpeed);
-
-		const float StageDuration = Info->GrowthStages[CurrentStageIndex].StageDuration;
-		if (StageDuration > 0.f && StageTimer >= StageDuration)
+		// 采摘后的重新生长延迟：先消耗 RegrowDelayRemaining（此期间停留在幼苗阶段、不推进阶段），
+		// 消耗完后才按正常 StageTimer 推进。等效于“幼苗→下一阶段”的时长 = 该阶段 StageDuration + RegrowDelayAfterHarvest。
+		if (RegrowDelayRemaining > 0.f)
 		{
-			AdvanceStage();
+			RegrowDelayRemaining = FMath::Max(0.f, RegrowDelayRemaining - DeltaTime);
+		}
+		else
+		{
+			StageTimer += DeltaTime * FMath::Max(0.0001f, Info->GrowthSpeed);
+
+			const float StageDuration = Info->GrowthStages[CurrentStageIndex].StageDuration;
+			if (StageDuration > 0.f && StageTimer >= StageDuration)
+			{
+				AdvanceStage();
+			}
 		}
 	}
 
@@ -250,6 +259,7 @@ void APlant::ResetToSeedStage()
 	bPest = false;
 	PestTimer = 0.f;
 	bHarvested = false;
+	bWatered = false;
 
 	// 取消任何残留的逐个重结果定时器
 	GetWorldTimerManager().ClearTimer(RefruitTimerHandle);
@@ -266,20 +276,25 @@ void APlant::ResetToSeedStage()
 	}
 }
 
-void APlant::Water(float Amount)
+void APlant::Water(float /*Amount*/)
 {
 	const FPlantInfo* Info = GetPlantInfo();
 	if (!Info)
 	{
 		return;
 	}
-	WaterLevel = FMath::Min(Info->WaterMax, WaterLevel + Amount);
+	// 一次浇水即把植被浇满：避免对一株植物反复多次浇水，浇一次即可满足其整个生长周期所需水分；
+	// 浇满后置位 bWatered，之后不再消耗水分，长到结果前都无需补浇。
+	WaterLevel = Info->WaterMax;
+	bWatered = true;
 }
 
 bool APlant::NeedsWater() const
 {
 	const FPlantInfo* Info = GetPlantInfo();
-	return Info && Info->bRequiresWater && WaterLevel < Info->WaterMax;
+	// 仅当配置需要浇水且当前水位已干涸（<=0）才视为“需要浇水”：
+	// 这样一次浇水浇满后，在水分被消耗回 0 之前无法再次浇水，避免对一株植物反复多次浇水。
+	return Info && Info->bRequiresWater && WaterLevel <= 0.f;
 }
 
 void APlant::RemovePest()
@@ -354,8 +369,9 @@ bool APlant::Harvest()
 		}
 		InteractingCharacter = nullptr;
 
-		// 摘取后不销毁植被：重置回第一阶段，重新生长并再次结果
+		// 摘取后不销毁植被：立即重置回幼苗阶段重新生长；重新生长前的等待并入“幼苗→下一阶段”的时长（见 Tick：RegrowDelayRemaining）
 		ResetToSeedStage();
+		RegrowDelayRemaining = Info ? Info->RegrowDelayAfterHarvest : 0.f;
 		return true;
 	}
 
@@ -389,11 +405,12 @@ bool APlant::Harvest()
 	}
 	SpawnedFruits.Empty();
 
-	// 摘果后：若启用自动重新结果，则重置回第一阶段重新生长（而非停留在结果阶段重结果）；
+	// 摘果后：若启用自动重新结果，则立即重置回幼苗阶段重新生长（重新生长前的等待并入“幼苗→下一阶段”时长）；
 	// 否则标记为已收获并停止生长（植被保留但不再结果）。
 	if (Info->bAutoRefruit)
 	{
 		ResetToSeedStage();
+		RegrowDelayRemaining = Info->RegrowDelayAfterHarvest;
 	}
 	else
 	{
@@ -601,23 +618,40 @@ void APlant::OnInteractionEndOverlap(UPrimitiveComponent* OverlappedComponent, A
 		{
 			Character->SetOverlappingPlant(nullptr);
 		}
-		if (InteractingCharacter == Character)
-		{
-			InteractingCharacter = nullptr;
-		}
-		UpdateHarvestHintOutline();
+	if (InteractingCharacter == Character)
+	{
+		InteractingCharacter = nullptr;
+	}
+	// 玩家离开范围：清除浇水提示抑制，下次靠近若仍缺水会重新高亮
+	bWaterHintSuppressed = false;
+	UpdateHarvestHintOutline();
 	}
 }
 
 void APlant::UpdateHarvestHintOutline()
 {
-	// 仅当“入背包采摘模式 + 已结果 + 未收获 + 已解锁 + 玩家在范围内 + 是当前正在交互（待采摘）的目标植被”时描边
-	const bool bShowHint = bHarvestToInventory
+	// 植株重新变干（水耗光）时清除浇水提示抑制，恢复“需浇水”高亮
+	if (WaterLevel <= 0.f)
+	{
+		bWaterHintSuppressed = false;
+	}
+
+	// 采摘提示：入背包采摘模式 + 已结果 + 未收获 + 已解锁 + 玩家在范围内 + 是当前待采摘目标
+	const bool bHarvestHint = bHarvestToInventory
 		&& IsFruiting()
 		&& !bHarvested
 		&& (IngredientUnlockID < 0 || bIngredientUnlocked)
 		&& InteractingCharacter != nullptr
 		&& InteractingCharacter->GetOverlappingPlant() == this;
+
+	// 浇水提示：玩家在范围内且植被还需要浇水——作为“可浇水 / 待浇水”的前置指示（先于浇水动作出现）；
+	// 浇水动作完成后会被 bWaterHintSuppressed 抑制，避免“刚浇完”立刻又亮。
+	const bool bWaterHint = InteractingCharacter != nullptr
+		&& InteractingCharacter->GetOverlappingPlant() == this
+		&& NeedsWater()
+		&& !bWaterHintSuppressed;
+
+	const bool bShowHint = bHarvestHint || bWaterHint;
 
 	// 仅在状态变化时改写自定义深度，避免每帧无意义调用
 	if (bShowHint != bHintOutlineActive)
@@ -625,6 +659,17 @@ void APlant::UpdateHarvestHintOutline()
 		bHintOutlineActive = bShowHint;
 		AItemActor::SetActorsOutline(this, bShowHint);
 	}
+}
+
+void APlant::SetWaterHintSuppressed(bool bSuppress)
+{
+	if (bWaterHintSuppressed == bSuppress)
+	{
+		return;
+	}
+	bWaterHintSuppressed = bSuppress;
+	// 立即刷新描边，使浇完水后高亮当帧取消
+	UpdateHarvestHintOutline();
 }
 
 void APlant::SetIngredientUnlocked(bool bUnlocked)

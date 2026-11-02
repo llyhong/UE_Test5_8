@@ -190,6 +190,10 @@ private:
 	UFUNCTION()
 	void GatheringMontageEnded(UAnimMontage* Montage, bool bInterrupted);
 
+	/** 浇水蒙太奇结束回调：此时才真正补水并取消描边 */
+	UFUNCTION()
+	void WateringMontageEnded(UAnimMontage* Montage, bool bInterrupted);
+
 bool CanAttack(); 
 	bool IsHolding();
 	bool CanPick(); //可以捡
@@ -574,6 +578,15 @@ public:
 
 	/** 正在等待采集动画结束、随后要收获的植物（避免动画途中被销毁） */
 	TObjectPtr<APlant> PendingGatherPlant = nullptr;
+
+	/** 浇水蒙太奇结束委托（用于动画播完后才真正补水） */
+	FOnMontageEnded OnWateringMontageEnded;
+
+	/** 正在等待浇水动画结束、随后要补水的植物（同时用于高亮描边） */
+	TObjectPtr<APlant> PendingWaterPlant = nullptr;
+
+	/** 浇水完成定时器：即使浇水蒙太奇被设为“循环”，也能在播放一轮时长后强制结束浇水流程 */
+	FTimerHandle WateringDoneTimerHandle;
 
 
 	 UFUNCTION(BlueprintImplementableEvent, Category="Character Events")

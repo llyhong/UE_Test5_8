@@ -121,9 +121,13 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Plant")
 	float GetWater() const { return WaterLevel; }
 
-	/** 是否需要浇水：配置了需要浇水（bRequiresWater）且当前水位尚未满 */
+	/** 是否需要浇水：配置了需要浇水（bRequiresWater）且当前水位已干涸（<=0）。浇满后须等水分消耗回 0 才可再次浇水 */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Plant")
 	bool NeedsWater() const;
+
+	/** 设置浇水提示抑制：浇水动作完成后调用以取消高亮；植株重新变干或玩家离开范围后自动恢复 */
+	UFUNCTION(BlueprintCallable, Category = "Plant")
+	void SetWaterHintSuppressed(bool bSuppress);
 
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Plant")
 	bool HasPest() const { return bPest; }
@@ -173,6 +177,7 @@ protected:
 	void AdvanceStage();
 	/** 摘取后重置回第一阶段（种子期）：清空收获/害虫状态并恢复生长，使植被重新生长结果（不再销毁植被） */
 	void ResetToSeedStage();
+
 	void SpawnFruit();
 
 	/** 在指定挂点索引处生出一个果实（供一次性结满与逐个重结果共用） */
@@ -196,6 +201,9 @@ protected:
 	float PestTimer = 0.f;
 	bool bHarvested = false;
 
+	/** 是否已浇满：浇满后置位，之后不再消耗水分（保持满水长到结果），摘果重置回幼苗时清除 */
+	bool bWatered = false;
+
 	/** 当前长在树上的果实（进入结果阶段时生成，收获时收集）。熟度状态已下沉到每个果实自身，
 	 *  由植物在生成果实时写入配置并启动计时，果实独立推进与广播。 */
 	UPROPERTY()
@@ -208,6 +216,12 @@ protected:
 	/** 当前采摘描边是否已开启（缓存，避免每帧重复调用 SetActorsOutline） */
 	bool bHintOutlineActive = false;
 
+	/** 浇水提示抑制：浇水动作完成后置位，避免“刚浇完”立刻又被高亮；植株重新变干或玩家离开范围后自动清除 */
+	bool bWaterHintSuppressed = false;
+
 	/** 自动重新结果定时器（逐个生长时用） */
 	FTimerHandle RefruitTimerHandle;
+
+	/** 采摘后重新生长前的等待时长（秒）：并入“幼苗→下一阶段”的时长，等效于该阶段 StageDuration + 此值。由 Harvest 重置植被时写入，Tick 中逐渐消耗。 */
+	float RegrowDelayRemaining = 0.f;
 };

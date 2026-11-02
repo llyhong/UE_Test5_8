@@ -96,6 +96,11 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fruit")
 	float RefruitInterval = 0.f;
 
+	/** 摘果后，重新开始成长（重置回第一阶段）之前需要等待的秒数；0=立即重新开始（无延迟）。
+	 *  延迟期间植被保持“已收获/等待”状态，不重新生长也不可再次采摘。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fruit")
+	float RegrowDelayAfterHarvest = 0.f;
+
 	// ========== 熟度（结果阶段内的“成熟 / 熟过头”子阶段） ==========
 	/** 是否启用熟度子阶段：结果后继续计时，区分“成熟”与“熟过头”，从而决定采摘品质 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ripeness")
