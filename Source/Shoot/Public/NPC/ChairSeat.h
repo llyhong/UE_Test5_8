@@ -196,6 +196,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Chair|Tips")
 	EChairSeatTipsMode TipsMode = EChairSeatTipsMode::OrderOnly;
 
+	/** 提示控件（TipsWidget）隐藏距离：玩家（ShootCharacter）离本餐桌超过该距离时隐藏；<=0 表示不限制距离。蓝图可配置 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Chair|Tips", meta = (ClampMin = "0.0"))
+	float TipsWidgetHideDistance = 800.f;
+
 	/** 当前桌况（空 / 入座中 / 等待点单 / 等待上菜 / 用餐中 / 待收空碟），提示控件按它决定显示什么 */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Chair|Tips")
 	EChairTipsState GetSeatState() const;
@@ -270,6 +274,9 @@ public:
 protected:
 	/** 按 TipsMode 与当前桌况更新控件显隐（显示时顺带确保控件实例已创建） */
 	void UpdateTipsVisibility();
+
+	/** 玩家（ShootCharacter）是否在提示控件显示距离内：超出 TipsWidgetHideDistance 返回 false（<=0 视为不限制） */
+	bool IsPlayerWithinTipsWidgetDistance() const;
 
 	/** 交互球：玩家进入范围时注册到玩家（AShootCharacter::SetOverlappingChairSeat） */
 	UFUNCTION()

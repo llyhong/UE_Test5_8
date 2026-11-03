@@ -192,6 +192,25 @@ float AGuestCharacter::GetOrderRemainSeconds() const
 	return FMath::Max(0.f, MaxWait - CurrentOrder->waitTime);
 }
 
+bool AGuestCharacter::IsPlayerWithinStatusWidgetDistance() const
+{
+	// <=0 视为不限制距离，任何距离都允许显示
+	if (StatusWidgetHideDistance <= 0.f)
+	{
+		return true;
+	}
+
+	// 取玩家 Pawn（ShootCharacter），取其位置与本客人比较距离
+	if (APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0))
+	{
+		const float DistSq = FVector::DistSquared(GetActorLocation(), PlayerPawn->GetActorLocation());
+		return DistSq <= FMath::Square(StatusWidgetHideDistance);
+	}
+
+	// 拿不到玩家时不强制隐藏，避免误隐藏
+	return true;
+}
+
 void AGuestCharacter::RefreshStatusWidgetVisibility()
 {
 	if (!StatusWidgetComp)
@@ -199,7 +218,8 @@ void AGuestCharacter::RefreshStatusWidgetVisibility()
 		return;
 	}
 
-	const bool bShow = ShouldShowStatusWidget();
+	// 是否满足显示条件（状态）且玩家在气泡显示距离内；超出距离则隐藏
+	const bool bShow = ShouldShowStatusWidget() && IsPlayerWithinStatusWidgetDistance();
 	if (bShow)
 	{
 		// 组件隐藏时不会创建控件实例，显示前先确保建出来（InitWidget 内部幂等）

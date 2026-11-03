@@ -76,7 +76,12 @@ public:
 	float PestInterval = 30.f;
 
 	// ========== 果实 ==========
-	/** 结出的果实类型（在蓝图中选择 ClassType，建议为 AItemActor 子类以便拾取） */
+	/** 是否在植物上显示果实模型：false 时不会在树上长出可见果实（如番茄/玉米这类整株模型本身就是成熟形态的作物），
+	 *  但成熟后依然可以采摘并获得果实，熟度 / 品质 / 采摘逻辑完全不变。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fruit")
+	bool bShowFruitOnPlant = true;
+
+	/** 结出的果实类型（采摘时按此类型产出，必须配置才能采摘） */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fruit")
 	TSubclassOf<AItemActor> FruitClass = nullptr;
 
@@ -84,8 +89,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fruit")
 	int32 FruitCount = 1;
 
-	/** 果实挂点（植物模型上的插槽名）。多个果实时按 “基础名_索引” 自动对齐到对应插槽（如 Fruit_0 / Fruit_1 / Fruit_2…）；不足时回退到基础名。 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fruit")
+	/** 果实挂点（植物模型上的插槽名）。多个果实时按 “基础名_索引” 自动对齐到对应插槽（如 Fruit_0 / Fruit_1 / Fruit_2…）；不足时回退到基础名。
+	 *  仅在 bShowFruitOnPlant=true 时有效（不显示果实时无需挂点）。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fruit", meta = (EditCondition = "bShowFruitOnPlant"))
 	FName FruitAttachSocket = NAME_None;
 
 	/** 被玩家摘果后是否自动重新开始结果（循环生长，否则摘一次后停止） */

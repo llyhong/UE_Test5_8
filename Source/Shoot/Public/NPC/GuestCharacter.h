@@ -166,6 +166,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guest|Status", meta = (ClampMin = "0.0"))
 	float StatusWidgetRemainSeconds = 10.f;
 
+	/** 头顶气泡（TipsWidget）隐藏距离：玩家（ShootCharacter）离本客人超过该距离时隐藏气泡；<=0 表示不限制距离。蓝图可配置 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guest|Status", meta = (ClampMin = "0.0"))
+	float StatusWidgetHideDistance = 800.f;
+
 	/** 是否已用餐：离场时据此区分“吃饱了”与“等不及走了”的台词 */
 	bool bHasEaten = false;
 
@@ -177,6 +181,9 @@ public:
 
 	/** 当前是否应该显示头顶气泡：需要点餐（WaitingOrder）常显；等餐（WaitingFood）仅在订单剩余时间不足阈值时显示 */
 	bool ShouldShowStatusWidget() const;
+
+	/** 玩家（ShootCharacter）是否在气泡显示距离内：超出 StatusWidgetHideDistance 返回 false（<=0 视为不限制） */
+	bool IsPlayerWithinStatusWidgetDistance() const;
 
 	/** 当前订单剩余等待时间（秒）；尚未点单或订单数据异常时返回 -1 */
 	float GetOrderRemainSeconds() const;

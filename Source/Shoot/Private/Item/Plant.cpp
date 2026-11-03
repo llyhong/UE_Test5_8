@@ -70,6 +70,21 @@ void APlant::BeginPlay()
 
 	ApplyStageMesh(CurrentStageIndex);
 
+	// 诊断：打印本株植物的阶段配置（勾选 bDebug 后可在 Output Log 查看每阶段是否配了模型）
+	if (bDebug && Info)
+	{
+		UE_LOG(LogShoot, Log, TEXT("[%s] 生长阶段数=%d%s"), *GetName(), Info->GrowthStages.Num(),
+			Info->GrowthStages.Num() <= 1 ? TEXT("（单阶段：开局即结果，不存在“第二阶段”）") : TEXT(""));
+		for (int32 i = 0; i < Info->GrowthStages.Num(); ++i)
+		{
+			const FPlantGrowthStage& S = Info->GrowthStages[i];
+			UE_LOG(LogShoot, Log, TEXT("  阶段%d: 名称=%s 时长=%.1f StageMesh=%s 缩放=%s"),
+				i, *S.StageName.ToString(), S.StageDuration,
+				S.StageMesh ? *S.StageMesh->GetName() : TEXT("空（保持上一阶段模型）"),
+				*S.StageScale.ToString());
+		}
+	}
+
 	// 若初始即处于结果阶段（如单阶段配置），直接把果实挂到树上
 	if (IsFruiting() && SpawnedFruits.Num() == 0)
 	{
@@ -108,6 +123,13 @@ void APlant::ApplyStageMesh(int32 StageIndex)
 	if (Stage.StageMesh)
 	{
 		PlantMesh->SetStaticMesh(Stage.StageMesh);
+	}
+	else if (bDebug)
+	{
+		// 该阶段没配模型：按约定保持上一阶段模型（这就是“阶段推进了但模型不变”的常见原因）
+		UE_LOG(LogShoot, Warning,
+			TEXT("[%s] 阶段 %d（%s）未配置 StageMesh：模型保持上一阶段，仅缩放更新"),
+			*GetName(), StageIndex, *Stage.StageName.ToString());
 	}
 	PlantMesh->SetRelativeScale3D(Stage.StageScale);
 }
@@ -182,8 +204,10 @@ void APlant::Tick(float DeltaTime)
 		{
 			StageTimer += DeltaTime * FMath::Max(0.0001f, Info->GrowthSpeed);
 
+			// StageDuration <= 0 视为“该阶段立即完成”：避免 DataTable 里把时长配成 0 时，
+			// 植物永远卡在当前阶段（模型不切换、也无法进入下一阶段）。
 			const float StageDuration = Info->GrowthStages[CurrentStageIndex].StageDuration;
-			if (StageDuration > 0.f && StageTimer >= StageDuration)
+			if (StageDuration <= 0.f || StageTimer >= StageDuration)
 			{
 				AdvanceStage();
 			}
@@ -241,7 +265,14 @@ void APlant::AdvanceStage()
 	OnStageChanged(CurrentStageIndex, GetCurrentStageName());
 	OnPlantStageChanged.Broadcast(CurrentStageIndex, GetCurrentStageName());
 
-	// 到达最后一个阶段即结果阶段 -> 在树上生成果实（可见），并通知可收获
+	if (bDebug)
+	{
+		UE_LOG(LogShoot, Log, TEXT("[%s] 推进到阶段 %d/%d（%s）"),
+			*GetName(), CurrentStageIndex + 1, Info->GrowthStages.Num(), *GetCurrentStageName().ToString());
+	}
+
+	// 到达最后一个阶段即结果阶段 -> 生成用于采摘/熟度的果实，并通知可收获。
+	// （bShowFruitOnPlant=false 时依然会生成，只是不在植物上显示外观，采摘与熟度不受影响）
 	if (IsFruiting())
 	{
 		SpawnFruit(); // 果实直接长在树上，每个果实自行启动熟度计时
@@ -446,7 +477,7 @@ void APlant::SpawnFruit()
 void APlant::SpawnSingleFruit(int32 Index)
 {
 	const FPlantInfo* Info = GetPlantInfo();
-	if (!Info || !GetWorld() || !Info->FruitClass || !PlantMesh)
+	if (!Info || !GetWorld() || !Info->FruitClass)
 	{
 		return;
 	}
@@ -458,36 +489,46 @@ void APlant::SpawnSingleFruit(int32 Index)
 	AItemActor* Fruit = GetWorld()->SpawnActor<AItemActor>(Info->FruitClass, GetActorTransform(), SpawnParams);
 	if (Fruit)
 	{
-		// 果实挂点与数量对齐：多个果实时按 “基础名_索引” 寻找对应插槽（如 Fruit0 / Fruit1）
-		FName SocketName = NAME_None;
-		if (Info->FruitAttachSocket != NAME_None)
+		if (Info->bShowFruitOnPlant && PlantMesh)
 		{
-			SocketName = (Info->FruitCount > 1)
-				? FName(*FString::Printf(TEXT("%s%d"), *Info->FruitAttachSocket.ToString(), Index))
-				: FName(*FString::Printf(TEXT("%s0"), *Info->FruitAttachSocket.ToString()));
-
-			// 索引插槽不存在时，回退到基础插槽名；仍不存在则挂在模型根（不指定插槽）
-			if (!PlantMesh->DoesSocketExist(SocketName))
+			// 果实挂点与数量对齐：多个果实时按 “基础名_索引” 寻找对应插槽（如 Fruit0 / Fruit1）
+			FName SocketName = NAME_None;
+			if (Info->FruitAttachSocket != NAME_None)
 			{
-				SocketName = PlantMesh->DoesSocketExist(Info->FruitAttachSocket)
-					? Info->FruitAttachSocket
-					: NAME_None;
+				SocketName = (Info->FruitCount > 1)
+					? FName(*FString::Printf(TEXT("%s%d"), *Info->FruitAttachSocket.ToString(), Index))
+					: FName(*FString::Printf(TEXT("%s0"), *Info->FruitAttachSocket.ToString()));
+
+				// 索引插槽不存在时，回退到基础插槽名；仍不存在则挂在模型根（不指定插槽）
+				if (!PlantMesh->DoesSocketExist(SocketName))
+				{
+					SocketName = PlantMesh->DoesSocketExist(Info->FruitAttachSocket)
+						? Info->FruitAttachSocket
+						: NAME_None;
+				}
+			}
+
+			//UE_LOG(LogShoot, Log, TEXT("[%s] 果实 %d 挂点 SocketName=%s, 插槽是否存在=%s"), *GetName(), Index, *SocketName.ToString(), PlantMesh->DoesSocketExist(SocketName) ? TEXT("是") : TEXT("否"));
+
+			// 复用 ItemActor 的挂点逻辑，挂到植物模型上对应的插槽
+			if (SocketName != NAME_None)
+			{
+				Fruit->AttachMeshToSocket(PlantMesh, SocketName);
 			}
 		}
-
-		//UE_LOG(LogShoot, Log, TEXT("[%s] 果实 %d 挂点 SocketName=%s, 插槽是否存在=%s"), *GetName(), Index, *SocketName.ToString(), PlantMesh->DoesSocketExist(SocketName) ? TEXT("是") : TEXT("否"));
-
-		// 复用 ItemActor 的挂点逻辑，挂到植物模型上对应的插槽
-		if (SocketName != NAME_None)
+		else
 		{
-			Fruit->AttachMeshToSocket(PlantMesh, SocketName);
+			// 不在植物上显示果实：隐藏外观并关闭碰撞；Actor 仍保留作为熟度 / 品质 / 采摘的数据载体
+			Fruit->SetActorHiddenInGame(true);
+			Fruit->SetActorEnableCollision(false);
 		}
 
 		SpawnedFruits.Add(Fruit);
 
 		// 入背包采摘模式下，树上的果实不再可被玩家单独拾取，仅作为普通场景物件；
 		// 采摘由植物在 Harvest 中统一处理入背包。旧模式（挂手上）则保持可拾取。
-		Fruit->bPickable = !bHarvestToInventory;
+		// 不显示的果实同样不可被单独拾取。
+		Fruit->bPickable = Info->bShowFruitOnPlant && !bHarvestToInventory;
 
 		// 写入熟度配置并启动该果实自身的熟度计时（每个果实独立累计，互不影响）
 		Fruit->ConfigureAndStartRipening(Info->bEnableRipeness, Info->RipeTime, Info->OverripeTime);

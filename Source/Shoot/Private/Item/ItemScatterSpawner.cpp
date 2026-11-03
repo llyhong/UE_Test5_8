@@ -8,6 +8,7 @@
 #include "GameFramework/Pawn.h"
 #include "Components/StaticMeshComponent.h"
 #include "Item/ItemActor.h"
+#include "LandscapeHeightfieldCollisionComponent.h"
 
 AItemScatterSpawner::AItemScatterSpawner()
 {
@@ -330,7 +331,31 @@ bool AItemScatterSpawner::ProjectToGroundAndRotate(const FVector& InPoint, FVect
 
 		FHitResult Hit;
 		FCollisionQueryParams QueryParams(FName(TEXT("ItemScatterGround")), false, this);
-		if (!World->LineTraceSingleByChannel(Hit, Start, End, GroundChannel, QueryParams))
+
+		if (bOnlyOnLandscape)
+		{
+			// 只接受地形（Landscape）命中：沿打线路径从上到下遍历全部命中，
+			// 跳过屋顶 / 楼板 / 道具等非地形表面，找到第一个 Landscape 碰撞组件为止；
+			// 整条线都碰不到地形（悬空、区域完全在建筑底下）则丢弃该点。
+			TArray<FHitResult> Hits;
+			World->LineTraceMultiByChannel(Hits, Start, End, GroundChannel, QueryParams);
+
+			bool bFoundLandscape = false;
+			for (const FHitResult& H : Hits)
+			{
+				if (H.GetComponent() && H.GetComponent()->IsA<ULandscapeHeightfieldCollisionComponent>())
+				{
+					Hit = H;
+					bFoundLandscape = true;
+					break;
+				}
+			}
+			if (!bFoundLandscape)
+			{
+				return false;
+			}
+		}
+		else if (!World->LineTraceSingleByChannel(Hit, Start, End, GroundChannel, QueryParams))
 		{
 			// 打不到地面（悬空/区域超出地面）：丢弃这个点
 			return false;

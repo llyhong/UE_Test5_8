@@ -141,6 +141,13 @@ void UTimeSystem::UpdateSun()
 		return;
 	}
 
+	// 太阳由时间系统驱动旋转，组件 Mobility 必须为 Movable；
+	// 关卡里忘了设时（如 Kitchen_New 的 LightSource）在此自动纠正一次，避免 PIE 反复报警告。
+	if (DLC->Mobility != EComponentMobility::Movable)
+	{
+		DLC->SetMobility(EComponentMobility::Movable);
+	}
+
 	const float Hour = GetCurrentHour();
 	const bool bIsDay = Hour > SunriseHour && Hour < SunsetHour;
 

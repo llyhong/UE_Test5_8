@@ -158,6 +158,12 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scatter|Ground", meta = (EditCondition = "bSnapToGround"))
 	TEnumAsByte<ECollisionChannel> GroundChannel = ECC_Visibility;
 
+	/** 是否只把 Actor 生成在地形（Landscape）上：开启后向下打线会跳过屋顶 / 楼板等非地形命中，
+	 *  继续向下查找 Landscape 表面；整条打线都碰不到地形时该点被丢弃。
+	 *  适合户外农场区域（防止食材生成到屋顶上）；若某生成器区域是普通静态网格地面，请关闭此项。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scatter|Ground", meta = (EditCondition = "bSnapToGround"))
+	bool bOnlyOnLandscape = true;
+
 	// ==================== 配置：数量与避让 ====================
 
 	/** 开局（BeginPlay）要生成的总个数 */

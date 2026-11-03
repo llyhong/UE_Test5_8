@@ -13,6 +13,7 @@
 #include "Game/OrderSystem.h"
 #include "Engine/Engine.h"
 #include "DrawDebugHelpers.h"
+#include "Kismet/GameplayStatics.h"
 
 namespace
 {
@@ -474,7 +475,7 @@ void AChairSeat::UpdateTipsVisibility()
 		return;
 	}
 
-	bool bShow = false;
+		bool bShow = false;
 	switch (TipsMode)
 	{
 	case EChairSeatTipsMode::Always:
@@ -492,6 +493,9 @@ void AChairSeat::UpdateTipsVisibility()
 		break;
 	}
 
+	// 超出提示控件隐藏距离时一律隐藏（<=0 视为不限制距离）
+	bShow = bShow && IsPlayerWithinTipsWidgetDistance();
+
 	if (bShow)
 	{
 		// 组件隐藏时不会创建控件实例，显示前先确保建出来（InitWidget 内部幂等）
@@ -501,6 +505,24 @@ void AChairSeat::UpdateTipsVisibility()
 	{
 		TipsWidgetComp->SetVisibility(bShow);
 	}
+}
+
+bool AChairSeat::IsPlayerWithinTipsWidgetDistance() const
+{
+	// <=0 视为不限制距离，任何距离都允许显示
+	if (TipsWidgetHideDistance <= 0.f)
+	{
+		return true;
+	}
+
+	if (APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0))
+	{
+		const float DistSq = FVector::DistSquared(GetActorLocation(), PlayerPawn->GetActorLocation());
+		return DistSq <= FMath::Square(TipsWidgetHideDistance);
+	}
+
+	// 拿不到玩家时不强制隐藏，避免误隐藏
+	return true;
 }
 
 // ==================== 玩家交互（E 键） ====================
@@ -750,6 +772,9 @@ void AChairSeat::OnInteractionEndOverlap(UPrimitiveComponent* OverlappedComponen
 void AChairSeat::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
+
+	// 每帧按“距离玩家 + 当前桌况”刷新提示控件显隐：玩家走远后自动隐藏，走近后恢复
+	UpdateTipsVisibility();
 
 	// 调试：座位 / 挂点 / 占用客人可视化，便于排查占座与碟子摆放问题
 	if (!bDrawDebugSeatLink)
