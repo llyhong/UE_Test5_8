@@ -6,6 +6,7 @@
 #include "Data/MenuData.h"
 #include "Engine/DataTable.h"
 #include "GameFramework/Actor.h"
+#include "Interaction/InteractionConfig.h"
 #include "CookingMachine.generated.h"
 class UWidgetComponent;
 class UBoxComponent;
@@ -114,6 +115,22 @@ public:
 	
 	UPROPERTY(VisibleAnywhere, Category = "Food")
 	UBoxComponent* BoxCollision;
+
+	// ============ 交互判定尺度（统一标准，见 InteractionConfig.h） ============
+	/** 交互盒半尺寸。C++ 在 OnConstruction / BeginPlay 强制应用，覆盖蓝图残留的默认值
+	 *  （引擎默认只有 32 立方，站在灶台端头就够不到）。
+	 *  水平方向用 MachineBox（灶台专用，比统一基准再紧 40%）；
+	 *  长条台面 / 双灶这类宽度大的设备，请在自己蓝图里把 X/Y 调大，别去动 InteractionConfig。
+	 *  Z 仍是 MachineHalfHeight：竖直方向必须覆盖 0~180，缩了会出现“站着按不到”。 */
+	UPROPERTY(EditDefaultsOnly, Category="Interaction")
+	FVector InteractionBoxExtent = FVector(
+		InteractionDistance::MachineBox,
+		InteractionDistance::MachineBox,
+		InteractionDistance::MachineHalfHeight);
+
+	/** 交互盒中心抬高量：让盒体覆盖 0~180，正好是角色胶囊全高 */
+	UPROPERTY(EditDefaultsOnly, Category="Interaction")
+	float InteractionCenterHeight = InteractionDistance::MachineHalfHeight;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
 	UStaticMeshComponent* ItemMesh;
 
@@ -173,6 +190,14 @@ protected:
 	// Called when the game starts or when spawned
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaTime) override;
+
+	/** 编辑器里改 InteractionBoxExtent 时立即写进组件，关卡视口中即可看到真实判定盒 */
+	virtual void OnConstruction(const FTransform& Transform) override;
+
+	/** 把 InteractionRadius（× Shoot.InteractScale 倍率）写进交互组件；OnConstruction/BeginPlay/运行时改倍率都会调用，必须幂等 */
+	UFUNCTION()
+	void ApplyInteractionScale();
+
 	void ResetFoodData();
 	/** 收集本机可做的菜品行：MachineID>0 时按菜品表的 MachineID 过滤（菜品 MachineID=0 视为通用）；
 	 *  MachineID<=0 或菜品表未就绪时退回手填的 MenuIDsArray */

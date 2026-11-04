@@ -9,6 +9,7 @@
 #include "Engine/LocalPlayer.h"
 #include "Item/ItemActor.h"
 #include "ShootCharacter.h"
+#include "Interaction/InteractionConfig.h"
 #include "Game/PlateSystem.h"
 #include "Game/BaseGameInstance.h"
 #include "Game/BaseLevelBP.h"
@@ -25,7 +26,10 @@ ADishwasher::ADishwasher()
 
 	InteractionSphere = CreateDefaultSubobject<USphereComponent>(TEXT("InteractionSphere"));
 	InteractionSphere->SetupAttachment(RootComponent);
-	InteractionSphere->SetSphereRadius(160.f);
+	InteractionSphere->SetSphereRadius(InteractionRadius * InteractionScale::Get());
+	// 视口里未选中也画出判定球，摆放关卡时能直接目测交互范围
+	InteractionSphere->ShapeColor = FColor(40, 190, 200);
+	InteractionSphere->bDrawOnlyIfSelected = false;
 	InteractionSphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 	InteractionSphere->SetCollisionResponseToAllChannels(ECR_Overlap);
 	InteractionSphere->SetGenerateOverlapEvents(true);
@@ -36,9 +40,33 @@ ADishwasher::ADishwasher()
 	TipsWidget->SetVisibility(false);
 }
 
+void ADishwasher::OnConstruction(const FTransform& Transform)
+{
+	Super::OnConstruction(Transform);
+
+	// 编辑器视口预览：改 InteractionRadius 立刻反映到组件上，
+	// 摆放关卡时看到的球就是运行时真正生效的判定范围
+	ApplyInteractionScale();
+}
+
+void ADishwasher::ApplyInteractionScale()
+{
+	if (InteractionSphere)
+	{
+		InteractionSphere->SetSphereRadius(InteractionRadius * InteractionScale::Get(), false);
+		InteractionSphere->SetRelativeLocation(FVector(0.f, 0.f, InteractionCenterHeight));
+		InteractionSphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+		InteractionSphere->SetCollisionResponseToAllChannels(ECR_Overlap);
+		InteractionSphere->SetGenerateOverlapEvents(true);
+	}
+}
+
 void ADishwasher::BeginPlay()
 {
 	Super::BeginPlay();
+
+	// 统一交互尺度：强制覆盖蓝图里残留的旧半径
+	ApplyInteractionScale();
 
 	InteractionSphere->OnComponentBeginOverlap.AddDynamic(this, &ADishwasher::OnInteractionOverlap);
 	InteractionSphere->OnComponentEndOverlap.AddDynamic(this, &ADishwasher::OnInteractionEndOverlap);
@@ -155,7 +183,7 @@ void ADishwasher::OnInteractionOverlap(UPrimitiveComponent* OverlappedComponent,
 		return;
 	}
 
-	Character->SetOverlappingDishwasher(this);
+	Character->AddOverlappingDishwasher(this);
 
 	// 当提示控件未被其它玩家占用时，显示"按 E 洗碟子"提示
 	if (LocalPlayer == nullptr && TipsWidget)
@@ -185,10 +213,8 @@ void ADishwasher::OnInteractionEndOverlap(UPrimitiveComponent* OverlappedCompone
 		return;
 	}
 
-	if (Character->GetOverlappingDishwasher() == this)
-	{
-		Character->SetOverlappingDishwasher(nullptr);
-	}
+	// 只注销自己：多台洗碗机范围交叠时，另一台仍是候选目标
+	Character->RemoveOverlappingDishwasher(this);
 
 	// 离开时隐藏提示控件（仅当占用者正是该玩家）
 	if (LocalPlayer && TipsWidget)

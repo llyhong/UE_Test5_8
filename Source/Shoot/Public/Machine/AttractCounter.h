@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Interaction/InteractionConfig.h"
 #include "GameFramework/Actor.h"
 #include "AttractCounter.generated.h"
 
@@ -34,6 +35,23 @@ public:
 	/** 交互范围：玩家进入后注册为可招揽 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	USphereComponent* InteractionSphere;
+
+	// ============ 交互判定尺度（统一标准，见 InteractionConfig.h） ============
+	/** 交互判定半径。C++ 在 OnConstruction（编辑器视口）与 BeginPlay（运行时）都会强制应用，
+	 *  会覆盖组件上残留的旧值；要单独调这台设备就改这里，不要直接改组件上的半径 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction", meta = (ClampMin = "10.0"))
+	float InteractionRadius = InteractionDistance::Attract;
+
+	/** 判定球心相对 Actor 原点的高度：抬到物体中部，否则贴地的球只在脚踝高度有判定 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
+	float InteractionCenterHeight = InteractionDistance::CenterHeight;
+
+	/** 编辑器里改上面的值时立即写进组件，关卡视口中即可看到真实判定球 */
+	virtual void OnConstruction(const FTransform& Transform) override;
+
+	/** 把 InteractionRadius（× Shoot.InteractScale 倍率）写进交互组件；OnConstruction/BeginPlay/运行时改倍率都会调用，必须幂等 */
+	UFUNCTION()
+	void ApplyInteractionScale();
 
 	/** 每次招揽基础提升的声誉值（声誉=0 时每次按键 +BaseReputationGain） */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Attract")

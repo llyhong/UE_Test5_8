@@ -8,6 +8,7 @@
 #include "NPC/GuestCharacter.h"
 #include "NPC/ChairSeat.h"
 #include "Engine/Engine.h"
+#include "Interaction/InteractionConfig.h"
 #include "Game/BaseGameInstance.h"
 #include "Game/EconomySystem.h"
 #include "Kismet/GameplayStatics.h"
@@ -22,15 +23,42 @@ AServingCounter::AServingCounter()
 
 	InteractionSphere = CreateDefaultSubobject<USphereComponent>(TEXT("InteractionSphere"));
 	InteractionSphere->SetupAttachment(RootComponent);
-	InteractionSphere->SetSphereRadius(140.f);
+	InteractionSphere->SetSphereRadius(InteractionRadius * InteractionScale::Get());
+	// 视口里未选中也画出判定球，摆放关卡时能直接目测交互范围
+	InteractionSphere->ShapeColor = FColor(40, 190, 200);
+	InteractionSphere->bDrawOnlyIfSelected = false;
 	InteractionSphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 	InteractionSphere->SetCollisionResponseToAllChannels(ECR_Overlap);
 	InteractionSphere->SetGenerateOverlapEvents(true); // 必须显式开启，否则不会触发 OnComponentBeginOverlap
 }
 
+void AServingCounter::OnConstruction(const FTransform& Transform)
+{
+	Super::OnConstruction(Transform);
+
+	// 编辑器视口预览：改 InteractionRadius 立刻反映到组件上，
+	// 摆放关卡时看到的球就是运行时真正生效的判定范围
+	ApplyInteractionScale();
+}
+
+void AServingCounter::ApplyInteractionScale()
+{
+	if (InteractionSphere)
+	{
+		InteractionSphere->SetSphereRadius(InteractionRadius * InteractionScale::Get(), false);
+		InteractionSphere->SetRelativeLocation(FVector(0.f, 0.f, InteractionCenterHeight));
+		InteractionSphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+		InteractionSphere->SetCollisionResponseToAllChannels(ECR_Overlap);
+		InteractionSphere->SetGenerateOverlapEvents(true);
+	}
+}
+
 void AServingCounter::BeginPlay()
 {
 	Super::BeginPlay();
+
+	// 统一交互尺度：强制覆盖蓝图里残留的旧半径
+	ApplyInteractionScale();
 
 	InteractionSphere->OnComponentBeginOverlap.AddDynamic(this, &AServingCounter::OnInteractionOverlap);
 	InteractionSphere->OnComponentEndOverlap.AddDynamic(this, &AServingCounter::OnInteractionEndOverlap);
@@ -318,7 +346,7 @@ void AServingCounter::OnInteractionOverlap(UPrimitiveComponent* OverlappedCompon
 {
 	if (AShootCharacter* Character = Cast<AShootCharacter>(OtherActor))
 	{
-		Character->SetOverlappingCounter(this);
+		Character->AddOverlappingCounter(this);
 		UE_LOG(LogTemp, Log, TEXT("[ServingCounter] 玩家进入范围，注册 OverlappingCounter"));
 		GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Yellow, TEXT("[上菜台] 已进入范围"));
 	}
@@ -329,10 +357,7 @@ void AServingCounter::OnInteractionEndOverlap(UPrimitiveComponent* OverlappedCom
 {
 	if (AShootCharacter* Character = Cast<AShootCharacter>(OtherActor))
 	{
-		// 仅当仍然指向本上菜台时才清空（避免多人/多台串扰）
-		if (Character->GetOverlappingCounter() == this)
-		{
-			Character->SetOverlappingCounter(nullptr);
-		}
+		// 只注销自己：两台上菜台范围交叠时，另一台仍是候选目标
+		Character->RemoveOverlappingCounter(this);
 	}
 }

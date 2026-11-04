@@ -11,6 +11,7 @@
 #include "Game/PlateSystem.h"
 #include "Game/BaseGameInstance.h"
 #include "Kismet/GameplayStatics.h"
+#include "DrawDebugHelpers.h"
 
 AItemActor::AItemActor()
 {
@@ -28,20 +29,64 @@ AItemActor::AItemActor()
 	
 	Sphere = CreateDefaultSubobject<USphereComponent>(TEXT("Sphere"));
 	Sphere->SetupAttachment(GetRootComponent());
+	// 视口里未选中也画出判定球，摆放关卡时能直接目测拾取范围
+	Sphere->ShapeColor = FColor(60, 200, 90);
+	Sphere->bDrawOnlyIfSelected = false;
 
 	// 空碟回收交互球：默认关闭，仅当本物品成为“桌上空碟”后才启用
 	CollectSphere = CreateDefaultSubobject<USphereComponent>(TEXT("CollectSphere"));
 	CollectSphere->SetupAttachment(GetRootComponent());
-	CollectSphere->SetSphereRadius(140.f);
+	CollectSphere->SetSphereRadius(InteractionDistance::Item);
+	CollectSphere->ShapeColor = FColor(220, 150, 40);
+	// 与 Sphere 同半径同球心，完全重合，默认不绘制（只在选中它时才画），避免视口里两球互相遮挡
+	CollectSphere->bDrawOnlyIfSelected = true;
 	CollectSphere->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	CollectSphere->SetCollisionResponseToAllChannels(ECR_Overlap);
 	CollectSphere->SetGenerateOverlapEvents(false);
 }
 
+void AItemActor::OnConstruction(const FTransform& Transform)
+{
+	Super::OnConstruction(Transform);
+
+	// 编辑器视口预览：改 Radius / CenterHeight 立刻反映到组件上，
+	// 这样摆放关卡时看到的球就是运行时真正生效的判定范围
+	ApplyInteractionScale();
+}
+
+void AItemActor::ApplyInteractionScale()
+{
+	// ============ 统一交互判定尺度 ============
+	// 组件上的半径/位置可能被蓝图保存过旧值（引擎默认只有 32），这里强制按统一标准重设。
+	// 不这么做的话，每个食材蓝图各写各的半径，玩家就会觉得“有的要贴脸、有的离很远”。
+	if (Sphere)
+	{
+		Sphere->SetSphereRadius(InteractionRadius * InteractionScale::Get(), false);
+		Sphere->SetRelativeLocation(FVector(0.f, 0.f, InteractionCenterHeight));
+		Sphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+		Sphere->SetCollisionResponseToAllChannels(ECR_Overlap);
+		Sphere->SetGenerateOverlapEvents(true);
+	}
+	if (CollectSphere)
+	{
+		// 空碟回收球与拾取球用同一尺度：同一件东西不该出现两套距离
+		CollectSphere->SetSphereRadius(InteractionRadius * InteractionScale::Get(), false);
+		CollectSphere->SetRelativeLocation(FVector(0.f, 0.f, InteractionCenterHeight));
+	}
+}
+
 void AItemActor::BeginPlay()
 {
 	Super::BeginPlay();
-	
+
+	ApplyInteractionScale();
+
+	// 盘子/食材蓝图（BP_Plate、BP_Beef、BP_fried_egg 等）在组件模板里勾了 Simulate Physics，
+	// 而构造函数为了让食物不挡玩家把 ItemMesh 设成 NoCollision + 全通道 Ignore。
+	// 两者叠加 = "有重力、无碰撞"：物品一生成就开始自由落体，直接穿过地板掉出世界，
+	// 表现为"第一份菜正常、第二份连盘子带菜一起没了"（第二个盘子已经掉到地板下面去了）。
+	EnsurePhysicsIsSafe();
+
 	//绑定回调函数
 	Sphere->OnComponentBeginOverlap.AddDynamic(this, &AItemActor::OnSphereOverlap);
 	Sphere->OnComponentEndOverlap.AddDynamic(this, &AItemActor::OnSphereEndOverlap);
@@ -77,6 +122,22 @@ bool AItemActor::CanInteract()
 void AItemActor::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
+
+	// ============ 交互范围调试可视化（控制台 Shoot.DebugInteract 1） ============
+	// 绿=当前拾取目标，灰=可拾取但不在目标位置。手持/烹饪中的物品不画，免得跟着手乱闪。
+	if (InteractionDebug::IsEnabled() && Sphere)
+	{
+		const EItemState St = GetItemState();
+		if (St == EItemState::EIS_Idle || St == EItemState::EIS_Hovering)
+		{
+			const FColor C = (St == EItemState::EIS_Hovering)
+				? InteractionDebug::ColorCurrentTarget()
+				: InteractionDebug::ColorIdle();
+			DrawDebugSphere(GetWorld(), Sphere->GetComponentLocation(), Sphere->GetScaledSphereRadius(),
+				16, C, false, 0.f, 0, 1.5f);
+		}
+	}
+
 	// if (OverlayMaterial && GetItemState() == EItemState::EIS_Hovering)
 	// {
 	// 	ItemMesh->SetOverlayMaterial(OverlayMaterial);
@@ -85,12 +146,9 @@ void AItemActor::Tick(float DeltaTime)
 	// {
 	// 	ItemMesh->SetOverlayMaterial(nullptr);
 	// }
-	bool needOutline = NeedOutLineEffect();
-	if (bSetOutline != needOutline)
-	{
-		bSetOutline = needOutline;
-		SetActorsOutline(this,bSetOutline);
-	}
+	// 描边不再由 ItemState(Hovering) 驱动：状态是"我进了某个球的范围"，一堆食材都满足，
+	// 于是会同时亮一片。描边的唯一开关是 SetInteractionHighlight()，由角色选出的
+	// "当前唯一交互目标"调用。
 
 	// —— 成品腐烂计时 ——
 	// 判定"是否在玩家手上"以 ItemState 为准：Equipped = 被持有（捡起），其余（Idle/Hovering/Cooking）视为未持有。
@@ -285,8 +343,10 @@ void AItemActor::OnSphereOverlap(UPrimitiveComponent* OverlappedComponent, AActo
 		 //   FString::Printf(TEXT("Primitive Component Name: %s"), *Name) );
 			return;
 		}
-		PickupInterface->SetOverlappingItem(this);
-		SetItemState(EItemState::EIS_Hovering);
+		PickupInterface->AddOverlappingItem(this);
+		// 注意：这里不再顺手把自己置为 Hovering。
+		// 进入交互球只代表"我是候选之一"，谁被高亮/被拾取由角色选出的唯一目标决定，
+		// 否则一堆挨在一起的食材会在各自的 Overlap 回调里同时点亮描边。
 		OnSphereOverlapEvent();
 	}
 
@@ -309,16 +369,18 @@ void AItemActor::OnSphereEndOverlap(UPrimitiveComponent* OverlappedComponent, AA
 	{
 		return;
 	}
-	if (GetItemState() != EItemState::EIS_Hovering)
+	// 已被拿在手上/正在锅里烹饪的物品不参与候选集维护（它们不在拾取候选里）
+	if (GetItemState() == EItemState::EIS_Equipped || GetItemState() == EItemState::EIS_Cooking)
 	{
 		return;
 	}
 	IPickupInterface* PickupInterface = Cast<IPickupInterface>(OtherActor);
 	if (PickupInterface)
 	{
-		PickupInterface->SetOverlappingItem(nullptr);
+		// 注销自己（带身份语义）：角色会从剩余候选里重选最近目标，避免误清别人的目标
+		PickupInterface->RemoveOverlappingItem(this);
 		SetItemState(EItemState::EIS_Idle);
-		OnSphereEndOverlapEvent();	
+		OnSphereEndOverlapEvent();
 	}
 }
 
@@ -383,13 +445,73 @@ void AItemActor::OnClear()
 
 bool AItemActor::NeedOutLineEffect()
 {
-	return  GetItemState() == EItemState::EIS_Hovering;
+	// 描边只认角色下发的"唯一交互目标"标记，不再看 ItemState
+	return bInteractionHighlight;
+}
+
+void AItemActor::SetInteractionHighlight(bool bEnable)
+{
+	if (bInteractionHighlight == bEnable)
+	{
+		return;
+	}
+	bInteractionHighlight = bEnable;
+
+	if (bSetOutline != bEnable)
+	{
+		bSetOutline = bEnable;
+		SetActorsOutline(this, bEnable);
+	}
 }
 
 void AItemActor::AttachMeshToSocket(USceneComponent* InParent, const FName& InSocketName)
 {
+	// 拿在手上/摆到灶台上时必须是"纯视觉"状态：关掉物理与碰撞。
+	// 否则被投掷过一次的物品（物理已开启）再被拾取，物理仍在跑，会挣脱挂点掉穿地板。
+	ItemMesh->SetSimulatePhysics(false);
+	ItemMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
 	FAttachmentTransformRules TransformRules(EAttachmentRule::SnapToTarget, true);
 	ItemMesh->AttachToComponent(InParent, TransformRules, InSocketName);
+}
+
+void AItemActor::EnablePhysicsDrop()
+{
+	if (!ItemMesh)
+	{
+		return;
+	}
+
+	ItemMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+	ItemMesh->SetCollisionObjectType(ECC_PhysicsBody);
+	ItemMesh->SetCollisionResponseToAllChannels(ECR_Ignore);
+	// 只和"世界几何"碰撞：地板、墙、桌子、其它掉落的食物
+	ItemMesh->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Block);
+	ItemMesh->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Block);
+	ItemMesh->SetCollisionResponseToChannel(ECC_PhysicsBody, ECR_Block);
+	// 明确不挡角色：食物落地后不该成为路障
+	ItemMesh->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
+
+	ItemMesh->SetUseCCD(true);
+	ItemMesh->SetEnableGravity(true);
+
+	if (!ItemMesh->IsSimulatingPhysics())
+	{
+		ItemMesh->SetSimulatePhysics(true);
+	}
+}
+
+void AItemActor::EnsurePhysicsIsSafe()
+{
+	if (!ItemMesh || !ItemMesh->IsSimulatingPhysics())
+	{
+		// 没开物理的物品（绝大多数场景摆放/手持状态）保持纯视觉，不做任何额外碰撞开销。
+		// 注意不能用 IsGravityEnabled() 判断：它默认就是 true，但不开模拟物理不会下落。
+		return;
+	}
+
+	// 复用手掷/掉落那套设置：只 Block 世界几何、Ignore Pawn、开 CCD。
+	EnablePhysicsDrop();
 }
 
 void AItemActor::DeAttachMeshToSocket()
@@ -408,7 +530,7 @@ void AItemActor::OnCollectOverlap(UPrimitiveComponent* OverlappedComponent, AAct
 	}
 	if (AShootCharacter* Player = Cast<AShootCharacter>(OtherActor))
 	{
-		Player->SetOverlappingEmptyPlate(this);
+		Player->AddOverlappingEmptyPlate(this);
 	}
 }
 
@@ -417,10 +539,8 @@ void AItemActor::OnCollectEndOverlap(UPrimitiveComponent* OverlappedComponent, A
 {
 	if (AShootCharacter* Player = Cast<AShootCharacter>(OtherActor))
 	{
-		if (Player->GetOverlappingEmptyPlate() == this)
-		{
-			Player->SetOverlappingEmptyPlate(nullptr);
-		}
+		// 只注销自己：相邻几张桌子的空碟范围交叠时，其它空碟仍是候选目标
+		Player->RemoveOverlappingEmptyPlate(this);
 	}
 }
 

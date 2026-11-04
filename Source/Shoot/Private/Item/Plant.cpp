@@ -9,6 +9,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "Components/SphereComponent.h"
 #include "Engine/Engine.h"
+#include "DrawDebugHelpers.h"
 
 APlant::APlant()
 {
@@ -23,13 +24,40 @@ APlant::APlant()
 	InteractionSphere->SetSphereRadius(120.f);
 	InteractionSphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 	InteractionSphere->SetCollisionResponseToAllChannels(ECR_Overlap);
+	// 视口里未选中也画出判定球（黄绿=植株），方便摆放时目测采摘范围
+	InteractionSphere->ShapeColor = FColor(170, 210, 60);
+	InteractionSphere->bDrawOnlyIfSelected = false;
 
 	ApplyStageMesh(0);
+}
+
+void APlant::OnConstruction(const FTransform& Transform)
+{
+	Super::OnConstruction(Transform);
+
+	// 编辑器视口预览：改 InteractionRadius 立刻反映到组件上
+	ApplyInteractionScale();
+}
+
+void APlant::ApplyInteractionScale()
+{
+	// ============ 统一交互判定尺度 ============
+	// 强制按统一标准重设，覆盖蓝图里可能残留的旧半径（各植物蓝图曾经各写各的）
+	if (InteractionSphere)
+	{
+		InteractionSphere->SetSphereRadius(InteractionRadius * InteractionScale::Get(), false);
+		InteractionSphere->SetRelativeLocation(FVector(0.f, 0.f, InteractionCenterHeight));
+		InteractionSphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+		InteractionSphere->SetCollisionResponseToAllChannels(ECR_Overlap);
+		InteractionSphere->SetGenerateOverlapEvents(true);
+	}
 }
 
 void APlant::BeginPlay()
 {
 	Super::BeginPlay();
+
+	ApplyInteractionScale();
 
 	InteractionSphere->OnComponentBeginOverlap.AddDynamic(this, &APlant::OnInteractionOverlap);
 	InteractionSphere->OnComponentEndOverlap.AddDynamic(this, &APlant::OnInteractionEndOverlap);
@@ -137,6 +165,16 @@ void APlant::ApplyStageMesh(int32 StageIndex)
 void APlant::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
+
+	// ============ 交互范围调试可视化（控制台 Shoot.DebugInteract 1） ============
+	// 绿=当前待交互植株，灰=在范围内但不是当前目标
+	if (InteractionDebug::IsEnabled() && InteractionSphere)
+	{
+		const bool bIsCurrent = InteractingCharacter && InteractingCharacter->GetOverlappingPlant() == this;
+		const FColor C = bIsCurrent ? InteractionDebug::ColorCurrentTarget() : InteractionDebug::ColorIdle();
+		DrawDebugSphere(GetWorld(), InteractionSphere->GetComponentLocation(), InteractionSphere->GetScaledSphereRadius(),
+			16, C, false, 0.f, 0, 1.5f);
+	}
 
 	// 每帧以“当前目标植被”为准校正采摘描边：确保只有当前待采摘的植被亮起，
 	// 其它植被（即使曾因事件顺序残留描边）会被强制关闭。
@@ -645,7 +683,8 @@ void APlant::OnInteractionOverlap(UPrimitiveComponent* OverlappedComponent, AAct
 	if (AShootCharacter* Character = Cast<AShootCharacter>(OtherActor))
 	{
 		InteractingCharacter = Character;
-		Character->SetOverlappingPlant(this);
+		// 注册进角色的植物候选集：由角色按距离选最近的一株，取代“后进入者胜”
+		Character->AddOverlappingPlant(this);
 		UpdateHarvestHintOutline();
 	}
 }
@@ -655,17 +694,16 @@ void APlant::OnInteractionEndOverlap(UPrimitiveComponent* OverlappedComponent, A
 {
 	if (AShootCharacter* Character = Cast<AShootCharacter>(OtherActor))
 	{
-		if (Character->GetOverlappingPlant() == this)
+		// 只注销自己：角色会从剩余候选里重选最近的一株，
+		// 不会像以前那样把另一株（仍在范围内）的目标一起清掉
+		Character->RemoveOverlappingPlant(this);
+		if (InteractingCharacter == Character)
 		{
-			Character->SetOverlappingPlant(nullptr);
+			InteractingCharacter = nullptr;
 		}
-	if (InteractingCharacter == Character)
-	{
-		InteractingCharacter = nullptr;
-	}
-	// 玩家离开范围：清除浇水提示抑制，下次靠近若仍缺水会重新高亮
-	bWaterHintSuppressed = false;
-	UpdateHarvestHintOutline();
+		// 玩家离开范围：清除浇水提示抑制，下次靠近若仍缺水会重新高亮
+		bWaterHintSuppressed = false;
+		UpdateHarvestHintOutline();
 	}
 }
 
@@ -677,18 +715,16 @@ void APlant::UpdateHarvestHintOutline()
 		bWaterHintSuppressed = false;
 	}
 
-	// 采摘提示：入背包采摘模式 + 已结果 + 未收获 + 已解锁 + 玩家在范围内 + 是当前待采摘目标
+	// 采摘提示：入背包采摘模式 + 已结果 + 未收获 + 已解锁 + 是角色选出的唯一交互目标
 	const bool bHarvestHint = bHarvestToInventory
 		&& IsFruiting()
 		&& !bHarvested
 		&& (IngredientUnlockID < 0 || bIngredientUnlocked)
-		&& InteractingCharacter != nullptr
-		&& InteractingCharacter->GetOverlappingPlant() == this;
+		&& bHighlightRequested;
 
-	// 浇水提示：玩家在范围内且植被还需要浇水——作为“可浇水 / 待浇水”的前置指示（先于浇水动作出现）；
+	// 浇水提示：植被还需要浇水——作为“可浇水 / 待浇水”的前置指示（先于浇水动作出现）；
 	// 浇水动作完成后会被 bWaterHintSuppressed 抑制，避免“刚浇完”立刻又亮。
-	const bool bWaterHint = InteractingCharacter != nullptr
-		&& InteractingCharacter->GetOverlappingPlant() == this
+	const bool bWaterHint = bHighlightRequested
 		&& NeedsWater()
 		&& !bWaterHintSuppressed;
 
@@ -700,6 +736,17 @@ void APlant::UpdateHarvestHintOutline()
 		bHintOutlineActive = bShowHint;
 		AItemActor::SetActorsOutline(this, bShowHint);
 	}
+}
+
+void APlant::SetInteractionHighlight(bool bEnable)
+{
+	if (bHighlightRequested == bEnable)
+	{
+		return;
+	}
+	bHighlightRequested = bEnable;
+	// 角色换目标当帧就要生效：熄灭上一株、点亮这一株都走同一条路径
+	UpdateHarvestHintOutline();
 }
 
 void APlant::SetWaterHintSuppressed(bool bSuppress)

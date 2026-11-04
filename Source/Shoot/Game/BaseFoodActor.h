@@ -26,4 +26,9 @@ public:
 	// Called every frame
 	virtual void Tick(float DeltaTime) override;
 
+private:
+	/** 生成时的世界高度：用来判断"是不是掉下去了" */
+	float SpawnWorldZ = 0.f;
+	/** 掉落诊断只打一次，避免刷屏 */
+	bool bLoggedFall = false;
 };

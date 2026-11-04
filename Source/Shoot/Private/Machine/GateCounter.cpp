@@ -9,6 +9,7 @@
 #include "Game/BaseGameInstance.h"
 #include "Game/BusinessSimulation.h"
 #include "Game/BusinessTime.h"
+#include "Interaction/InteractionConfig.h"
 
 AGateCounter::AGateCounter()
 {
@@ -19,7 +20,10 @@ AGateCounter::AGateCounter()
 
 	InteractionSphere = CreateDefaultSubobject<USphereComponent>(TEXT("InteractionSphere"));
 	InteractionSphere->SetupAttachment(RootComponent);
-	InteractionSphere->SetSphereRadius(220.f);
+	InteractionSphere->SetSphereRadius(InteractionRadius * InteractionScale::Get());
+	// 视口里未选中也画出判定球，摆放关卡时能直接目测交互范围
+	InteractionSphere->ShapeColor = FColor(180, 100, 230);
+	InteractionSphere->bDrawOnlyIfSelected = false;
 	InteractionSphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 	InteractionSphere->SetCollisionResponseToAllChannels(ECR_Overlap);
 	InteractionSphere->SetGenerateOverlapEvents(true);
@@ -28,6 +32,27 @@ AGateCounter::AGateCounter()
 	TipsWidget = CreateDefaultSubobject<UWidgetComponent>(TEXT("TipsWidget"));
 	TipsWidget->SetupAttachment(RootComponent);
 	TipsWidget->SetVisibility(false);
+}
+
+void AGateCounter::OnConstruction(const FTransform& Transform)
+{
+	Super::OnConstruction(Transform);
+
+	// 编辑器视口预览：改 InteractionRadius 立刻反映到组件上，
+	// 摆放关卡时看到的球就是运行时真正生效的判定范围
+	ApplyInteractionScale();
+}
+
+void AGateCounter::ApplyInteractionScale()
+{
+	if (InteractionSphere)
+	{
+		InteractionSphere->SetSphereRadius(InteractionRadius * InteractionScale::Get(), false);
+		InteractionSphere->SetRelativeLocation(FVector(0.f, 0.f, InteractionCenterHeight));
+		InteractionSphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+		InteractionSphere->SetCollisionResponseToAllChannels(ECR_Overlap);
+		InteractionSphere->SetGenerateOverlapEvents(true);
+	}
 }
 
 void AGateCounter::BeginPlay()
@@ -40,10 +65,8 @@ void AGateCounter::BeginPlay()
 		InteractionSphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 		InteractionSphere->SetCollisionResponseToAllChannels(ECR_Overlap);
 		InteractionSphere->SetGenerateOverlapEvents(true);
-		if (InteractionSphere->GetUnscaledSphereRadius() <= 0.f)
-		{
-			InteractionSphere->SetSphereRadius(220.f);
-		}
+		// 统一交互尺度：无条件按标准重设，覆盖蓝图里可能残留的旧半径
+		ApplyInteractionScale();
 
 		InteractionSphere->OnComponentBeginOverlap.AddDynamic(this, &AGateCounter::OnInteractionOverlap);
 		InteractionSphere->OnComponentEndOverlap.AddDynamic(this, &AGateCounter::OnInteractionEndOverlap);
@@ -84,7 +107,7 @@ void AGateCounter::OnInteractionOverlap(UPrimitiveComponent* OverlappedComponent
 				FString::Printf(TEXT("[Gate] 重叠注册成功：%s 进入交互范围"), *GetNameSafe(Player)));
 		}
 
-		Player->SetOverlappingGate(this);
+		Player->AddOverlappingGate(this);
 
 		// 当提示控件未被其它玩家占用时，显示“按 E 开门营业”提示
 		if (LocalPlayer == nullptr && TipsWidget)
@@ -111,11 +134,8 @@ void AGateCounter::OnInteractionEndOverlap(UPrimitiveComponent* OverlappedCompon
 {
 	if (AShootCharacter* Player = Cast<AShootCharacter>(OtherActor))
 	{
-		// 仅当仍指向自己时才清空，避免多台串扰
-		if (Player->GetOverlappingGate() == this)
-		{
-			Player->SetOverlappingGate(nullptr);
-		}
+		// 只注销自己，避免多台大门范围交叠时互相清目标
+		Player->RemoveOverlappingGate(this);
 
 		// 离开时隐藏提示控件（仅当占用者正是该玩家）
 		if (LocalPlayer && TipsWidget)

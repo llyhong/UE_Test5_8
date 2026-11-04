@@ -100,50 +100,108 @@ private:
 	UPROPERTY(VisibleInstanceOnly)
 	TObjectPtr<AItemActor> OverlappingItem;
 
+	// 交互范围内的全部物品候选集（进入时注册、离开时注销），
+	// OverlappingItem 始终指向其中距离最近的一个，取代旧的"单指针后进者胜"
+	UPROPERTY(VisibleInstanceOnly)
+	TArray<TObjectPtr<AItemActor>> OverlappingItems;
+
 	UPROPERTY(VisibleInstanceOnly)
 	TObjectPtr<AItemActor> PickingItem;
+
+	// ============ 放下后的重拾锁定 ============
+	// 刚放下的物品在 DropRePickLockTime 秒内不可再被拾取，
+	// 避免连按 E 出现"拾取↔放下"抖动
+	UPROPERTY(EditDefaultsOnly, Category="Pickup")
+	float DropRePickLockTime = 0.3f;
+
+	TObjectPtr<AItemActor> LastDroppedItem = nullptr;
+	float LastDropTime = -1000.f;
+
+	bool IsDropLockActive(AItemActor* Item) const;
 
 	// 当前可交互的植物（靠近时由 APlant 的重叠球注册）
 	UPROPERTY(VisibleInstanceOnly)
 	TObjectPtr<APlant> OverlappingPlant;
 
-	// 当前可提交菜品的上菜台（靠近时由上菜台的重叠球注册）
+	// 植物候选集：进入时注册、离开时注销，OverlappingPlant 取其中距离最近的一株
+	UPROPERTY(VisibleInstanceOnly)
+	TArray<TObjectPtr<APlant>> OverlappingPlants;
+
+	// 灶台候选集：同上，由 ACookingMachine 注册/注销
+	UPROPERTY(VisibleInstanceOnly)
+	TArray<TObjectPtr<ACookingMachine>> OverlappingCookMachines;
+
+	// 以下 7 类交互目标统一采用"候选集 + 最近目标"：
+	// 物体进入范围时 Add 自己、离开时 Remove 自己，单指针始终指向候选里
+	// "视线可达且距离最近"的那一个，不再有"后进者胜"和"先离开者清空目标"。
+
+	// 上菜台候选集
+	UPROPERTY(VisibleInstanceOnly)
+	TArray<TObjectPtr<class AServingCounter>> OverlappingServingCounters;
+
 	UPROPERTY(VisibleInstanceOnly)
 	TObjectPtr<class AServingCounter> OverlappingCounter;
 
-	// 当前可交还碟子的洗碗机（靠近时由洗碗机的重叠球注册）
+	// 洗碗机候选集
+	UPROPERTY(VisibleInstanceOnly)
+	TArray<TObjectPtr<class ADishwasher>> OverlappingDishwashers;
+
 	UPROPERTY(VisibleInstanceOnly)
 	TObjectPtr<class ADishwasher> OverlappingDishwasher;
 
-	// 当前可招揽顾客的招揽台（靠近时由招揽台的重叠球注册）
+	// 招揽台候选集
+	UPROPERTY(VisibleInstanceOnly)
+	TArray<TObjectPtr<class AAttractCounter>> OverlappingAttractCounters;
+
 	UPROPERTY(VisibleInstanceOnly)
 	TObjectPtr<class AAttractCounter> OverlappingAttractCounter;
 
-	// 当前可开门营业的大门交互台（靠近时由大门的重叠球注册）
+	// 大门交互台候选集
+	UPROPERTY(VisibleInstanceOnly)
+	TArray<TObjectPtr<class AGateCounter>> OverlappingGates;
+
 	UPROPERTY(VisibleInstanceOnly)
 	TObjectPtr<class AGateCounter> OverlappingGate;
 
-	// 当前可接单的客人（靠近时由客人的交互球注册；仅"需要玩家接单"模式使用）
+	// 客人候选集
+	UPROPERTY(VisibleInstanceOnly)
+	TArray<TObjectPtr<class AGuestCharacter>> OverlappingGuests;
+
 	UPROPERTY(VisibleInstanceOnly)
 	TObjectPtr<class AGuestCharacter> OverlappingGuest;
 
-	// 当前可交互的餐桌（靠近时由餐桌 ChairSeat 的交互球注册；用于 E 键点单 / 上菜 / 收空碟）
+	// 餐桌候选集
+	UPROPERTY(VisibleInstanceOnly)
+	TArray<TObjectPtr<class AChairSeat>> OverlappingChairSeats;
+
 	UPROPERTY(VisibleInstanceOnly)
 	TObjectPtr<class AChairSeat> OverlappingChairSeat;
 
 	// 当前可收走的空碟（靠近空碟时由空碟的回收球注册；方案B 上菜闭环，收走后变成手上脏碟）
 	UPROPERTY(VisibleInstanceOnly)
+	TArray<TObjectPtr<class AItemActor>> OverlappingEmptyPlates;
+
+	UPROPERTY(VisibleInstanceOnly)
 	TObjectPtr<class AItemActor> OverlappingEmptyPlate;
 
-	// 当前可投入食材的研究炉（靠近时由研究炉的重叠球注册；用于 E 键投入食材研究新菜谱）
+	// 当前可投入食材的研究炉（靠近时由研究炉的重叠球注册）
+	UPROPERTY(VisibleInstanceOnly)
+	TArray<TObjectPtr<class AResearchStove>> OverlappingResearchStoves;
+
 	UPROPERTY(VisibleInstanceOnly)
 	TObjectPtr<class AResearchStove> OverlappingResearchStove;
 
 	// 当前可存物/取物的仓库（靠近时由仓库的重叠球注册；用于 E 键把背包物品存入仓库）
 	UPROPERTY(VisibleInstanceOnly)
+	TArray<TObjectPtr<class AStorageWarehouse>> OverlappingWarehouses;
+
+	UPROPERTY(VisibleInstanceOnly)
 	TObjectPtr<class AStorageWarehouse> OverlappingWarehouse;
 
 	// 当前可对话的交互对象（靠近时由 UInteractionDialogueComponent 注册；通用对话系统）
+	UPROPERTY(VisibleInstanceOnly)
+	TArray<TObjectPtr<class UInteractionDialogueComponent>> OverlappingDialogues;
+
 	UPROPERTY(VisibleInstanceOnly)
 	TObjectPtr<class UInteractionDialogueComponent> OverlappingDialogue;
 
@@ -256,6 +314,74 @@ protected:
 	UPROPERTY(EditAnywhere, Category="Input")
 	UInputAction* OpenShopAction;
 
+	/** 冲刺 Input Action (LeftShift)：按住加速移动，松开恢复 */
+	UPROPERTY(EditAnywhere, Category="Input")
+	UInputAction* RushAction;
+
+	// ============ 冲刺 / 速度 ============
+	/** 常规行走速度（RushEnd 恢复到此值） */
+	UPROPERTY(EditDefaultsOnly, Category="Movement")
+	float WalkSpeed = 600.f;
+
+	/** 冲刺速度 */
+	UPROPERTY(EditDefaultsOnly, Category="Movement")
+	float SprintSpeed = 900.f;
+
+	/** 常规最大加速度（起步跟手程度） */
+	UPROPERTY(EditDefaultsOnly, Category="Movement")
+	float WalkAcceleration = 3000.f;
+
+	/** 冲刺最大加速度：起步/转向时更快把实际速度拉到冲刺速
+	 *  （600→900 约 0.06s，观感接近瞬时但不产生速度阶跃） */
+	UPROPERTY(EditDefaultsOnly, Category="Movement")
+	float SprintAcceleration = 5200.f;
+
+	/** 常规转向速率（Yaw） */
+	UPROPERTY(EditDefaultsOnly, Category="Movement")
+	float WalkRotationRate = 500.f;
+
+	/** 冲刺转向速率（Yaw）：高速下转向更跟手 */
+	UPROPERTY(EditDefaultsOnly, Category="Movement")
+	float SprintRotationRate = 720.f;
+
+	/** 起步脉冲：当帧把水平速度直接推到冲刺速度（速度阶跃）。
+	 *  注意：阶跃会让弹簧臂相机“先被甩开再追上来”，表现就是镜头猛地往前一突，
+	 *  因此默认关闭；需要的那点跟手感交给 SprintAcceleration 平滑加速完成。 */
+	UPROPERTY(EditDefaultsOnly, Category="Movement")
+	bool bSprintInstantBurst = false;
+
+	/** 相机跟随速度（越大越贴住角色）。
+	 *  冲刺前后必须保持同一值——LagSpeed 一变，滞后量就跳变，镜头会前后抽动。 */
+	UPROPERTY(EditDefaultsOnly, Category="Movement")
+	float CameraLagSpeed = 35.f;
+
+	/** 相机允许的最大滞后距离（0 = 不限制）。
+	 *  保持 0：LagSpeed 已固定，稳态滞后只有一二十厘米，无需夹紧；
+	 *  一旦设小值，滞后量会每帧撞上限被硬夹住，反而产生顿感。 */
+	UPROPERTY(EditDefaultsOnly, Category="Movement")
+	float CameraLagMaxDistance = 0.f;
+
+	/** 是否启用冲刺 FOV 拉伸。关掉后镜头只提速不变焦，最不容易晕 */
+	UPROPERTY(EditDefaultsOnly, Category="Movement")
+	bool bUseSprintFOV = false;
+
+	/** 非冲刺时的相机 FOV */
+	UPROPERTY(EditDefaultsOnly, Category="Movement")
+	float NormalFOV = 90.f;
+
+	/** 冲刺时的相机 FOV（小幅拉大做速度感，过大容易晕） */
+	UPROPERTY(EditDefaultsOnly, Category="Movement")
+	float SprintFOV = 92.f;
+
+	/** FOV 过渡速度：越大越快到位 */
+	UPROPERTY(EditDefaultsOnly, Category="Movement")
+	float FOVInterpSpeed = 10.f;
+
+	/** 当前相机目标 FOV（Tick 中插值逼近） */
+	float TargetFOV = 90.f;
+
+	bool bIsSprinting = false;
+
 
 public:
 
@@ -266,6 +392,139 @@ public:
 	
 	UFUNCTION(BlueprintCallable, Category="PickupInterface")
 	virtual void SetOverlappingItem(AItemActor* Item) override;
+
+	// 物品进入交互范围：加入候选集并重选最近目标
+	UFUNCTION(BlueprintCallable, Category="PickupInterface")
+	virtual void AddOverlappingItem(AItemActor* Item) override;
+
+	// 物品离开交互范围：从候选集移除并重选最近目标
+	UFUNCTION(BlueprintCallable, Category="PickupInterface")
+	virtual void RemoveOverlappingItem(AItemActor* Item) override;
+
+	// 从候选集中选出距离最近的物品作为 OverlappingItem（同步描边与 HUD）
+	void RefreshBestOverlappingItem();
+
+	// ============ 灶台候选集 ============
+	// 进入/离开时由 ACookingMachine 调用；CookingMachine 始终指向候选里最近的一台
+	UFUNCTION(BlueprintCallable, Category="PickupInterface")
+	virtual void AddOverlappingCookMachine(ACookingMachine* Machine) override;
+
+	UFUNCTION(BlueprintCallable, Category="PickupInterface")
+	virtual void RemoveOverlappingCookMachine(ACookingMachine* Machine) override;
+
+	void RefreshBestCookMachine();
+
+	// ============ 植物候选集 ============
+	// 进入/离开时由 APlant 调用；OverlappingPlant 始终指向候选里最近的一株
+	UFUNCTION(BlueprintCallable, Category="PickupInterface")
+	virtual void AddOverlappingPlant(APlant* Plant) override;
+
+	UFUNCTION(BlueprintCallable, Category="PickupInterface")
+	virtual void RemoveOverlappingPlant(APlant* Plant) override;
+
+	void RefreshBestPlant();
+
+	// ============ 其余交互目标候选集（上菜台/洗碗机/招揽台/大门/客人/餐桌/研究炉） ============
+	// 这七类都由各自的交互球直接调用角色的 Add/Remove，不再走"单指针覆盖"。
+	// 语义与物品/灶台/植物一致：只登记自己，选谁由角色按"视线可达 + 距离最近"决定。
+	void AddOverlappingCounter(class AServingCounter* Counter);
+	void RemoveOverlappingCounter(class AServingCounter* Counter);
+	void RefreshBestCounter();
+
+	void AddOverlappingDishwasher(class ADishwasher* Dishwasher);
+	void RemoveOverlappingDishwasher(class ADishwasher* Dishwasher);
+	void RefreshBestDishwasher();
+
+	void AddOverlappingAttractCounter(class AAttractCounter* Counter);
+	void RemoveOverlappingAttractCounter(class AAttractCounter* Counter);
+	void RefreshBestAttractCounter();
+
+	void AddOverlappingGate(class AGateCounter* Gate);
+	void RemoveOverlappingGate(class AGateCounter* Gate);
+	void RefreshBestGate();
+
+	void AddOverlappingGuest(class AGuestCharacter* Guest);
+	void RemoveOverlappingGuest(class AGuestCharacter* Guest);
+	void RefreshBestGuest();
+
+	void AddOverlappingChairSeat(class AChairSeat* Seat);
+	void RemoveOverlappingChairSeat(class AChairSeat* Seat);
+	void RefreshBestChairSeat();
+
+	void AddOverlappingResearchStove(class AResearchStove* Stove);
+	void RemoveOverlappingResearchStove(class AResearchStove* Stove);
+	void RefreshBestResearchStove();
+
+	// 空碟 / 仓库 / 对话目标：同样走候选集，避免"多张桌子空碟互相抢目标"
+	void AddOverlappingEmptyPlate(class AItemActor* Plate);
+	void RemoveOverlappingEmptyPlate(class AItemActor* Plate);
+	void RefreshBestEmptyPlate();
+
+	void AddOverlappingWarehouse(class AStorageWarehouse* Warehouse);
+	void RemoveOverlappingWarehouse(class AStorageWarehouse* Warehouse);
+	void RefreshBestWarehouse();
+
+	void AddOverlappingDialogue(class UInteractionDialogueComponent* Comp);
+	void RemoveOverlappingDialogue(class UInteractionDialogueComponent* Comp);
+	void RefreshBestDialogue();
+
+	// ============ 交互视线与统一刷新 ============
+	/** 视线校验：角色眼睛到目标（用包围盒上离眼睛最近的点）之间被墙/台面挡住则返回 false。
+	 *  解决“站在墙另一边也能浇水/投料”的问题 */
+	bool HasInteractionLineOfSight(const AActor* Target) const;
+
+	/** 定期重估三个候选集的最优目标：玩家移动、绕到墙后、物体被搬走都能及时反映 */
+	void RefreshAllInteractionTargets();
+
+	// ============ 交互高亮（同一时刻只亮一个） ============
+	/** 一次交互候选。Pick() 与高亮共用同一份候选表，
+	 *  保证"亮着的那个"永远等于"此刻按 E 会生效的那个"。 */
+	struct FInteractOption
+	{
+		int32 Tier = 2;
+		/** 真实距离（用于显示与调试） */
+		float Dist = FLT_MAX;
+		/** 排序用的"朝向加权距离"：背后目标会被放大，正前方不放大 */
+		float Score = FLT_MAX;
+		FString Name;
+		/** 该动作作用于哪个 Actor；没有具体目标（如"放下"）时为 nullptr */
+		AActor* Target = nullptr;
+		TFunction<bool()> Run;
+	};
+
+	// ============ 交互朝向 ============
+	/** 交互判定用的朝向（水平化）：优先角色脸朝向，退化到控制器/相机朝向 */
+	FVector GetInteractionFacing() const;
+
+	/** 角色到目标的真实交互距离：用包围盒最近点，大件设备不会因为 pivot 远而被算远 */
+	float GetInteractionDistanceTo(const AActor* Target) const;
+
+	/** 朝向加权距离：真实距离 × (1 + 权重 × 偏离度)。
+	 *  背后 40cm 的蔬菜（≈97）会输给正前方 90cm 的那个，避免按 E 时莫名转身 */
+	float GetFacingWeightedDistance(const AActor* Target) const;
+
+	/** 收集当前所有可执行的交互（分层 + 距离），不执行任何副作用 */
+	void BuildInteractionOptions(TArray<FInteractOption, TInlineAllocator<12>>& OutOptions);
+
+	/** 重算"当前唯一高亮目标"：取候选表里第一个有 Actor 目标的项，
+	 *  是物品/植株就点亮它，并把上一个目标熄灭 */
+	void RefreshInteractionHighlight();
+
+	/** 当前高亮的 Actor（未高亮为 nullptr） */
+	UPROPERTY()
+	TObjectPtr<AActor> HighlightTarget;
+
+	UPROPERTY(EditDefaultsOnly, Category="Interaction")
+	bool bEnableInteractionHighlight = true;
+
+	/** 目标重估间隔（秒）：不必每帧，0.15s 足够跟手且几乎无开销 */
+	UPROPERTY(EditDefaultsOnly, Category="Interaction")
+	float InteractionRefreshInterval = 0.15f;
+
+	float InteractionRefreshTimer = 0.f;
+
+	/** 上一次生效的 Shoot.InteractScale 倍率：变了就重设世界里所有交互球 */
+	float LastAppliedInteractionScale = 1.f;
 	
 	UFUNCTION(BlueprintCallable, Category="ShootCharacter")
 	FORCEINLINE AItemActor* GetOverlapItem() const { return OverlappingItem; }
@@ -453,6 +712,60 @@ protected:
 
 	void Pick(const FInputActionValue& Value);
 
+	/** E 键松开：结束"按住范围拾取"状态 */
+	void PickReleased(const FInputActionValue& Value);
+
+	// ============ 交互动画期间的输入缓冲 ============
+	/** 交互动画（拾取/采集/浇水）播放中按下的 E 会被记下，动画结束后在 PickBufferWindow 内补执行一次。
+	 *  这样连按不会再被动画吞掉，也不会在动画期间触发"放下→再拾取"的抖动。 */
+	void BufferPickInput();
+	void TickBufferedPick(float DeltaTime);
+
+	/** 当前是否正在播交互动画（角色状态无法区分，因为采集/浇水不改 CharacterActionState） */
+	bool IsInteractionAnimPlaying();
+
+	bool bHasBufferedPick = false;
+	float BufferedPickTime = 0.f;
+	/** 正在消费缓冲按键：此时跳过"放下"兜底，避免刚捡起的东西被缓冲键立刻放掉 */
+	bool bConsumingBufferedPick = false;
+
+	UPROPERTY(EditDefaultsOnly, Category="Interaction|Buffer")
+	float PickBufferWindow = 0.35f;
+
+	// ============ 按住 E 范围拾取（野外收割） ============
+	/** 按住 E 超过 RangePickHoldTime 后，把 RangePickRadius 内可拾取的散落物品直接收进背包 */
+	void TickRangePick(float DeltaTime);
+
+	/** 半径内最近的、可被范围拾取的物品（已过滤空碟/脏碟/手上物品/烹饪中/隔墙） */
+	AItemActor* FindNearestRangePickItem() const;
+
+	/** 身边是否贴着设备类交互目标（灶台/上菜台/门等）：有的话不吸，避免把待加工食材吸走 */
+	bool HasBlockingInteractionTarget() const;
+
+	UPROPERTY(EditDefaultsOnly, Category="Interaction|RangePick")
+	bool bRangePickEnabled = true;
+
+	UPROPERTY(EditDefaultsOnly, Category="Interaction|RangePick")
+	float RangePickRadius = 150.f;
+
+	/** 按住多久后才进入范围拾取（短按仍然只做一次普通交互） */
+	UPROPERTY(EditDefaultsOnly, Category="Interaction|RangePick")
+	float RangePickHoldTime = 0.25f;
+
+	/** 连续吸取的间隔 */
+	UPROPERTY(EditDefaultsOnly, Category="Interaction|RangePick")
+	float RangePickInterval = 0.12f;
+
+	bool bPickHeld = false;
+	float PickHeldTime = 0.f;
+	float RangePickCooldown = 0.f;
+
+	/** 冲刺开始（按住 LeftShift）：提速并放大相机 FOV */
+	void RushStart(const FInputActionValue& Value);
+
+	/** 冲刺结束（松开）：恢复速度与 FOV */
+	void RushEnd(const FInputActionValue& Value);
+
 	void PushFoodStart(const FInputActionValue& Value);
 	
 	void PushFoodComplete(const FInputActionValue& Value);
@@ -587,6 +900,15 @@ public:
 
 	/** 浇水完成定时器：即使浇水蒙太奇被设为“循环”，也能在播放一轮时长后强制结束浇水流程 */
 	FTimerHandle WateringDoneTimerHandle;
+
+	/** 采集完成兜底定时器：即使采集蒙太奇被设为“循环”或被中断，也能在播放一轮时长后强制收获，
+	 *  防止 PendingGatherPlant 永不置空导致后续所有采摘被守卫吞掉 */
+	FTimerHandle GatheringDoneTimerHandle;
+
+	// ============ 采集/浇水时的平滑转身 ============
+	// 目标朝向（仅水平），Tick 中用 RInterpTo 插值逼近，取代原来的瞬时 SetActorRotation
+	FRotator InteractFaceRotation = FRotator::ZeroRotator;
+	bool bHasInteractFaceRotation = false;
 
 
 	 UFUNCTION(BlueprintImplementableEvent, Category="Character Events")

@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
 #include "NPC/GuestTypes.h"
+#include "Interaction/InteractionConfig.h"
 #include "GuestCharacter.generated.h"
 
 class AGuestAIController;
@@ -148,6 +149,18 @@ public:
 	/** 交互范围：玩家靠近后可按 E 接单（仅"需要玩家接单"模式使用） */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Guest|Components")
 	TObjectPtr<USphereComponent> InteractionSphere;
+
+	/** 交互判定半径。OnConstruction（编辑器视口）与 BeginPlay（运行时）都会强制应用到组件上 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guest|Components", meta = (ClampMin = "10.0"))
+	float InteractionRadius = InteractionDistance::Guest;
+
+	/** 编辑器里改 InteractionRadius 时立即写进组件，关卡视口中即可看到真实判定球 */
+	virtual void OnConstruction(const FTransform& Transform) override;
+
+	/** 把 InteractionRadius（× Shoot.InteractScale 倍率）写进交互球。
+	 *  OnConstruction / BeginPlay / 运行时改倍率都会调用，必须幂等 */
+	UFUNCTION()
+	void ApplyInteractionScale();
 
 	/** 客人自身计时器（进食/等待上菜超时），不依赖 AI 控制器 */
 	FTimerHandle GuestTimerHandle;

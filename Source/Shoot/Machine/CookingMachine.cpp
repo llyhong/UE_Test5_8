@@ -14,6 +14,7 @@
 #include "Game/PlateSystem.h"
 #include "Item/ItemActor.h"
 #include "Kismet/GameplayStatics.h"
+#include "DrawDebugHelpers.h"
 
 // Sets default values
 ACookingMachine::ACookingMachine()
@@ -30,6 +31,9 @@ ACookingMachine::ACookingMachine()
 	BoxCollision->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 	BoxCollision->SetCollisionResponseToAllChannels(ECollisionResponse::ECR_Overlap);
 	//BoxCollision->SetCollisionResponseToChannel(ECollisionChannel::ECC_Pawn, ECollisionResponse::ECR_Ignore);
+	// 视口里未选中也画出判定盒（青色=台面设备），方便摆放时目测交互范围
+	BoxCollision->ShapeColor = FColor(40, 190, 200);
+	BoxCollision->bDrawOnlyIfSelected = false;
 
 	TipsWidget = CreateDefaultSubobject<UWidgetComponent>(TEXT("TipsWidget"));
 	TipsWidget->SetupAttachment(GetRootComponent());
@@ -41,12 +45,38 @@ ACookingMachine::ACookingMachine()
 }
 
 
+void ACookingMachine::OnConstruction(const FTransform& Transform)
+{
+	Super::OnConstruction(Transform);
+
+	// 编辑器视口预览：改 InteractionBoxExtent 立刻反映到盒体上
+	ApplyInteractionScale();
+}
+
+void ACookingMachine::ApplyInteractionScale()
+{
+	// ============ 统一交互判定尺度 ============
+	// 强制按统一标准重设：引擎默认盒体只有 32 立方（贴在 pivot 高度），
+	// 玩家站在长条灶台的端头就会“够不到”，这是灶台交互范围最典型的错位来源。
+	if (BoxCollision)
+	{
+		BoxCollision->SetBoxExtent(InteractionBoxExtent * InteractionScale::Get(), false);
+		BoxCollision->SetRelativeLocation(FVector(0.f, 0.f, InteractionCenterHeight));
+		BoxCollision->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+		BoxCollision->SetCollisionResponseToAllChannels(ECR_Overlap);
+		BoxCollision->SetGenerateOverlapEvents(true);
+	}
+}
+
 // Called when the game starts or when spawned
 void ACookingMachine::BeginPlay()
 {
 	ResetFoodData();
 	Tags.Add("Machine");
 	Super::BeginPlay();
+
+	ApplyInteractionScale();
+
 	BoxCollision->OnComponentBeginOverlap.AddDynamic(this, &ACookingMachine::OnBoxOverlap);
 	BoxCollision->OnComponentEndOverlap.AddDynamic(this, &ACookingMachine::OnBoxEndOverlap);
 }
@@ -486,6 +516,16 @@ bool ACookingMachine::AddFoodMateral(int32 FoodMaterialID)
 // Called every frame
 void ACookingMachine::Tick(float DeltaTime)
 {
+	// ============ 交互范围调试可视化（控制台 Shoot.DebugInteract 1） ============
+	// 白=有玩家在盒内，灰=无人靠近。用来核对灶台的实际判定范围是否覆盖台面。
+	if (InteractionDebug::IsEnabled() && BoxCollision)
+	{
+		const FColor C = LocalPlayer ? InteractionDebug::ColorInRange() : InteractionDebug::ColorIdle();
+		DrawDebugBox(GetWorld(), BoxCollision->GetComponentLocation(),
+			BoxCollision->GetScaledBoxExtent(), BoxCollision->GetComponentQuat(),
+			C, false, 0.f, 0, 1.5f);
+	}
+
 	if (OnFire && Repairing)//维修中
 	{
 		CurRepairTime += DeltaTime;
@@ -542,7 +582,8 @@ void ACookingMachine::OnBoxOverlap(UPrimitiveComponent* OverlappedComponent, AAc
 	IPickupInterface* PickupInterface = Cast<IPickupInterface>(OtherActor);
 	if (PickupInterface)
 	{
-		PickupInterface->SetCookMachineItem(this);
+		// 注册进角色的灶台候选集：由角色按距离选最近的一台，取代“后进入者胜”
+		PickupInterface->AddOverlappingCookMachine(this);
 		
 		//当tips没有被其他玩家占用的时候
 		if(LocalPlayer == nullptr)
@@ -572,7 +613,9 @@ void ACookingMachine::OnBoxEndOverlap(UPrimitiveComponent* OverlappedComponent, 
 	IPickupInterface* PickupInterface = Cast<IPickupInterface>(OtherActor);
 	if (PickupInterface)
 	{
-		PickupInterface->SetCookMachineItem(nullptr);
+		// 只注销自己：角色会从剩余候选里重选最近的灶台，
+		// 不会像以前那样把另一台（仍在范围内）的目标一起清掉
+		PickupInterface->RemoveOverlappingCookMachine(this);
 		if(LocalPlayer)
 		{
 			if (APawn* AP = Cast<APawn>(OtherActor))

@@ -7,6 +7,7 @@
 #include "Engine/DataTable.h"
 #include "Data/PlantInfo.h"
 #include "Data/QualityTypes.h"
+#include "Interaction/InteractionConfig.h"
 #include "Plant.generated.h"
 
 class UStaticMeshComponent;
@@ -31,6 +32,13 @@ public:
 
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaTime) override;
+
+	/** 编辑器里改 InteractionRadius 时立即写进组件，关卡视口中即可看到真实判定球 */
+	virtual void OnConstruction(const FTransform& Transform) override;
+
+	/** 把 InteractionRadius（× Shoot.InteractScale 倍率）写进交互组件；OnConstruction/BeginPlay/运行时改倍率都会调用，必须幂等 */
+	UFUNCTION()
+	void ApplyInteractionScale();
 
 	/** 植物配置数据表行引用（DataTable: PlantInfo） */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Plant", meta = (RowType = "PlantInfo"))
@@ -88,6 +96,10 @@ public:
 
 	/** 根据当前状态刷新“靠近可采摘”描边提示（仅当前目标植被且可收获时显示） */
 	void UpdateHarvestHintOutline();
+
+	/** 角色指定"本株是当前唯一交互目标"（描边请求）。
+	 *  真正是否点亮还要叠加本株的状态条件（缺水 / 已结果可采），见 UpdateHarvestHintOutline */
+	void SetInteractionHighlight(bool bEnable);
 
 	// ========== 查询（供 UI / 蓝图） ==========
 
@@ -156,6 +168,15 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	USphereComponent* InteractionSphere;
 
+	// ============ 交互判定尺度（统一标准，见 InteractionConfig.h） ============
+	/** 交互球半径。C++ 在 BeginPlay 强制应用，覆盖蓝图残留旧值 */
+	UPROPERTY(EditDefaultsOnly, Category="Interaction")
+	float InteractionRadius = InteractionDistance::Plant;
+
+	/** 球心抬高量：抬到植株中部，与角色胶囊的覆盖高度对齐 */
+	UPROPERTY(EditDefaultsOnly, Category="Interaction")
+	float InteractionCenterHeight = InteractionDistance::CenterHeight;
+
 	/** 调试开关：在屏幕上打印植物状态（可在蓝图/实例上设置） */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug")
 	bool bDebug = false;
@@ -214,6 +235,10 @@ protected:
 	TObjectPtr<AShootCharacter> InteractingCharacter;
 
 	/** 当前采摘描边是否已开启（缓存，避免每帧重复调用 SetActorsOutline） */
+	/** 角色是否把本株选为"当前唯一交互目标"（描边请求，非最终是否点亮） */
+	bool bHighlightRequested = false;
+
+	/** 当前描边是否真的亮着（缓存，避免重复改写自定义深度） */
 	bool bHintOutlineActive = false;
 
 	/** 浇水提示抑制：浇水动作完成后置位，避免“刚浇完”立刻又被高亮；植株重新变干或玩家离开范围后自动清除 */

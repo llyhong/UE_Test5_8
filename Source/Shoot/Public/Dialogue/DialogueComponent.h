@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "Dialogue/DialogueDefinitions.h"
+#include "Interaction/InteractionConfig.h"
 #include "DialogueComponent.generated.h"
 
 class USphereComponent;
@@ -33,9 +34,20 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
 	TSubclassOf<UDialogueWidget> DialogueWidgetClass;
 
-	/** 交互球半径 */
+	/** 交互球半径。OnRegister（编辑器视口）与 BeginPlay（运行时）都会强制应用到组件上 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
-	float InteractionRadius = 150.f;
+	float InteractionRadius = InteractionDistance::Counter;
+
+	/** 编辑器里改 InteractionRadius 时立即写进组件，关卡视口中即可看到真实判定球 */
+	virtual void OnRegister() override;
+
+	/** 创建并配置交互球（编辑器和运行时都调用，重复调用安全） */
+	void EnsureInteractionSphere();
+
+	/** 把 InteractionRadius（× Shoot.InteractScale 倍率）写进交互球。
+	 *  OnRegister / BeginPlay / 运行时改倍率都会调用，必须幂等 */
+	UFUNCTION()
+	void ApplyInteractionScale();
 
 	/** 是否绘制交互半径调试球（绿色线框），便于在编辑器 / 运行时调整 InteractionRadius */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Debug")

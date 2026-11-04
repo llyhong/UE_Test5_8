@@ -7,6 +7,7 @@
 #include "Engine/DataTable.h"
 #include "Interfaces/HoveringInterface.h"
 #include "Data/QualityTypes.h"
+#include "Interaction/InteractionConfig.h"
 #include "ItemActor.generated.h"
 class USphereComponent;
 class ABaseFoodActor;
@@ -50,6 +51,22 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Item")
 	void DeAttachMeshToSocket();
 
+	/**
+	 * 开启物理下落（投掷 / 松手掉落）。
+	 *
+	 * ItemMesh 平时是 NoCollision + 对所有通道 Ignore（避免食物挡住玩家），
+	 * 但这样一旦 SetSimulatePhysics(true) 就完全没有阻挡，会直接穿过地板掉出世界。
+	 * 所以物理必须和碰撞成对打开：只对世界几何（WorldStatic / WorldDynamic）Block，
+	 * Pawn / Camera / Visibility 仍然 Ignore —— 落地不穿地，但不会把玩家挡在过道里。
+	 * 同时打开 CCD，防止快速下落时隧穿薄地板。
+	 */
+	UFUNCTION(BlueprintCallable, Category="Item")
+	void EnablePhysicsDrop();
+
+	/** 兜底：如果蓝图把 ItemMesh 设成模拟物理（BP_Plate / BP_Beef 等确实勾了），
+	 *  就必须补上"能落地"的碰撞，否则有重力无阻挡 → 生成即穿地板。 */
+	void EnsurePhysicsIsSafe();
+
 	UFUNCTION(BlueprintImplementableEvent, Category="Item")
 	void OnSphereOverlapEvent();
 
@@ -66,6 +83,9 @@ private:
 	EItemState ItemState = EItemState::EIS_Idle;
 	bool bSetOutline = false;
 
+	/** 当前是否是角色的"唯一交互目标"（描边的唯一依据） */
+	bool bInteractionHighlight = false;
+
 	/** 是否在树上结果中（由植物生成果实时开启，采摘/离树时关闭），控制熟度计时是否推进 */
 	bool bTrackRipening = false;
 
@@ -74,6 +94,15 @@ private:
 public:	
 	// Called every frame
 	virtual void Tick(float DeltaTime) override;
+
+	/** 编辑器里改 InteractionRadius / InteractionCenterHeight 时立即把值写进组件，
+	 *  这样在关卡视口中摆放时看到的就是运行时真正生效的判定球，而不是蓝图残留的旧半径 */
+	virtual void OnConstruction(const FTransform& Transform) override;
+
+	/** 把 InteractionRadius / InteractionCenterHeight（× Shoot.InteractScale 倍率）应用到 Sphere 与 CollectSphere。
+	 *  OnConstruction（编辑器）、BeginPlay（运行时）、运行时改倍率都会调用，必须幂等 */
+	UFUNCTION()
+	void ApplyInteractionScale();
 	
 	UFUNCTION()
 	virtual void OnSphereOverlap( UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult & SweepResult) override;
@@ -85,6 +114,16 @@ public:
 	
 	UFUNCTION(BlueprintCallable, Category="Item")
 	FORCEINLINE void SetItemState(EItemState State){ItemState = State;}
+
+	/** 交互高亮（描边）：由角色按"当前唯一交互目标"统一点亮/熄灭。
+	 *  旧实现是每个物体在 Overlap 时按自己的 Hovering 状态点亮，站在一堆食材中间会亮成一片；
+	 *  现在描边只认这一个开关，同一时刻全场景最多一个物体亮着。
+	 *  APlant 重写了它：还要满足"缺水 / 可采摘"才真的画出描边。 */
+	UFUNCTION(BlueprintCallable, Category="Item")
+	virtual void SetInteractionHighlight(bool bEnable);
+
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category="Item")
+	FORCEINLINE bool IsInteractionHighlighted() const { return bInteractionHighlight; }
 
 	UFUNCTION(BlueprintCallable, Category="Item")
 	FORCEINLINE int32 GetMenuFoodID() const { return MenuFoodID; }
@@ -106,6 +145,17 @@ public:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
 	USphereComponent* Sphere;
+
+	// ============ 交互判定尺度（统一标准，见 InteractionConfig.h） ============
+	/** 拾取判定球半径。C++ 在 BeginPlay 强制应用，会覆盖蓝图组件上残留的旧值，
+	 *  保证所有食材的拾取手感一致；个别物品要特殊处理就改这里，不要改组件上的半径 */
+	UPROPERTY(EditDefaultsOnly, Category="Interaction")
+	float InteractionRadius = InteractionDistance::Item;
+
+	/** 判定球心相对 Actor 原点的高度：抬到物体中部，
+	 *  否则贴地的球只在脚踝高度有判定，表现为“站旁边也按不出反应” */
+	UPROPERTY(EditDefaultsOnly, Category="Interaction")
+	float InteractionCenterHeight = InteractionDistance::CenterHeight;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	USceneComponent* HandIK_LPoint;

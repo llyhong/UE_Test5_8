@@ -10,6 +10,7 @@
 #include "Engine/Engine.h"
 #include "Item/ItemActor.h"
 #include "ShootCharacter.h"
+#include "Interaction/InteractionConfig.h"
 #include "Game/BaseGameInstance.h"
 
 AResearchStove::AResearchStove()
@@ -23,7 +24,10 @@ AResearchStove::AResearchStove()
 
 	InteractionSphere = CreateDefaultSubobject<USphereComponent>(TEXT("InteractionSphere"));
 	InteractionSphere->SetupAttachment(RootComponent);
-	InteractionSphere->SetSphereRadius(160.f);
+	InteractionSphere->SetSphereRadius(InteractionRadius * InteractionScale::Get());
+	// 视口里未选中也画出判定球，摆放关卡时能直接目测交互范围
+	InteractionSphere->ShapeColor = FColor(40, 190, 200);
+	InteractionSphere->bDrawOnlyIfSelected = false;
 	InteractionSphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 	InteractionSphere->SetCollisionResponseToAllChannels(ECR_Overlap);
 	InteractionSphere->SetGenerateOverlapEvents(true);
@@ -34,9 +38,33 @@ AResearchStove::AResearchStove()
 	TipsWidget->SetVisibility(false);
 }
 
+void AResearchStove::OnConstruction(const FTransform& Transform)
+{
+	Super::OnConstruction(Transform);
+
+	// 编辑器视口预览：改 InteractionRadius 立刻反映到组件上，
+	// 摆放关卡时看到的球就是运行时真正生效的判定范围
+	ApplyInteractionScale();
+}
+
+void AResearchStove::ApplyInteractionScale()
+{
+	if (InteractionSphere)
+	{
+		InteractionSphere->SetSphereRadius(InteractionRadius * InteractionScale::Get(), false);
+		InteractionSphere->SetRelativeLocation(FVector(0.f, 0.f, InteractionCenterHeight));
+		InteractionSphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+		InteractionSphere->SetCollisionResponseToAllChannels(ECR_Overlap);
+		InteractionSphere->SetGenerateOverlapEvents(true);
+	}
+}
+
 void AResearchStove::BeginPlay()
 {
 	Super::BeginPlay();
+
+	// 统一交互尺度：强制覆盖蓝图里残留的旧半径
+	ApplyInteractionScale();
 
 	InteractionSphere->OnComponentBeginOverlap.AddDynamic(this, &AResearchStove::OnInteractionOverlap);
 	InteractionSphere->OnComponentEndOverlap.AddDynamic(this, &AResearchStove::OnInteractionEndOverlap);
@@ -301,7 +329,7 @@ void AResearchStove::OnInteractionOverlap(UPrimitiveComponent* OverlappedCompone
 		return;
 	}
 
-	Character->SetOverlappingResearchStove(this);
+	Character->AddOverlappingResearchStove(this);
 
 	// 当提示控件未被其它玩家占用时，显示"按 E 投入食材研究"提示
 	if (LocalPlayer == nullptr && TipsWidget)
@@ -331,10 +359,8 @@ void AResearchStove::OnInteractionEndOverlap(UPrimitiveComponent* OverlappedComp
 		return;
 	}
 
-	if (Character->GetOverlappingResearchStove() == this)
-	{
-		Character->SetOverlappingResearchStove(nullptr);
-	}
+	// 只注销自己：多台研究炉范围交叠时，另一台仍是候选目标
+	Character->RemoveOverlappingResearchStove(this);
 
 	// 离开时隐藏提示控件（仅当占用者正是该玩家）
 	if (LocalPlayer && TipsWidget)

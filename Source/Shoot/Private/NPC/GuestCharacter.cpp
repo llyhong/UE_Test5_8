@@ -34,10 +34,13 @@ AGuestCharacter::AGuestCharacter()
 	// 交互范围：玩家靠近后可按 E 接单（与上菜台/招揽台的交互球用法一致）
 	InteractionSphere = CreateDefaultSubobject<USphereComponent>(TEXT("InteractionSphere"));
 	InteractionSphere->SetupAttachment(RootComponent);
-	InteractionSphere->SetSphereRadius(220.f);
+	InteractionSphere->SetSphereRadius(InteractionRadius * InteractionScale::Get());
 	InteractionSphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 	InteractionSphere->SetCollisionResponseToAllChannels(ECR_Overlap);
 	InteractionSphere->SetGenerateOverlapEvents(true);
+	// 视口里未选中也画出判定球（粉色=客人），方便摆放时目测接单范围
+	InteractionSphere->ShapeColor = FColor(235, 110, 160);
+	InteractionSphere->bDrawOnlyIfSelected = false;
 
 	// 客人与客人之间的避让：
 	// 1) 开启 RVO 避让，AI 走向同一方向（如同时进场/同时离场）时会互相绕行，而不是顶在一起。
@@ -82,9 +85,29 @@ AGuestCharacter::AGuestCharacter()
 	// 按状态随机抽取，C++ 不再硬编码，便于策划在编辑器里维护。
 }
 
+void AGuestCharacter::OnConstruction(const FTransform& Transform)
+{
+	Super::OnConstruction(Transform);
+
+	// 编辑器视口预览：改 InteractionRadius 立刻反映到组件上
+	ApplyInteractionScale();
+}
+
+void AGuestCharacter::ApplyInteractionScale()
+{
+	if (InteractionSphere)
+	{
+		InteractionSphere->SetSphereRadius(InteractionRadius * InteractionScale::Get(), false);
+	}
+}
+
 void AGuestCharacter::BeginPlay()
 {
 	Super::BeginPlay();
+
+	// 运行时同样强制应用，覆盖蓝图里残留的旧半径
+	ApplyInteractionScale();
+
 	SetGuestState(EGuestState::WalkingIn);
 
 	// 确保胶囊体对 Pawn（其他客人/玩家）通道设为阻挡，避免蓝图默认值把碰撞设成
@@ -725,7 +748,7 @@ void AGuestCharacter::OnInteractionOverlap(UPrimitiveComponent* OverlappedCompon
 	// - 方案B上菜：靠近“正在等餐”的客人按 E 直接端菜上菜。
 	if (AShootCharacter* Player = Cast<AShootCharacter>(OtherActor))
 	{
-		Player->SetOverlappingGuest(this);
+		Player->AddOverlappingGuest(this);
 	}
 }
 
@@ -734,11 +757,8 @@ void AGuestCharacter::OnInteractionEndOverlap(UPrimitiveComponent* OverlappedCom
 {
 	if (AShootCharacter* Player = Cast<AShootCharacter>(OtherActor))
 	{
-		// 仅当仍指向自己时才清空，避免多个客人同时重叠时互相串扰
-		if (Player->GetOverlappingGuest() == this)
-		{
-			Player->SetOverlappingGuest(nullptr);
-		}
+		// 只注销自己：多个客人范围交叠时，另一个仍是候选目标
+		Player->RemoveOverlappingGuest(this);
 	}
 }
 

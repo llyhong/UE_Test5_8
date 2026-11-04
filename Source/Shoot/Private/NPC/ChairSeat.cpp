@@ -70,10 +70,13 @@ AChairSeat::AChairSeat()
 	// 交互球：玩家靠近后按 E 与本餐桌交互（点单 / 上菜 / 收空碟）
 	InteractionSphere = CreateDefaultSubobject<USphereComponent>(TEXT("InteractionSphere"));
 	InteractionSphere->SetupAttachment(RootComponent);
-	InteractionSphere->SetSphereRadius(InteractionRadius);
+	InteractionSphere->SetSphereRadius(InteractionRadius * InteractionScale::Get());
 	InteractionSphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 	InteractionSphere->SetCollisionResponseToAllChannels(ECR_Overlap);
 	InteractionSphere->SetGenerateOverlapEvents(true);
+	// 视口里未选中也画出判定球（紫色=餐桌），方便摆放时目测交互范围
+	InteractionSphere->ShapeColor = FColor(160, 110, 230);
+	InteractionSphere->bDrawOnlyIfSelected = false;
 
 	// 菜单提示控件：挂在餐桌上方，显示当前客人点的菜单。
 	// 控件类由蓝图在 TipsWidgetComp 的 Widget Class 上配置，这里不给默认类，
@@ -89,13 +92,29 @@ AChairSeat::AChairSeat()
 	TipsWidgetComp->SetVisibility(false);
 }
 
+void AChairSeat::OnConstruction(const FTransform& Transform)
+{
+	Super::OnConstruction(Transform);
+
+	// 编辑器视口预览：改 InteractionRadius 立刻反映到组件上
+	ApplyInteractionScale();
+}
+
+void AChairSeat::ApplyInteractionScale()
+{
+	if (InteractionSphere)
+	{
+		InteractionSphere->SetSphereRadius(InteractionRadius * InteractionScale::Get(), false);
+	}
+}
+
 void AChairSeat::BeginPlay()
 {
 	Super::BeginPlay();
 
 	if (InteractionSphere)
 	{
-		InteractionSphere->SetSphereRadius(InteractionRadius);
+		ApplyInteractionScale();
 		InteractionSphere->OnComponentBeginOverlap.AddDynamic(this, &AChairSeat::OnInteractionOverlap);
 		InteractionSphere->OnComponentEndOverlap.AddDynamic(this, &AChairSeat::OnInteractionEndOverlap);
 	}
@@ -726,10 +745,10 @@ bool AChairSeat::TryCollectPlateByPlayer(AShootCharacter* Player)
 	DirtyPlate = nullptr;
 	bHasDirtyPlate = false;
 
-	// 碟子已在手上，清掉玩家身上的空碟可交互引用，避免重复收走
+	// 碟子已在手上：从候选集注销该空碟，避免重复收走（不影响其它空碟目标）
 	if (Player->GetOverlappingEmptyPlate() == Plate)
 	{
-		Player->SetOverlappingEmptyPlate(nullptr);
+		Player->RemoveOverlappingEmptyPlate(Plate);
 	}
 
 	SeatMessage(TEXT("[餐桌] 已收走空碟，座位空出"), FColor::Green);
@@ -744,7 +763,7 @@ void AChairSeat::OnInteractionOverlap(UPrimitiveComponent* OverlappedComponent, 
 {
 	if (AShootCharacter* Player = Cast<AShootCharacter>(OtherActor))
 	{
-		Player->SetOverlappingChairSeat(this);
+		Player->AddOverlappingChairSeat(this);
 
 		// TipsMode = PlayerNear 时按“范围内玩家数”决定提示控件显隐
 		TipsNearbyPlayerCount++;
@@ -757,11 +776,8 @@ void AChairSeat::OnInteractionEndOverlap(UPrimitiveComponent* OverlappedComponen
 {
 	if (AShootCharacter* Player = Cast<AShootCharacter>(OtherActor))
 	{
-		// 仅当仍指向本餐桌时才清空，避免多张餐桌重叠时互相串扰
-		if (Player->GetOverlappingChairSeat() == this)
-		{
-			Player->SetOverlappingChairSeat(nullptr);
-		}
+		// 只注销自己：相邻餐桌范围交叠时，另一张仍是候选目标
+		Player->RemoveOverlappingChairSeat(this);
 
 		// TipsMode = PlayerNear 时按“范围内玩家数”决定提示控件显隐
 		TipsNearbyPlayerCount = FMath::Max(0, TipsNearbyPlayerCount - 1);

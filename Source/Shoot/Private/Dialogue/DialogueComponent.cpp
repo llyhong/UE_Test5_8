@@ -15,6 +15,56 @@ UInteractionDialogueComponent::UInteractionDialogueComponent()
 	PrimaryComponentTick.bCanEverTick = true;
 }
 
+void UInteractionDialogueComponent::OnRegister()
+{
+	Super::OnRegister();
+
+	// 编辑器视口预览：让判定球在编辑器中就存在，改 InteractionRadius 能立刻看到范围。
+	// 只在编辑器世界创建；PIE / 打包运行时仍由 BeginPlay 创建，行为与之前一致。
+	if (!GetWorld() || GetWorld()->IsGameWorld())
+	{
+		return;
+	}
+	EnsureInteractionSphere();
+}
+
+void UInteractionDialogueComponent::EnsureInteractionSphere()
+{
+	AActor* Owner = GetOwner();
+	if (!Owner || InteractionSphere)
+	{
+		return;
+	}
+
+	// —— 交互球（挂到 Owner 根组件，玩家靠近才可按 E） ——
+	// 注意：必须先 SetupAttachment 再 RegisterComponent，否则组件会先以世界原点注册，
+	// 造成“启动时误触发重叠”且玩家站在 NPC 面前却不在球体内（按 E 无反应）。
+	InteractionSphere = NewObject<USphereComponent>(Owner, TEXT("DialogueInteractionSphere"));
+	if (InteractionSphere)
+	{
+		InteractionSphere->SetSphereRadius(InteractionRadius * InteractionScale::Get());
+		InteractionSphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+		InteractionSphere->SetCollisionResponseToAllChannels(ECR_Overlap);
+		InteractionSphere->SetGenerateOverlapEvents(true);
+		// 视口里未选中也画出判定球（浅蓝=对话），方便摆放时目测对话范围
+		InteractionSphere->ShapeColor = FColor(90, 170, 250);
+		InteractionSphere->bDrawOnlyIfSelected = false;
+		InteractionSphere->SetupAttachment(Owner->GetRootComponent());
+		InteractionSphere->RegisterComponent();
+		InteractionSphere->OnComponentBeginOverlap.AddDynamic(this, &UInteractionDialogueComponent::OnInteractionOverlap);
+		InteractionSphere->OnComponentEndOverlap.AddDynamic(this, &UInteractionDialogueComponent::OnInteractionEndOverlap);
+	}
+}
+
+void UInteractionDialogueComponent::ApplyInteractionScale()
+{
+	EnsureInteractionSphere();
+	if (InteractionSphere)
+	{
+		InteractionSphere->SetSphereRadius(InteractionRadius * InteractionScale::Get(), false);
+	}
+}
+
 void UInteractionDialogueComponent::BeginPlay()
 {
 	Super::BeginPlay();
@@ -25,21 +75,7 @@ void UInteractionDialogueComponent::BeginPlay()
 		return;
 	}
 
-	// —— 交互球（运行时挂到 Owner 根组件，玩家靠近才可按 E） ——
-	// 注意：必须先 SetupAttachment 再 RegisterComponent，否则组件会先以世界原点注册，
-	// 造成“启动时误触发重叠”且玩家站在 NPC 面前却不在球体内（按 E 无反应）。
-	InteractionSphere = NewObject<USphereComponent>(Owner, TEXT("DialogueInteractionSphere"));
-	if (InteractionSphere)
-	{
-		InteractionSphere->SetSphereRadius(InteractionRadius);
-		InteractionSphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-		InteractionSphere->SetCollisionResponseToAllChannels(ECR_Overlap);
-		InteractionSphere->SetGenerateOverlapEvents(true);
-		InteractionSphere->SetupAttachment(Owner->GetRootComponent());
-		InteractionSphere->RegisterComponent();
-		InteractionSphere->OnComponentBeginOverlap.AddDynamic(this, &UInteractionDialogueComponent::OnInteractionOverlap);
-		InteractionSphere->OnComponentEndOverlap.AddDynamic(this, &UInteractionDialogueComponent::OnInteractionEndOverlap);
-	}
+	EnsureInteractionSphere();
 
 	// —— 交互提示 Widget（“按 E 对话”，默认隐藏） ——
 	if (PromptWidgetClass)
@@ -194,7 +230,7 @@ void UInteractionDialogueComponent::OnInteractionOverlap(UPrimitiveComponent* Ov
 {
 	if (AShootCharacter* SC = Cast<AShootCharacter>(OtherActor))
 	{
-		SC->SetOverlappingDialogue(this);
+		SC->AddOverlappingDialogue(this);
 		ShowPrompt();
 		UE_LOG(LogTemp, Log, TEXT("[Dialogue] 玩家进入范围: %s -> %s (半径%.0f)"),
 			*GetNameSafe(SC), *GetNameSafe(GetOwner()), InteractionRadius);
@@ -206,10 +242,8 @@ void UInteractionDialogueComponent::OnInteractionEndOverlap(UPrimitiveComponent*
 {
 	if (AShootCharacter* SC = Cast<AShootCharacter>(OtherActor))
 	{
-		if (SC->GetOverlappingDialogue() == this)
-		{
-			SC->SetOverlappingDialogue(nullptr);
-		}
+		// 只注销自己，多个可对话对象范围交叠时互不影响
+		SC->RemoveOverlappingDialogue(this);
 		HidePrompt();
 
 		// 玩家离开时自动隐藏对话框（满足需求）
@@ -228,6 +262,6 @@ void UInteractionDialogueComponent::TickComponent(float DeltaTime, ELevelTick Ti
 	if (bDebugDrawRadius && GetOwner())
 	{
 		// 每帧绘制交互半径调试球（绿色线框，跟随 Owner 位置，便于调整 InteractionRadius）
-		DrawDebugSphere(GetOwner()->GetWorld(), GetOwner()->GetActorLocation(), InteractionRadius, 24, DebugRadiusColor, false, -1.f, 0, 2.f);
+		DrawDebugSphere(GetOwner()->GetWorld(), GetOwner()->GetActorLocation(), InteractionRadius * InteractionScale::Get(), 24, DebugRadiusColor, false, -1.f, 0, 2.f);
 	}
 }

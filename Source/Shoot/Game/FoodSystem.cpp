@@ -173,12 +173,14 @@ TArray<int32> UFoodSystem::GetFoodIDsByMachine(int32 MachineID) const
 	}
 	return FoodIDs;
 }
-ABaseFoodActor* UFoodSystem::CreateFoodActor(int32 FoodID)
+ABaseFoodActor* UFoodSystem::CreateFoodActor(int32 FoodID, const FVector& SpawnLocation)
 {
 	UClass* LoadedClass = LoadObject<UClass>(nullptr, *FString::Printf(TEXT("/Game/_Demo/Blueprints/Cooking/Food/BP_Food_%d.BP_Food_%d_C"),FoodID,FoodID));
 	if (LoadedClass)
 	{
-		ABaseFoodActor* NewActor = GetWorld()->SpawnActor<ABaseFoodActor>(LoadedClass, FVector::Zero(), FRotator::ZeroRotator);
+		// 生成在调用方给的位置（一般是盘子上方）。挂点接不上时至少不会停在地图原点、
+		// 沉到地板下面去。
+		ABaseFoodActor* NewActor = GetWorld()->SpawnActor<ABaseFoodActor>(LoadedClass, SpawnLocation, FRotator::ZeroRotator);
 		return NewActor;
 	}
 	GEngine->AddOnScreenDebugMessage(-1,2,FColor::Red,TEXT("无效食物ID "));

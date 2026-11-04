@@ -27,6 +27,7 @@
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputActionValue.h"
+#include "UObject/ConstructorHelpers.h"
 #include "Shoot.h"
 #include "Animation/AnimMontage.h"
 #include "Animation/ShootAnimInstance.h"
@@ -40,11 +41,17 @@
 #include "Kismet/GameplayStaticsTypes.h"
 #include "Blueprint/AIBlueprintHelperLibrary.h"
 #include "Data/ItemActorInfo.h"
+#include "Interaction/InteractionConfig.h"
+#include "DrawDebugHelpers.h"
+#include "EngineUtils.h"
 
 
 void AShootCharacter::PlayPickMontage(FName SelectionName)
 {
-	if (CharacterActionState == ECharacterActionState::EAS_Unoccupied)
+	// 手持物品（EAS_Picking）时也允许播放：DoPick 先置 EAS_Picking 再播动画，
+	// 旧逻辑只放行 EAS_Unoccupied 会导致拾取动画永远不播
+	if (CharacterActionState == ECharacterActionState::EAS_Unoccupied
+		|| CharacterActionState == ECharacterActionState::EAS_Picking)
 	{
 		UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
 		if (AnimInstance && PickMontage)
@@ -57,7 +64,9 @@ void AShootCharacter::PlayPickMontage(FName SelectionName)
 
 bool AShootCharacter::PlayGatheringMontage()
 {
-	if (CharacterActionState == ECharacterActionState::EAS_Unoccupied)
+	// 手持物品时也允许采集动画（旧逻辑导致拿着东西采瞬间完成、无动画）
+	if (CharacterActionState == ECharacterActionState::EAS_Unoccupied
+		|| CharacterActionState == ECharacterActionState::EAS_Picking)
 	{
 		UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
 		if (AnimInstance && GatheringMontage)
@@ -71,7 +80,9 @@ bool AShootCharacter::PlayGatheringMontage()
 
 bool AShootCharacter::PlayWateringMontage()
 {
-	if (CharacterActionState == ECharacterActionState::EAS_Unoccupied)
+	// 手持物品时也允许浇水动画（旧逻辑导致拿着东西浇水瞬间完成、无动画）
+	if (CharacterActionState == ECharacterActionState::EAS_Unoccupied
+		|| CharacterActionState == ECharacterActionState::EAS_Picking)
 	{
 		UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
 		if (AnimInstance && WateringMontage)
@@ -85,16 +96,29 @@ bool AShootCharacter::PlayWateringMontage()
 
 void AShootCharacter::GatheringMontageEnded(UAnimMontage* Montage, bool bInterrupted)
 {
+	// 兜底定时器到此作废（正常路径由蒙太奇结束触发本函数）
+	GetWorldTimerManager().ClearTimer(GatheringDoneTimerHandle);
+
 	// 采集动画播完（无论是否被中断）才真正收获并删除植物
 	if (PendingGatherPlant && IsValid(PendingGatherPlant))
 	{
 		PendingGatherPlant->Harvest();
 	}
 	PendingGatherPlant = nullptr;
+	bHasInteractFaceRotation = false;
+
+	// 蒙太奇若被误配为“循环”，此处强制停止，避免角色一直停留在采集动画
+	if (UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance())
+	{
+		AnimInstance->Montage_Stop(0.25f, GatheringMontage);
+	}
 }
 
 void AShootCharacter::WateringMontageEnded(UAnimMontage* Montage, bool bInterrupted)
 {
+	// 兜底定时器到此作废（正常路径由蒙太奇结束触发本函数，避免双触发重复执行）
+	GetWorldTimerManager().ClearTimer(WateringDoneTimerHandle);
+
 	// 浇水动画播完（无论是否被中断，或由定时器兜底触发）才真正补水；
 	// 描边由 APlant::UpdateHarvestHintOutline 在补水后（不再需要浇水时）自动清除，此处不再手动处理
 	if (PendingWaterPlant && IsValid(PendingWaterPlant))
@@ -103,6 +127,7 @@ void AShootCharacter::WateringMontageEnded(UAnimMontage* Montage, bool bInterrup
 		PendingWaterPlant->SetWaterHintSuppressed(true); // 浇完后取消高亮（植株变干或离开范围后恢复）
 	}
 	PendingWaterPlant = nullptr;
+	bHasInteractFaceRotation = false;
 
 	// 蒙太奇若被误配为“循环”，此处强制停止，避免角色一直停留在浇水动画
 	if (UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance())
@@ -218,13 +243,16 @@ bool AShootCharacter::IsSpawner()
 
 	// Configure character movement
 	GetCharacterMovement()->bOrientRotationToMovement = true;
-	GetCharacterMovement()->RotationRate = FRotator(0.0f, 500.0f, 0.0f);
+	GetCharacterMovement()->RotationRate = FRotator(0.0f, WalkRotationRate, 0.0f);
 
 	// Note: For faster iteration times these variables, and many more, can be tweaked in the Character Blueprint
 	// instead of recompiling to adjust them
-	GetCharacterMovement()->JumpZVelocity = 500.f;
-	GetCharacterMovement()->AirControl = 0.35f;
-	GetCharacterMovement()->MaxWalkSpeed = 500.f;
+	// 手感调参：快起快落（马里奥式跳跃），更高加速让起步跟手，冲刺提速见 RushStart/RushEnd
+	GetCharacterMovement()->JumpZVelocity = 700.f;
+	GetCharacterMovement()->AirControl = 0.5f;
+	GetCharacterMovement()->MaxWalkSpeed = WalkSpeed;
+	GetCharacterMovement()->MaxAcceleration = WalkAcceleration;
+	GetCharacterMovement()->GravityScale = 2.0f;
 	GetCharacterMovement()->MinAnalogWalkSpeed = 20.f;
 	GetCharacterMovement()->BrakingDecelerationWalking = 2000.f;
 	GetCharacterMovement()->BrakingDecelerationFalling = 1500.0f;
@@ -235,11 +263,26 @@ bool AShootCharacter::IsSpawner()
 	CameraBoom->TargetArmLength = 400.0f;
 	CameraBoom->bUsePawnControlRotation = true;
 	CameraBoom->bDoCollisionTest = false; // 镜头不与被遮挡的场景物件发生碰撞拉近距离
+	// 相机延迟跟随：保留一点缓冲吸收台阶/落地的上下颠簸，
+	// 但 LagSpeed 固定不变、并限制最大滞后距离，避免加速/急停时镜头前后抽动
+	CameraBoom->bEnableCameraLag = true;
+	CameraBoom->CameraLagSpeed = CameraLagSpeed;
+	CameraBoom->CameraLagMaxDistance = CameraLagMaxDistance;
+	// 旋转不做滞后：鼠标转视角必须即时响应
+	CameraBoom->bEnableCameraRotationLag = false;
 
 	// Create a follow camera
 	FollowCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FollowCamera"));
 	FollowCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName);
 	FollowCamera->bUsePawnControlRotation = false;
+	TargetFOV = FollowCamera->FieldOfView; // 冲刺 FOV 插值的基准
+
+	// 冲刺 Input Action 直接在 C++ 里加载，免去每个角色蓝图手动赋值
+	static ConstructorHelpers::FObjectFinder<UInputAction> RushActionFinder(TEXT("/Game/Input/Actions/IA_Rush"));
+	if (RushActionFinder.Succeeded())
+	{
+		RushAction = RushActionFinder.Object;
+	}
 
  	RetargetMesh = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("RetargetMesh"));
  	RetargetMesh->SetupAttachment(GetMesh());
@@ -254,11 +297,20 @@ void AShootCharacter::SetOverlappingItem(AItemActor* Item)
  		return ;
  	}
 
- 	if (OverlappingItem!= nullptr && Item != nullptr && OverlappingItem != Item)
+ 	if (OverlappingItem != nullptr && Item != nullptr && OverlappingItem != Item
+ 		&& OverlappingItem->GetItemState() != EItemState::EIS_Equipped
+ 		&& OverlappingItem->GetItemState() != EItemState::EIS_Cooking)
  	{
  		OverlappingItem->SetItemState(EItemState::EIS_Idle);
  	}
 	OverlappingItem = Item;
+
+	// 新目标若处于 Idle（曾是候选但被切走），恢复 Hovering 让描边重新点亮
+	if (Item && Item->GetItemState() == EItemState::EIS_Idle
+		&& Item->GetItemState() != EItemState::EIS_Equipped)
+	{
+		Item->SetItemState(EItemState::EIS_Hovering);
+	}
 
 	// 驱动 HUD：对准食物箱时显示其剩余数量，否则隐藏（带缓存，避免每帧重复推送）
 	if (UHUDWidget* HUD = GetHUDWidget())
@@ -280,6 +332,616 @@ void AShootCharacter::SetOverlappingItem(AItemActor* Item)
 			LastSpawnerCount = -2;
 		}
 	}
+}
+
+void AShootCharacter::AddOverlappingItem(AItemActor* Item)
+{
+	if (IsPicking || !Item || !IsValid(Item))
+	{
+		return;
+	}
+	// 已被拿在手上/正在锅里烹饪的不进入候选集
+	if (Item->GetItemState() == EItemState::EIS_Equipped || Item->GetItemState() == EItemState::EIS_Cooking)
+	{
+		return;
+	}
+	if (!OverlappingItems.Contains(Item))
+	{
+		OverlappingItems.Add(Item);
+	}
+	RefreshBestOverlappingItem();
+}
+
+void AShootCharacter::RemoveOverlappingItem(AItemActor* Item)
+{
+	if (!Item)
+	{
+		return;
+	}
+	OverlappingItems.RemoveSingle(Item);
+	// 该物品刚被移除（自身已置 Idle 或即将置 Idle），直接重选即可
+	RefreshBestOverlappingItem();
+}
+
+void AShootCharacter::RefreshBestOverlappingItem()
+{
+	// 清理失效引用（物品被销毁/入包等）
+	for (int32 i = OverlappingItems.Num() - 1; i >= 0; --i)
+	{
+		AItemActor* It = OverlappingItems[i];
+		if (!It || !IsValid(It)
+			|| It->GetItemState() == EItemState::EIS_Equipped
+			|| It->GetItemState() == EItemState::EIS_Cooking)
+		{
+			OverlappingItems.RemoveAtSwap(i);
+		}
+	}
+
+	// 选"朝向加权距离"最小者作为当前目标：同等距离下正前方的优先，
+	// 背后的食材再近也排在后面（否则会出现"按 E 却转身去捡背后那颗"）
+	AItemActor* Best = nullptr;
+	float BestScore = FLT_MAX;
+	for (AItemActor* It : OverlappingItems)
+	{
+		// 视线被墙/台面挡住的不算候选（范围够但看不见 → 不该按 E 生效）
+		if (!HasInteractionLineOfSight(It))
+		{
+			continue;
+		}
+		const float Score = GetFacingWeightedDistance(It);
+		if (Score < BestScore)
+		{
+			BestScore = Score;
+			Best = It;
+		}
+	}
+
+	SetOverlappingItem(Best);
+}
+
+bool AShootCharacter::HasInteractionLineOfSight(const AActor* Target) const
+{
+	if (!Target || !GetWorld())
+	{
+		return false;
+	}
+
+	// 眼睛位置取胶囊中心偏上：贴地目标不会因为地面本身被误判成遮挡
+	const FVector EyeLoc = GetActorLocation() + FVector(0.f, 0.f, 60.f);
+
+	// 终点取目标包围盒上离眼睛最近的点 —— 用 Actor 中心的话，
+	// 大件物体（灶台）会先撞到它自己的网格，导致永远“被遮挡”
+	FVector TargetPoint = Target->GetActorLocation();
+	const FBox Bounds = Target->GetComponentsBoundingBox(true);
+	if (Bounds.IsValid)
+	{
+		TargetPoint = Bounds.GetClosestPointTo(EyeLoc);
+	}
+
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(InteractionLOS), false, this);
+	Params.AddIgnoredActor(Target);
+
+	FHitResult Hit;
+	const bool bBlocked = GetWorld()->LineTraceSingleByChannel(Hit, EyeLoc, TargetPoint, ECC_Visibility, Params);
+	if (!bBlocked)
+	{
+		return true;
+	}
+
+	// 命中点贴着目标时不算遮挡：薄物件擦边、或者视线正好掠过桌面/椅背边缘，
+	// 这类"擦到一点点"的命中不该判成"看不见"，否则玩家会觉得贴着桌子也交互不了
+	if (Bounds.IsValid && Bounds.ExpandBy(30.f).IsInside(Hit.ImpactPoint))
+	{
+		return true;
+	}
+	return FVector::Dist(Hit.ImpactPoint, TargetPoint) < 25.f;
+}
+
+// ============ 灶台候选集 ============
+void AShootCharacter::AddOverlappingCookMachine(ACookingMachine* Machine)
+{
+	if (!IsValid(Machine))
+	{
+		return;
+	}
+	OverlappingCookMachines.AddUnique(Machine);
+	RefreshBestCookMachine();
+}
+
+void AShootCharacter::RemoveOverlappingCookMachine(ACookingMachine* Machine)
+{
+	if (!Machine)
+	{
+		return;
+	}
+	OverlappingCookMachines.Remove(Machine);
+	RefreshBestCookMachine();
+}
+
+void AShootCharacter::RefreshBestCookMachine()
+{
+	// 清理失效引用（灶台被销毁/换关卡残留）
+	for (int32 i = OverlappingCookMachines.Num() - 1; i >= 0; --i)
+	{
+		if (!IsValid(OverlappingCookMachines[i]))
+		{
+			OverlappingCookMachines.RemoveAtSwap(i);
+		}
+	}
+
+	// 选“视线可达 + 距离最近”的一台
+	ACookingMachine* Best = nullptr;
+	float BestDistSq = FLT_MAX;
+	const FVector MyLoc = GetActorLocation();
+	for (ACookingMachine* M : OverlappingCookMachines)
+	{
+		if (!HasInteractionLineOfSight(M))
+		{
+			continue;
+		}
+		const float DistSq = FVector::DistSquared(MyLoc, M->GetActorLocation());
+		if (DistSq < BestDistSq)
+		{
+			BestDistSq = DistSq;
+			Best = M;
+		}
+	}
+
+	if (CookingMachine != Best)
+	{
+		CookingMachine = Best;
+	}
+}
+
+// ============ 植物候选集 ============
+void AShootCharacter::AddOverlappingPlant(APlant* Plant)
+{
+	if (!IsValid(Plant))
+	{
+		return;
+	}
+	OverlappingPlants.AddUnique(Plant);
+	RefreshBestPlant();
+}
+
+void AShootCharacter::RemoveOverlappingPlant(APlant* Plant)
+{
+	if (!Plant)
+	{
+		return;
+	}
+	OverlappingPlants.Remove(Plant);
+	RefreshBestPlant();
+}
+
+void AShootCharacter::RefreshBestPlant()
+{
+	for (int32 i = OverlappingPlants.Num() - 1; i >= 0; --i)
+	{
+		if (!IsValid(OverlappingPlants[i]))
+		{
+			OverlappingPlants.RemoveAtSwap(i);
+		}
+	}
+
+	APlant* Best = nullptr;
+	float BestScore = FLT_MAX;
+	for (APlant* P : OverlappingPlants)
+	{
+		if (!HasInteractionLineOfSight(P))
+		{
+			continue;
+		}
+		// 朝向加权：正前方的植株优先，背后的再近也不抢
+		const float Score = GetFacingWeightedDistance(P);
+		if (Score < BestScore)
+		{
+			BestScore = Score;
+			Best = P;
+		}
+	}
+
+	// 交给 SetOverlappingPlant 统一处理描边刷新（新旧目标的 Outline 都会重估）
+	SetOverlappingPlant(Best);
+}
+
+namespace
+{
+	/** 交互候选排序：Tier 优先 → 朝向加权距离 → 真实距离。
+	 *  Pick() 与 RefreshInteractionHighlight() 共用同一份规则，
+	 *  保证"亮着的那个"就是"按 E 会生效的那个"。 */
+	inline bool InteractionOptionLess(const AShootCharacter::FInteractOption& A, const AShootCharacter::FInteractOption& B)
+	{
+		if (A.Tier != B.Tier)
+		{
+			return A.Tier < B.Tier;
+		}
+		if (!FMath::IsNearlyEqual(A.Score, B.Score, 0.5f))
+		{
+			return A.Score < B.Score;
+		}
+		return A.Dist < B.Dist;
+	}
+
+	/** 通用候选目标重选：先剔除失效项，再返回"视线可达 + 朝向加权距离最小"的一个。
+	 *  ScoreOf 由调用方传入（需要角色朝向），HasLos 同理由调用方传入——
+	 *  两者都依赖角色实例（眼睛位置/脸朝向/世界），无法做成静态工具。 */
+	template <typename T, typename FScorePredicate, typename FLosPredicate>
+	T* PickBestInteractionCandidate(TArray<TObjectPtr<T>>& Candidates, FScorePredicate&& ScoreOf, FLosPredicate&& HasLos)
+	{
+		for (int32 i = Candidates.Num() - 1; i >= 0; --i)
+		{
+			if (!IsValid(Candidates[i]))
+			{
+				Candidates.RemoveAtSwap(i);
+			}
+		}
+
+		T* Best = nullptr;
+		float BestScore = FLT_MAX;
+		for (int32 i = 0; i < Candidates.Num(); ++i)
+		{
+			T* Candidate = Candidates[i];
+			if (!Candidate || !HasLos(Candidate))
+			{
+				continue;
+			}
+			const float Score = ScoreOf(Candidate);
+			if (Score < BestScore)
+			{
+				BestScore = Score;
+				Best = Candidate;
+			}
+		}
+		return Best;
+	}
+}
+
+// ============ 上菜台候选集 ============
+void AShootCharacter::AddOverlappingCounter(AServingCounter* Counter)
+{
+	if (!IsValid(Counter))
+	{
+		return;
+	}
+	OverlappingServingCounters.AddUnique(Counter);
+	RefreshBestCounter();
+}
+
+void AShootCharacter::RemoveOverlappingCounter(AServingCounter* Counter)
+{
+	if (!Counter)
+	{
+		return;
+	}
+	OverlappingServingCounters.Remove(Counter);
+	RefreshBestCounter();
+}
+
+void AShootCharacter::RefreshBestCounter()
+{
+	OverlappingCounter = PickBestInteractionCandidate(OverlappingServingCounters,
+		[this](const AActor* A) { return GetFacingWeightedDistance(A); },
+		[this](const AActor* A) { return HasInteractionLineOfSight(A); });
+}
+
+// ============ 洗碗机候选集 ============
+void AShootCharacter::AddOverlappingDishwasher(ADishwasher* Dishwasher)
+{
+	if (!IsValid(Dishwasher))
+	{
+		return;
+	}
+	OverlappingDishwashers.AddUnique(Dishwasher);
+	RefreshBestDishwasher();
+}
+
+void AShootCharacter::RemoveOverlappingDishwasher(ADishwasher* Dishwasher)
+{
+	if (!Dishwasher)
+	{
+		return;
+	}
+	OverlappingDishwashers.Remove(Dishwasher);
+	RefreshBestDishwasher();
+}
+
+void AShootCharacter::RefreshBestDishwasher()
+{
+	OverlappingDishwasher = PickBestInteractionCandidate(OverlappingDishwashers,
+		[this](const AActor* A) { return GetFacingWeightedDistance(A); },
+		[this](const AActor* A) { return HasInteractionLineOfSight(A); });
+}
+
+// ============ 招揽台候选集 ============
+void AShootCharacter::AddOverlappingAttractCounter(AAttractCounter* Counter)
+{
+	if (!IsValid(Counter))
+	{
+		return;
+	}
+	OverlappingAttractCounters.AddUnique(Counter);
+	RefreshBestAttractCounter();
+}
+
+void AShootCharacter::RemoveOverlappingAttractCounter(AAttractCounter* Counter)
+{
+	if (!Counter)
+	{
+		return;
+	}
+	OverlappingAttractCounters.Remove(Counter);
+	RefreshBestAttractCounter();
+}
+
+void AShootCharacter::RefreshBestAttractCounter()
+{
+	OverlappingAttractCounter = PickBestInteractionCandidate(OverlappingAttractCounters,
+		[this](const AActor* A) { return GetFacingWeightedDistance(A); },
+		[this](const AActor* A) { return HasInteractionLineOfSight(A); });
+}
+
+// ============ 大门交互台候选集 ============
+void AShootCharacter::AddOverlappingGate(AGateCounter* Gate)
+{
+	if (!IsValid(Gate))
+	{
+		return;
+	}
+	OverlappingGates.AddUnique(Gate);
+	RefreshBestGate();
+}
+
+void AShootCharacter::RemoveOverlappingGate(AGateCounter* Gate)
+{
+	if (!Gate)
+	{
+		return;
+	}
+	OverlappingGates.Remove(Gate);
+	RefreshBestGate();
+}
+
+void AShootCharacter::RefreshBestGate()
+{
+	OverlappingGate = PickBestInteractionCandidate(OverlappingGates,
+		[this](const AActor* A) { return GetFacingWeightedDistance(A); },
+		[this](const AActor* A) { return HasInteractionLineOfSight(A); });
+}
+
+// ============ 客人候选集 ============
+void AShootCharacter::AddOverlappingGuest(AGuestCharacter* Guest)
+{
+	if (!IsValid(Guest))
+	{
+		return;
+	}
+	OverlappingGuests.AddUnique(Guest);
+	RefreshBestGuest();
+}
+
+void AShootCharacter::RemoveOverlappingGuest(AGuestCharacter* Guest)
+{
+	if (!Guest)
+	{
+		return;
+	}
+	OverlappingGuests.Remove(Guest);
+	RefreshBestGuest();
+}
+
+void AShootCharacter::RefreshBestGuest()
+{
+	OverlappingGuest = PickBestInteractionCandidate(OverlappingGuests,
+		[this](const AActor* A) { return GetFacingWeightedDistance(A); },
+		[this](const AActor* A) { return HasInteractionLineOfSight(A); });
+}
+
+// ============ 餐桌候选集 ============
+void AShootCharacter::AddOverlappingChairSeat(AChairSeat* Seat)
+{
+	if (!IsValid(Seat))
+	{
+		return;
+	}
+	OverlappingChairSeats.AddUnique(Seat);
+	RefreshBestChairSeat();
+}
+
+void AShootCharacter::RemoveOverlappingChairSeat(AChairSeat* Seat)
+{
+	if (!Seat)
+	{
+		return;
+	}
+	OverlappingChairSeats.Remove(Seat);
+	RefreshBestChairSeat();
+}
+
+void AShootCharacter::RefreshBestChairSeat()
+{
+	OverlappingChairSeat = PickBestInteractionCandidate(OverlappingChairSeats,
+		[this](const AActor* A) { return GetFacingWeightedDistance(A); },
+		[this](const AActor* A) { return HasInteractionLineOfSight(A); });
+}
+
+// ============ 研究炉候选集 ============
+void AShootCharacter::AddOverlappingResearchStove(AResearchStove* Stove)
+{
+	if (!IsValid(Stove))
+	{
+		return;
+	}
+	OverlappingResearchStoves.AddUnique(Stove);
+	RefreshBestResearchStove();
+}
+
+void AShootCharacter::RemoveOverlappingResearchStove(AResearchStove* Stove)
+{
+	if (!Stove)
+	{
+		return;
+	}
+	OverlappingResearchStoves.Remove(Stove);
+	RefreshBestResearchStove();
+}
+
+void AShootCharacter::RefreshBestResearchStove()
+{
+	OverlappingResearchStove = PickBestInteractionCandidate(OverlappingResearchStoves,
+		[this](const AActor* A) { return GetFacingWeightedDistance(A); },
+		[this](const AActor* A) { return HasInteractionLineOfSight(A); });
+}
+
+// ============ 空碟候选集 ============
+void AShootCharacter::AddOverlappingEmptyPlate(AItemActor* Plate)
+{
+	if (!IsValid(Plate))
+	{
+		return;
+	}
+	OverlappingEmptyPlates.AddUnique(Plate);
+	RefreshBestEmptyPlate();
+}
+
+void AShootCharacter::RemoveOverlappingEmptyPlate(AItemActor* Plate)
+{
+	if (!Plate)
+	{
+		return;
+	}
+	OverlappingEmptyPlates.Remove(Plate);
+	RefreshBestEmptyPlate();
+}
+
+void AShootCharacter::RefreshBestEmptyPlate()
+{
+	OverlappingEmptyPlate = PickBestInteractionCandidate(OverlappingEmptyPlates,
+		[this](const AActor* A) { return GetFacingWeightedDistance(A); },
+		[this](const AActor* A) { return HasInteractionLineOfSight(A); });
+}
+
+// ============ 仓库候选集 ============
+void AShootCharacter::AddOverlappingWarehouse(AStorageWarehouse* Warehouse)
+{
+	if (!IsValid(Warehouse))
+	{
+		return;
+	}
+	OverlappingWarehouses.AddUnique(Warehouse);
+	RefreshBestWarehouse();
+}
+
+void AShootCharacter::RemoveOverlappingWarehouse(AStorageWarehouse* Warehouse)
+{
+	if (!Warehouse)
+	{
+		return;
+	}
+	OverlappingWarehouses.Remove(Warehouse);
+	RefreshBestWarehouse();
+}
+
+void AShootCharacter::RefreshBestWarehouse()
+{
+	OverlappingWarehouse = PickBestInteractionCandidate(OverlappingWarehouses,
+		[this](const AActor* A) { return GetFacingWeightedDistance(A); },
+		[this](const AActor* A) { return HasInteractionLineOfSight(A); });
+}
+
+// ============ 对话目标候选集 ============
+// 对话是组件而不是 Actor，距离/视线都以它宿主 Actor 为基准
+void AShootCharacter::AddOverlappingDialogue(UInteractionDialogueComponent* Comp)
+{
+	if (!IsValid(Comp))
+	{
+		return;
+	}
+	OverlappingDialogues.AddUnique(Comp);
+	RefreshBestDialogue();
+}
+
+void AShootCharacter::RemoveOverlappingDialogue(UInteractionDialogueComponent* Comp)
+{
+	if (!Comp)
+	{
+		return;
+	}
+	OverlappingDialogues.Remove(Comp);
+	RefreshBestDialogue();
+}
+
+void AShootCharacter::RefreshBestDialogue()
+{
+	for (int32 i = OverlappingDialogues.Num() - 1; i >= 0; --i)
+	{
+		if (!IsValid(OverlappingDialogues[i]))
+		{
+			OverlappingDialogues.RemoveAtSwap(i);
+		}
+	}
+
+	UInteractionDialogueComponent* Best = nullptr;
+	float BestScore = FLT_MAX;
+	for (int32 i = 0; i < OverlappingDialogues.Num(); ++i)
+	{
+		UInteractionDialogueComponent* Comp = OverlappingDialogues[i];
+		AActor* CompOwner = Comp ? Comp->GetOwner() : nullptr;
+		if (!CompOwner || !HasInteractionLineOfSight(CompOwner))
+		{
+			continue;
+		}
+		const float Score = GetFacingWeightedDistance(CompOwner);
+		if (Score < BestScore)
+		{
+			BestScore = Score;
+			Best = Comp;
+		}
+	}
+	OverlappingDialogue = Best;
+}
+
+void AShootCharacter::RefreshAllInteractionTargets()
+{
+	// 运行时倍率（Shoot.InteractScale）变了 → 立刻把所有交互球按新倍率重设一遍。
+	// 放在最前面：球体尺寸变化触发的重叠事件会被下面这轮重选一并消化。
+	const float Scale = InteractionScale::Get();
+	if (!FMath::IsNearlyEqual(Scale, LastAppliedInteractionScale))
+	{
+		LastAppliedInteractionScale = Scale;
+		InteractionScale::RefreshAllInteractionScales(GetWorld());
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Cyan,
+				FString::Printf(TEXT("[交互] 半径倍率 %.2f"), Scale));
+		}
+	}
+
+	RefreshBestOverlappingItem();
+	RefreshBestCookMachine();
+	RefreshBestPlant();
+
+	// 其余交互目标同样定期重估：绕到墙后、走到两台设备中间、目标被搬走都能及时反映
+	RefreshBestCounter();
+	RefreshBestDishwasher();
+	RefreshBestAttractCounter();
+	RefreshBestGate();
+	RefreshBestGuest();
+	RefreshBestChairSeat();
+	RefreshBestResearchStove();
+	RefreshBestEmptyPlate();
+	RefreshBestWarehouse();
+	RefreshBestDialogue();
+
+	// 所有候选都重估完，再统一决定"只亮哪一个"
+	RefreshInteractionHighlight();
+}
+
+bool AShootCharacter::IsDropLockActive(AItemActor* Item) const
+{
+	return Item && Item == LastDroppedItem
+		&& GetWorld()
+		&& (GetWorld()->GetTimeSeconds() - LastDropTime) < DropRePickLockTime;
 }
 
 UHUDWidget* AShootCharacter::GetHUDWidget()
@@ -402,15 +1064,15 @@ void AShootCharacter::InteractWithPlant()
 		{
 			PendingGatherPlant = OverlappingPlant;
 
-			// 采集时朝向植被（开关控制）：仅水平转向，让角色面对待采摘的植物
+			// 采集时朝向植被（开关控制）：仅水平转向，由 Tick 里的 RInterpTo 平滑逼近（不再瞬时转身）
 			if (bFacePlantWhenGathering && PendingGatherPlant)
 			{
 				FVector ToPlant = PendingGatherPlant->GetActorLocation() - GetActorLocation();
 				ToPlant.Z = 0.f;
 				if (!ToPlant.IsNearlyZero())
 				{
-					const FRotator FaceRot = ToPlant.Rotation();
-					SetActorRotation(FaceRot);
+					InteractFaceRotation = ToPlant.Rotation();
+					bHasInteractFaceRotation = true;
 				}
 			}
 
@@ -427,10 +1089,20 @@ void AShootCharacter::InteractWithPlant()
 					PendingGatherPlant->Harvest();
 					PendingGatherPlant = nullptr;
 				}
+
+				// 兜底定时器：以蒙太奇一轮时长为准到点强制完成采集。
+				// 作用：即使采集蒙太奇被误配为“循环”或被中断（自然结束事件不触发），
+				// 也能在播放一轮后收获并停止蒙太奇，避免 PendingGatherPlant 永不置空吞掉后续采摘。
+				const float GatherDuration = (GatheringMontage && GatheringMontage->GetPlayLength() > 0.f)
+					? GatheringMontage->GetPlayLength()
+					: 1.f;
+				FTimerDelegate GatherDoneDel;
+				GatherDoneDel.BindUObject(this, &AShootCharacter::GatheringMontageEnded, (UAnimMontage*)nullptr, false);
+				GetWorldTimerManager().SetTimer(GatheringDoneTimerHandle, GatherDoneDel, GatherDuration, false);
 			}
 			else
 			{
-				// 蒙太奇未播放（未配置或角色忙碌）：直接收获
+				// 蒙太奇未播放（未配置）：直接收获
 				PendingGatherPlant->Harvest();
 				PendingGatherPlant = nullptr;
 			}
@@ -438,15 +1110,15 @@ void AShootCharacter::InteractWithPlant()
 	}
 	else if (OverlappingPlant->NeedsWater())
 	{
-		// 浇水时朝向植被（复用采集时的开关控制）：仅水平转向，让角色面对待浇水的植物
+		// 浇水时朝向植被（复用采集时的开关控制）：仅水平转向，由 Tick 平滑逼近
 		if (bFacePlantWhenGathering && OverlappingPlant)
 		{
 			FVector ToPlant = OverlappingPlant->GetActorLocation() - GetActorLocation();
 			ToPlant.Z = 0.f;
 			if (!ToPlant.IsNearlyZero())
 			{
-				const FRotator FaceRot = ToPlant.Rotation();
-				SetActorRotation(FaceRot);
+				InteractFaceRotation = ToPlant.Rotation();
+				bHasInteractFaceRotation = true;
 			}
 		}
 
@@ -510,6 +1182,10 @@ void AShootCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComp
 		// 否则按住 E 时浇水/采集动画播完会立刻被重新触发，表现为“一直循环”，对话也会反复开关。
 		EnhancedInputComponent->BindAction(PickAction, ETriggerEvent::Started, this, &AShootCharacter::Pick);
 
+		// E 键松开：仅用于结束"按住范围拾取"（长按吸 2m 内的散落物）。
+		// 拾取本身仍然只在 Started 触发一次，避免 Triggered 每帧重放导致动画循环。
+		EnhancedInputComponent->BindAction(PickAction, ETriggerEvent::Completed, this, &AShootCharacter::PickReleased);
+
 		//PushFood
 		EnhancedInputComponent->BindAction(PushFoodAction, ETriggerEvent::Started, this, &AShootCharacter::PushFoodStart);
 		EnhancedInputComponent->BindAction(PushFoodAction, ETriggerEvent::Completed, this, &AShootCharacter::PushFoodComplete);
@@ -528,6 +1204,13 @@ void AShootCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComp
 
 		// 打开/关闭商店界面 (P 键)
 		EnhancedInputComponent->BindAction(OpenShopAction, ETriggerEvent::Completed, this, &AShootCharacter::ToggleShop);
+
+		// 冲刺 (LeftShift)：按住提速 + 相机 FOV 拉大做速度感，松开恢复
+		if (RushAction)
+		{
+			EnhancedInputComponent->BindAction(RushAction, ETriggerEvent::Started, this, &AShootCharacter::RushStart);
+			EnhancedInputComponent->BindAction(RushAction, ETriggerEvent::Completed, this, &AShootCharacter::RushEnd);
+		}
 
 	}
 
@@ -557,219 +1240,707 @@ void AShootCharacter::Attack(const FInputActionValue& Value)
 	}
 }
 
+void AShootCharacter::RushStart(const FInputActionValue& Value)
+{
+	if (bIsSprinting)
+	{
+		return;
+	}
+	// 死亡 / 修理 / 攻击中不允许冲刺（这些状态下移动本身受限，强行提速会打架）
+	if (CharacterState == ECharacterState::ECS_Dead
+		|| CharacterState == ECharacterState::ECS_Repairing
+		|| CharacterActionState == ECharacterActionState::EAS_Attacking)
+	{
+		return;
+	}
+
+	bIsSprinting = true;
+
+	UCharacterMovementComponent* Move = GetCharacterMovement();
+	Move->MaxWalkSpeed = SprintSpeed;
+	Move->MaxAcceleration = SprintAcceleration;
+	Move->RotationRate = FRotator(0.f, SprintRotationRate, 0.f);
+
+	// 起步脉冲默认关闭：速度阶跃（600→900 一帧完成）会让弹簧臂相机先被甩开再追上，
+	// 视觉上就是镜头猛地往前一突。现在靠 SprintAcceleration 在 ~0.06s 内平滑到速。
+	if (bSprintInstantBurst && Move->IsMovingOnGround())
+	{
+		const FVector Dir = FVector(Move->Velocity.X, Move->Velocity.Y, 0.f).GetSafeNormal();
+		if (!Dir.IsNearlyZero())
+		{
+			Move->Velocity = Dir * SprintSpeed;
+		}
+	}
+
+	TargetFOV = SprintFOV; // FOV 与相机跟随在 Tick 中平滑逼近
+}
+
+void AShootCharacter::RushEnd(const FInputActionValue& Value)
+{
+	if (!bIsSprinting)
+	{
+		return;
+	}
+	bIsSprinting = false;
+
+	UCharacterMovementComponent* Move = GetCharacterMovement();
+	Move->MaxWalkSpeed = WalkSpeed;
+	Move->MaxAcceleration = WalkAcceleration;
+	Move->RotationRate = FRotator(0.f, WalkRotationRate, 0.f);
+
+	TargetFOV = NormalFOV; // 松开后靠 BrakingDeceleration 自然回落，不硬切速度
+}
+
 void AShootCharacter::Pick(const FInputActionValue& Value)
 {
-	// 通用对话交互：靠近带对话组件的对象时按 Pick 切换对话界面
-	// 已打开 -> 再次按 E 关闭对话框；未打开 -> 打开对话框
-	if (OverlappingDialogue)
+	// 记录"E 正被按住"：长按由 TickRangePick 转为范围拾取（短按仍然只做一次普通交互）。
+	// 缓冲补执行的那次不算按住，否则松手事件已经过去，会永远停留在"按住"状态。
+	if (!bConsumingBufferedPick)
 	{
-		if (OverlappingDialogue->IsDialogueOpen())
-		{
-			OverlappingDialogue->CloseDialogue();
-		}
-		else
-		{
-			OverlappingDialogue->StartDialogue(this);
-		}
+		bPickHeld = true;
+		PickHeldTime = 0.f;
+		RangePickCooldown = 0.f;
+	}
+
+	// ============================================================================
+	// 交互分发：从"19 层写死的 if-else 优先级链"改为"分层 + 同层按距离决胜"。
+	//
+	// 旧逻辑的痛点：优先级是硬编码的，只要站在大门/招揽台/餐桌的判定球内，
+	// 按 E 永远只做那件事，脚边的食物根本捡不起来；锅煮好时同理（取菜永远压过拾取）。
+	//
+	// 新逻辑：把所有"此刻可执行"的交互都收集成候选，分四层：
+	//   Tier 0  必须响应      —— 手上脏碟（只能交还洗碗机，禁止放下）、已打开的对话
+	//   Tier 1  交付手持物品   —— 上菜台 / 端给客人 / 投入研究炉
+	//   Tier 2  环境交互       —— 门 / 招揽 / 餐桌 / 仓库 / 植物 / 出锅 / 修理 / 生成箱 / 拾取
+	//                            同层内按"角色到目标包围盒最近点"的距离决胜，谁近谁生效
+	//   Tier 3  兜底          —— 放下手上的东西
+	// 排序后依次尝试，第一个"消费了这次按键"的动作生效；返回 false 表示这次没做成，
+	// 让下一个候选接手（例如研究炉拒绝了无效食材，就继续尝试拾取脚下的东西）。
+	// ============================================================================
+	// ---- 交互动画播放中：记一次缓冲，动画结束后补执行 ----
+	// 旧行为：动画期间按 E 完全被吞（Pick 只在 Started 触发，动画中的按键没人处理）；
+	// 若直接放行，又会在动画中途触发"放下→再拾取"，表现为抖动。
+	// 缓冲把这次按键延后到动画结束，既不吃键也不打断当前动作。
+	if (IsInteractionAnimPlaying())
+	{
+		BufferPickInput();
 		return;
 	}
 
-	// 靠近植物时优先处理植物交互（浇水/驱虫/收获），不再走普通拾取逻辑
-	if (OverlappingPlant)
-	{
-		InteractWithPlant();
-		return;
-	}
+	TArray<FInteractOption, TInlineAllocator<12>> Options;
+	BuildInteractionOptions(Options);
 
-	// 大门交互台：靠近时按 E 开门营业（明确的开门动作，优先于招揽/接单）
-	if (OverlappingGate)
-	{
-		OverlappingGate->OpenBusiness();
-		return;
-	}
+	// 分层排序：Tier 小的先；同层按距离近的先；完全同分时保持加入顺序（StableSort）
+	Options.StableSort(InteractionOptionLess);
 
- 	// 招揽顾客：合并到拾取键 (PickAction)，在招揽台范围内按下即触发招揽
- 	if (OverlappingAttractCounter)
- 	{
- 		OverlappingAttractCounter->AttractCustomers();
- 		return;
- 	}
- 	
-	// 餐桌交互（优先于对客人的直接交互）：靠近餐桌按 E 完成
-	// 点单（下单并绑定菜单） / 上菜（校验菜品是否与座位绑定的菜单一致） / 收走空碟（释放座位）
-	if (OverlappingChairSeat)
+	for (const FInteractOption& Option : Options)
 	{
-		if (OverlappingChairSeat->TryInteractByPlayer(this))
+		if (Option.Run())
 		{
+			if (InteractionDebug::IsEnabled() && GEngine)
+			{
+				GEngine->AddOnScreenDebugMessage(-1, 1.5f, FColor::Cyan,
+					FString::Printf(TEXT("[交互] %s  (Tier %d / %.0fcm / 朝向分 %.0f)"),
+						*Option.Name, Option.Tier, Option.Dist, Option.Score));
+			}
 			return;
 		}
 	}
+}
 
-	// 客人接单：靠近"等待接单"的客人按 E 接单，接单后才产生订单
-	if (OverlappingGuest && OverlappingGuest->CanAcceptOrderByPlayer())
+// ============================================================================
+// 交互朝向：谁近不算数，还要看脸朝哪
+// ============================================================================
+FVector AShootCharacter::GetInteractionFacing() const
+{
+	// 角色是 bOrientRotationToMovement：脸永远朝着移动方向，停下来也保持最后朝向。
+	// 这正是玩家心里的"正前方"。控制器/相机朝向只在极端情况下兜底。
+	FVector Facing = GetActorForwardVector();
+	Facing.Z = 0.f;
+	if (!Facing.Normalize())
 	{
-		OverlappingGuest->AcceptOrderByPlayer();
-		return;
+		if (const AController* C = GetController())
+		{
+			Facing = C->GetControlRotation().Vector();
+			Facing.Z = 0.f;
+			Facing.Normalize();
+		}
+	}
+	return Facing.IsNearlyZero() ? FVector::ForwardVector : Facing;
+}
+
+float AShootCharacter::GetInteractionDistanceTo(const AActor* Target) const
+{
+	if (!Target)
+	{
+		return FLT_MAX;
+	}
+	const FVector MyLoc = GetActorLocation();
+	const FBox B = Target->GetComponentsBoundingBox(true);
+	return B.IsValid
+		? FVector::Dist(MyLoc, B.GetClosestPointTo(MyLoc))
+		: FVector::Dist(MyLoc, Target->GetActorLocation());
+}
+
+float AShootCharacter::GetFacingWeightedDistance(const AActor* Target) const
+{
+	const float Dist = GetInteractionDistanceTo(Target);
+	if (!Target || Dist >= FLT_MAX)
+	{
+		return FLT_MAX;
 	}
 
+	const float Weight = InteractionFacing::GetPenaltyScale();
+	if (Weight <= 0.f || Dist <= KINDA_SMALL_NUMBER)
+	{
+		return Dist;
+	}
+
+	const FVector MyLoc = GetActorLocation();
+	const FBox B = Target->GetComponentsBoundingBox(true);
+	const FVector Closest = B.IsValid ? B.GetClosestPointTo(MyLoc) : Target->GetActorLocation();
+
+	FVector ToTarget = Closest - MyLoc;
+	ToTarget.Z = 0.f;
+	const float Horiz = ToTarget.Size();
+	if (Horiz < 30.f)
+	{
+		// 头顶/脚下：水平方向退化成噪声，硬算角度会随机偏向，直接不做惩罚
+		return Dist;
+	}
+
+	const float Cos = FVector::DotProduct(ToTarget / Horiz, GetInteractionFacing());
+	// 偏离度：正前方 cos=1 → 0；正侧面 cos=0 → 0.5；正后方 cos=-1 → 1
+	const float OffFront = FMath::Clamp((1.f - Cos) * 0.5f, 0.f, 1.f);
+	return Dist * (1.f + Weight * OffFront);
+}
+
+void AShootCharacter::BuildInteractionOptions(TArray<FInteractOption, TInlineAllocator<12>>& OutOptions)
+{
+	constexpr int32 TierForce = 0;
+	constexpr int32 TierHandover = 1;
+	constexpr int32 TierWorld = 2;
+	constexpr int32 TierFallback = 3;
+
+	// 到目标的交互距离：用包围盒最近点（大件设备不会因为 pivot 远而被算得比小物件远）
+	auto DistTo = [this](const AActor* Target) -> float
+	{
+		return GetInteractionDistanceTo(Target);
+	};
+
+	// Dist 只用于显示；真正排序用 Score —— 背后的目标会被按偏离度放大，
+	// 于是"背后 40cm 的蔬菜"不会再抢走"正前方 90cm 的蔬菜"。权重来自 Shoot.InteractFacing。
+	auto AddOption = [this, &OutOptions](int32 Tier, float Dist, const TCHAR* Name, AActor* Target, TFunction<bool()>&& Run)
+	{
+		FInteractOption Option;
+		Option.Tier = Tier;
+		Option.Dist = Dist;
+		// 没有具体目标（Tier 0 / 放下）时 Dist 是 0，恒排在同层最前，不需要惩罚
+		Option.Score = (Target && Dist > 0.f) ? GetFacingWeightedDistance(Target) : Dist;
+		Option.Name = Name;
+		Option.Target = Target;
+		Option.Run = MoveTemp(Run);
+		OutOptions.Add(MoveTemp(Option));
+	};
+
+	// ---------------- Tier 0：必须响应 ----------------
 	// 手上拿着脏碟：唯一出路是走到洗碗机按 E 交还（可用碟子数 +1）。
-	// 禁止放下/丢弃/拿去做菜，否则碟子会丢失导致可用碟子数永远无法恢复。
+	// 禁止放下/丢弃/拿去做菜，否则碟子会丢失导致可用碟子数永远无法恢复，
+	// 所以这一层无论距离多远都优先，且一定消费按键。
 	if (PickingItem && PickingItem->bIsDirtyPlate)
 	{
-		if (OverlappingDishwasher && OverlappingDishwasher->SubmitPlate(PickingItem))
+		AddOption(TierForce, 0.f, TEXT("交还脏碟"), OverlappingDishwasher, [this]()
 		{
-			// 交还成功：碟子已被洗碗机销毁，清空手持状态
-			SetPickingItem(nullptr);
-			CharacterActionState = ECharacterActionState::EAS_Unoccupied;
-			CharacterState = ECharacterState::ECS_Idle;
-			FBIK_Alpha = 0;
-			HandIK_LPoint = nullptr;
-			HandIK_RPoint = nullptr;
-			return;
-		}
-		if (GEngine)
-		{
-			GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Yellow, TEXT("[脏碟] 请走到洗碗机旁按 E 交还清洗"));
-		}
-		return; // 未靠近洗碗机：不做任何处理（也不允许放下脏碟）
+			if (OverlappingDishwasher && OverlappingDishwasher->SubmitPlate(PickingItem))
+			{
+				ClearHeldItemState();
+				return true;
+			}
+			if (GEngine)
+			{
+				GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Yellow, TEXT("[脏碟] 请走到洗碗机旁按 E 交还清洗"));
+			}
+			return true;
+		});
 	}
 
-	// 研究炉：手上拿着食材/食物时靠近研究炉按 E 投入，凑齐配方后自动开始研究并解锁新菜谱
-	if (OverlappingResearchStove && PickingItem && !PickingItem->bIsDirtyPlate)
+	// 对话已打开：再按 E 关闭（未打开则在 Tier 2 参与距离竞争）
+	if (OverlappingDialogue && OverlappingDialogue->IsDialogueOpen())
 	{
-		if (OverlappingResearchStove->AddFood(PickingItem))
+		AddOption(TierForce, 0.f, TEXT("关闭对话"), OverlappingDialogue->GetOwner(), [this]()
 		{
-			// 投入成功：食材已被研究炉销毁，清空手持状态
-			SetPickingItem(nullptr);
-			CharacterActionState = ECharacterActionState::EAS_Unoccupied;
-			CharacterState = ECharacterState::ECS_Idle;
-			FBIK_Alpha = 0;
-			HandIK_LPoint = nullptr;
-			HandIK_RPoint = nullptr;
-			return;
-		}
-		// 投入失败（研究中/无效食材）：不消耗物品，继续后续逻辑
+			OverlappingDialogue->CloseDialogue();
+			return true;
+		});
 	}
 
-	// 方案B：玩家手上有菜且靠近"正在等餐"的客人 → 直接端菜上菜给该客人
-	// （脏碟不是菜，不能上菜）
-	if (PickingItem && !PickingItem->bIsDirtyPlate
-		&& OverlappingGuest && OverlappingGuest->CanPlayerServeDish())
+	// ---------------- Tier 1：交付手持物品 ----------------
+	// 手上拿着东西时，"把手上的东西交出去"比脚边任何东西都更符合意图。
+	if (PickingItem && !PickingItem->bIsDirtyPlate)
 	{
-		if (OverlappingGuest->TryServeDish(this, PickingItem))
+		if (OverlappingResearchStove)
 		{
-			// 成功上菜：成品已摆上桌，清空手持状态
-			SetPickingItem(nullptr);
-			CharacterActionState = ECharacterActionState::EAS_Unoccupied;
-			CharacterState = ECharacterState::ECS_Idle;
-			FBIK_Alpha = 0;
-			HandIK_LPoint = nullptr;
-			HandIK_RPoint = nullptr;
-			return;
+			AddOption(TierHandover, DistTo(OverlappingResearchStove), TEXT("投入研究炉"), OverlappingResearchStove, [this]()
+			{
+				if (OverlappingResearchStove->AddFood(PickingItem))
+				{
+					ClearHeldItemState();
+					return true;
+				}
+				return false; // 研究中/无效食材：不消费按键，交给下一个候选
+			});
 		}
-		// 上菜失败（菜不对/订单不匹配）：不消耗菜品，继续后续逻辑
+
+		if (OverlappingGuest && OverlappingGuest->CanPlayerServeDish())
+		{
+			AddOption(TierHandover, DistTo(OverlappingGuest), TEXT("端菜给客人"), OverlappingGuest, [this]()
+			{
+				if (OverlappingGuest->TryServeDish(this, PickingItem))
+				{
+					ClearHeldItemState();
+					return true;
+				}
+				return false; // 菜不对/订单不匹配：不消费按键
+			});
+		}
+
+		if (OverlappingCounter)
+		{
+			AddOption(TierHandover, DistTo(OverlappingCounter), TEXT("提交上菜台"), OverlappingCounter, [this]()
+			{
+				if (OverlappingCounter->SubmitDish(PickingItem))
+				{
+					ClearHeldItemState();
+				}
+				// 与原逻辑一致：站在上菜台范围内按 E 就当作"上菜尝试"，不再落到放下
+				return true;
+			});
+		}
 	}
 
-	// 方案B：玩家空手靠近空碟 → 按 E 收走空碟：释放座位（下一位客人可入座），
-	// 碟子变成手上的“脏碟”，需走到洗碗机按 E 交还才能回收成可用碟子。
+	// ---------------- Tier 2：环境交互（同层按距离决胜） ----------------
+
+	// 植物：浇水 / 驱虫 / 收获
+	if (OverlappingPlant)
+	{
+		AddOption(TierWorld, DistTo(OverlappingPlant), TEXT("植物"), OverlappingPlant, [this]()
+		{
+			InteractWithPlant();
+			return true;
+		});
+	}
+
+	// 通用对话（未打开时）
+	if (OverlappingDialogue && !OverlappingDialogue->IsDialogueOpen())
+	{
+		AddOption(TierWorld, DistTo(OverlappingDialogue->GetOwner()), TEXT("开始对话"), OverlappingDialogue->GetOwner(), [this]()
+		{
+			OverlappingDialogue->StartDialogue(this);
+			return true;
+		});
+	}
+
+	// 大门：开门营业
+	if (OverlappingGate)
+	{
+		AddOption(TierWorld, DistTo(OverlappingGate), TEXT("开门营业"), OverlappingGate, [this]()
+		{
+			OverlappingGate->OpenBusiness();
+			return true;
+		});
+	}
+
+	// 招揽台：招揽顾客
+	if (OverlappingAttractCounter)
+	{
+		AddOption(TierWorld, DistTo(OverlappingAttractCounter), TEXT("招揽顾客"), OverlappingAttractCounter, [this]()
+		{
+			OverlappingAttractCounter->AttractCustomers();
+			return true;
+		});
+	}
+
+	// 餐桌：点单 / 上菜 / 收空碟
+	if (OverlappingChairSeat)
+	{
+		AddOption(TierWorld, DistTo(OverlappingChairSeat), TEXT("餐桌"), OverlappingChairSeat, [this]()
+		{
+			return OverlappingChairSeat->TryInteractByPlayer(this);
+		});
+	}
+
+	// 客人接单（仅"需要玩家接单"模式）
+	if (OverlappingGuest && OverlappingGuest->CanAcceptOrderByPlayer())
+	{
+		AddOption(TierWorld, DistTo(OverlappingGuest), TEXT("接单"), OverlappingGuest, [this]()
+		{
+			OverlappingGuest->AcceptOrderByPlayer();
+			return true;
+		});
+	}
+
+	// 收走空碟 → 变成手上脏碟
 	if (OverlappingEmptyPlate && !PickingItem)
 	{
-		if (OverlappingEmptyPlate->PickUpByPlayer(this))
+		AItemActor* Plate = OverlappingEmptyPlate;
+		AddOption(TierWorld, DistTo(Plate), TEXT("收走空碟"), Plate, [this, Plate]()
 		{
-			SetOverlappingEmptyPlate(nullptr);
-			return;
-		}
+			if (Plate->PickUpByPlayer(this))
+			{
+				// 收走后从候选集注销（物体会转为手持脏碟），立即重选下一个空碟
+				RemoveOverlappingEmptyPlate(Plate);
+				return true;
+			}
+			return false;
+		});
 	}
 
-	// 空手靠近研究炉且炉内还残留食材、又没在研究 → 按 E 清空炉内食材（防止投错食材后卡住）
+	// 研究炉：空手 + 炉内有残留食材 + 未在研究 → 清空炉内食材（防止投错食材卡住）
 	if (OverlappingResearchStove && !PickingItem
 		&& !OverlappingResearchStove->bResearching && OverlappingResearchStove->StoredItemIDs.Num() > 0)
 	{
-		OverlappingResearchStove->ClearFoods();
-		if (GEngine)
+		AResearchStove* Stove = OverlappingResearchStove;
+		AddOption(TierWorld, DistTo(Stove), TEXT("清空研究炉"), Stove, [Stove]()
 		{
-			GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Yellow, TEXT("[研究炉] 已清空炉内食材"));
+			Stove->ClearFoods();
+			if (GEngine)
+			{
+				GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Yellow, TEXT("[研究炉] 已清空炉内食材"));
+			}
+			return true;
+		});
+	}
+
+	// 灶台/锅：煮好了 → 出锅（切菜生成物需要先放下手上的东西）
+	if (MachineCookFinished() && CookingMachine)
+	{
+		const float MDist = DistTo(CookingMachine);
+		if (IsSpawnOther())
+		{
+			if (NeedDropDown())
+			{
+				AddOption(TierWorld, MDist, TEXT("放下手持物"), CookingMachine, [this]()
+				{
+					DoDropDown();
+					return true;
+				});
+			}
+			else
+			{
+				AddOption(TierWorld, MDist, TEXT("取出切好的菜"), CookingMachine, [this]()
+				{
+					DoSpwanOther();
+					return true;
+				});
+			}
+		}
+		else
+		{
+			AddOption(TierWorld, MDist, TEXT("取出成品"), CookingMachine, [this]()
+			{
+				DoPushDishTest();
+				return true;
+			});
+		}
+	}
+
+	// 灶台着火：修理
+	if (NeedRepairMachine())
+	{
+		AddOption(TierWorld, DistTo(CookingMachine), TEXT("修理灶台"), CookingMachine, [this]()
+		{
+			DoRepair();
+			return true;
+		});
+	}
+
+	// 手上拿着食材：扔进锅
+	if (CanThrowToMachine())
+	{
+		AddOption(TierWorld, DistTo(CookingMachine), TEXT("扔进锅"), CookingMachine, [this]()
+		{
+			DoThrow();
+			return true;
+		});
+	}
+
+	// 仓库：把背包物品存入（手上物品不受影响；背包为空时无副作用）
+	if (OverlappingWarehouse)
+	{
+		AddOption(TierWorld, DistTo(OverlappingWarehouse), TEXT("存入仓库"), OverlappingWarehouse, [this]()
+		{
+			OverlappingWarehouse->DepositFromInventory(this);
+			return true;
+		});
+	}
+
+	// 生成箱：取料（手上有东西时按 E 应该是"放下"，不参与取料）
+	if (!PickingItem && IsSpawner())
+	{
+		AddOption(TierWorld, DistTo(OverlappingItem), TEXT("取料"), OverlappingItem, [this]()
+		{
+			DoSpwan();
+			return true;
+		});
+	}
+
+	// 地面/桌面物品：拾取（手上有东西时同理不参与，让位给 Tier 3 的放下）
+	// 刚放下的物品有锁定时间，防连按 E "拾取↔放下"抖动
+	if (!PickingItem && CanPick() && !IsDropLockActive(OverlappingItem))
+	{
+		AddOption(TierWorld, DistTo(OverlappingItem), TEXT("拾取"), OverlappingItem, [this]()
+		{
+			DoPick();
+			return true;
+		});
+	}
+
+	// ---------------- Tier 3：兜底 —— 放下手上的东西 ----------------
+	// 缓冲消费时不执行：玩家在动画期间按的那一下本意是"继续交互"，
+	// 补执行时若变成"把刚捡的东西放下"，手感会更差。
+	if (NeedDropDown() && !bConsumingBufferedPick)
+	{
+		AddOption(TierFallback, FLT_MAX, TEXT("放下"), nullptr, [this]()
+		{
+			DoDropDown();
+			return true;
+		});
+	}
+}
+
+void AShootCharacter::RefreshInteractionHighlight()
+{
+	if (!bEnableInteractionHighlight)
+	{
+		return;
+	}
+
+	TArray<FInteractOption, TInlineAllocator<12>> Options;
+	BuildInteractionOptions(Options);
+
+	// 与 Pick() 完全相同的排序规则：先分层、同层按距离，保证"亮着的"就是"按 E 会生效的"
+	Options.StableSort(InteractionOptionLess);
+
+	// 只看排在最前面的那一个：它要不是物品/植株（比如灶台、客人、放下），就一个都不亮。
+	// 旧实现里每个球各自在 Overlap 时点亮自己，站在一堆食材中间就会亮成一片。
+	AActor* NewTarget = Options.Num() > 0 ? Options[0].Target : nullptr;
+
+	if (HighlightTarget == NewTarget)
+	{
+		return;
+	}
+
+	// 熄灭上一个目标
+	if (AItemActor* OldItem = Cast<AItemActor>(HighlightTarget))
+	{
+		if (IsValid(OldItem))
+		{
+			OldItem->SetInteractionHighlight(false);
+		}
+	}
+	else if (APlant* OldPlant = Cast<APlant>(HighlightTarget))
+	{
+		if (IsValid(OldPlant))
+		{
+			OldPlant->SetInteractionHighlight(false);
+		}
+	}
+
+	HighlightTarget = NewTarget;
+
+	if (InteractionDebug::IsEnabled() && GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 1.2f, FColor::Cyan,
+			FString::Printf(TEXT("[高亮] %s"), NewTarget ? *GetNameSafe(NewTarget) : TEXT("无")));
+	}
+
+	// 点亮新目标（只有物品和植株支持描边；灶台/客人等目标胜出时全场无高亮）
+	if (AItemActor* NewItem = Cast<AItemActor>(NewTarget))
+	{
+		if (IsValid(NewItem))
+		{
+			NewItem->SetInteractionHighlight(true);
+		}
+	}
+	else if (APlant* NewPlant = Cast<APlant>(NewTarget))
+	{
+		if (IsValid(NewPlant))
+		{
+			NewPlant->SetInteractionHighlight(true);
+		}
+	}
+}
+
+// ============================================================================
+// 交互动画期间的输入缓冲
+// ============================================================================
+bool AShootCharacter::IsInteractionAnimPlaying()
+{
+	if (!GetMesh())
+	{
+		return false;
+	}
+	UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
+	if (!AnimInstance)
+	{
+		return false;
+	}
+
+	// 采集/浇水不改 CharacterActionState（角色一直处于 EAS_Unoccupied 或 EAS_Picking），
+	// 所以"动画是否在播"只能看蒙太奇本身
+	return (PickMontage && AnimInstance->Montage_IsPlaying(PickMontage))
+		|| (GatheringMontage && AnimInstance->Montage_IsPlaying(GatheringMontage))
+		|| (WateringMontage && AnimInstance->Montage_IsPlaying(WateringMontage));
+}
+
+void AShootCharacter::BufferPickInput()
+{
+	bHasBufferedPick = true;
+	if (GetWorld())
+	{
+		BufferedPickTime = GetWorld()->GetTimeSeconds();
+	}
+}
+
+void AShootCharacter::TickBufferedPick(float DeltaTime)
+{
+	if (!bHasBufferedPick)
+	{
+		return;
+	}
+
+	const float Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
+	if (IsInteractionAnimPlaying())
+	{
+		// 动画过长或被误配成循环：超过窗口就丢弃，不补执行一个"过期的按键"
+		if (Now - BufferedPickTime > PickBufferWindow)
+		{
+			bHasBufferedPick = false;
 		}
 		return;
 	}
 
-	// 靠近上菜台且手上持有物品：把成品提交上菜（菜单校验通过则成功上菜给客人）
-	if (OverlappingCounter && PickingItem)
+	bHasBufferedPick = false;
+	bConsumingBufferedPick = true;
+	Pick(FInputActionValue());
+	bConsumingBufferedPick = false;
+}
+
+void AShootCharacter::PickReleased(const FInputActionValue& Value)
+{
+	bPickHeld = false;
+	PickHeldTime = 0.f;
+	RangePickCooldown = 0.f;
+}
+
+// ============================================================================
+// 按住 E 范围拾取（野外收割）：长按超过 RangePickHoldTime 后，
+// 每隔 RangePickInterval 把半径内最近的散落物品直接收进背包（不占手）
+// ============================================================================
+void AShootCharacter::TickRangePick(float DeltaTime)
+{
+	// 手上拿着脏碟时不收割：脏碟状态不允许做别的动作（原逻辑就这么约束的）
+	if (!bRangePickEnabled || !bPickHeld || IsInteractionAnimPlaying()
+		|| (PickingItem && PickingItem->bIsDirtyPlate))
 	{
-		const bool bServed = OverlappingCounter->SubmitDish(PickingItem);
-		if (bServed)
+		PickHeldTime = 0.f;
+		return;
+	}
+
+	PickHeldTime += DeltaTime;
+	if (PickHeldTime < RangePickHoldTime)
+	{
+		return; // 还没到长按判定：短按仍然只做一次普通交互
+	}
+
+	RangePickCooldown -= DeltaTime;
+	if (RangePickCooldown > 0.f)
+	{
+		return;
+	}
+
+	// 贴着设备时不吸：否则站在灶台/上菜台旁长按 E 会把待加工食材吸进背包
+	if (HasBlockingInteractionTarget())
+	{
+		return;
+	}
+
+	if (AItemActor* Item = FindNearestRangePickItem())
+	{
+		RangePickCooldown = RangePickInterval;
+		const FString ItemName = Item->GetName();
+		if (AddItemToInventory(Item)) // 内部销毁世界物体，之后不能再访问 Item
 		{
-			// 成功上菜：成品已被上菜台销毁，清空手持状态
-			SetPickingItem(nullptr);
-			CharacterActionState = ECharacterActionState::EAS_Unoccupied;
-			CharacterState = ECharacterState::ECS_Idle;
-			FBIK_Alpha = 0;
-			HandIK_LPoint = nullptr;
-			HandIK_RPoint = nullptr;
+			RemoveOverlappingItem(Item);
+			if (GEngine)
+			{
+				GEngine->AddOnScreenDebugMessage(-1, 1.f, FColor::Green,
+					FString::Printf(TEXT("[范围拾取] %s 已入背包"), *ItemName));
+			}
 		}
-		return;
+	}
+}
+
+AItemActor* AShootCharacter::FindNearestRangePickItem() const
+{
+	if (!GetWorld())
+	{
+		return nullptr;
 	}
 
-	// if (CookingMachine!=nullptr)
-	// {
-	// 	GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::White, FString::Printf(TEXT("Bool值为: %s"), CookingMachine->IsFinish ? TEXT("True") : TEXT("False")));
-	// }
- 	if (MachineCookFinished())
- 	{
- 		//DoPutDish();//上菜碟 V1.0
+	AItemActor* Best = nullptr;
+	float BestDistSq = FMath::Square(RangePickRadius);
+	const FVector MyLoc = GetActorLocation();
 
- 		//DoPushDishTest();//直接上菜 V2.0
+	for (TActorIterator<AItemActor> It(GetWorld()); It; ++It)
+	{
+		AItemActor* Item = *It;
+		if (!Item || !IsValid(Item) || Item == PickingItem)
+		{
+			continue;
+		}
+		// 空碟/脏碟走各自的交互流程，不能当散落物吸走
+		if (!Item->bPickable || Item->bIsEmptyPlate || Item->bIsDirtyPlate)
+		{
+			continue;
+		}
 
- 		//V3.0
- 		if (IsSpawnOther())//切好菜了，生成一个对应切换的item
- 		{
- 			if (NeedDropDown())
- 			{
- 				DoDropDown();
- 			}
-		    else
-		    {
-		    	DoSpwanOther();
-		    }
- 			
- 		}
-	    else
-	    {
-	    	DoPushDishTest();
-	    }
- 		
- 	}
- 	// else if (CanGiveDishToGuest()) //V1.0
- 	// {
- 	// 	DoGiveDishToGuest();
- 	// }
-	else if (NeedRepairMachine())
-	{
-		DoRepair();
+		const EItemState State = Item->GetItemState();
+		if (State == EItemState::EIS_Equipped || State == EItemState::EIS_Cooking)
+		{
+			continue;
+		}
+
+		const float DistSq = FVector::DistSquared(MyLoc, Item->GetActorLocation());
+		if (DistSq > BestDistSq)
+		{
+			continue;
+		}
+		// 隔着墙/台面的不吸
+		if (!HasInteractionLineOfSight(Item))
+		{
+			continue;
+		}
+
+		BestDistSq = DistSq;
+		Best = Item;
 	}
-	else if (CanThrowToMachine())//如果是拿着食物，则看一下是不是可以扔到锅里
-	{
-		DoThrow();
-	}
-	// 仓库：靠近仓库按 E 把背包里的物品存入仓库并清空背包（手上物品不受影响；背包为空时按 E 无副作用）。
-	// 必须排在 NeedDropDown 之前：否则手上拿着物品时按 E 会先把手上物品丢掉，到不了仓库分支，背包也就不会被清空。
-	else if (OverlappingWarehouse)
-	{
-		OverlappingWarehouse->DepositFromInventory(this);
-		return;
-	}
- 	else if (NeedDropDown())
- 	{
- 		DoDropDown();
- 	}
-	else if (IsSpawner())
-	{
-		DoSpwan();
-	}
-	else if (CanPick())
-	{
-		DoPick();
-	}
+
+	return Best;
+}
+
+bool AShootCharacter::HasBlockingInteractionTarget() const
+{
+	// 只列"设备/服务类"：这些位置长按 E 的意图一定是操作设备，不是收割地面散落物
+	return CookingMachine != nullptr
+		|| OverlappingCounter != nullptr
+		|| OverlappingAttractCounter != nullptr
+		|| OverlappingGate != nullptr
+		|| OverlappingGuest != nullptr
+		|| OverlappingChairSeat != nullptr
+		|| OverlappingDishwasher != nullptr
+		|| OverlappingResearchStove != nullptr
+		|| OverlappingWarehouse != nullptr;
 }
 
  void AShootCharacter::PushFoodStart(const FInputActionValue& Value)
@@ -936,10 +2107,10 @@ void AShootCharacter::DoPick()
 	}
 
  	IsPicking = false;
- 	//拿到手上后，把Hovering item设置为空
- 	SetOverlappingItem(nullptr);
-	//SetWeaponCollisionEnabled(ECollisionEnabled::NoCollision);
-	
+ 	//拿到手上后，把Hovering item设置为空，并从候选集移除（物品已 Equipped 挂到手上）
+	RemoveOverlappingItem(OverlappingItem);
+ 	//SetWeaponCollisionEnabled(ECollisionEnabled::NoCollision);
+
 }
 
  void AShootCharacter::DoSpwan()
@@ -969,8 +2140,8 @@ void AShootCharacter::DoPick()
  	}
 
  	//IsPicking = false;
- 	//拿到手上后，把Hovering item设置为空
- 	SetOverlappingItem(nullptr);
+ 	//生成物已拿在手上：从候选集重选目标（食物箱仍在脚下时保持为当前目标，HUD 数量同步刷新）
+ 	RefreshBestOverlappingItem();
  	//SetWeaponCollisionEnabled(ECollisionEnabled::NoCollision);
  }
 
@@ -994,17 +2165,20 @@ void AShootCharacter::DoPick()
 	}
  	CookingMachine->FoodActors.Empty();
  	GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, TEXT("切好菜"));
- 	SetOverlappingItem(nullptr);
+ 	RefreshBestOverlappingItem();
  }
 
  void AShootCharacter::DoDropDown() // 如果已经手上有食物了，要先将食物扔下
  {
  	PickingItem->DeAttachMeshToSocket();
  	//PickingItem->SetItemState(EItemState::EIS_Idle);//临时简单处理，为了可以放下食物可以马上拾取
-		
+
  	OnReleasePickEvent();
  	PickingItem->SetItemState(EItemState::EIS_Hovering);//临时简单处理，为了可以放下食物可以马上拾取
- 	SetOverlappingItem(PickingItem);//简单，先将hovering 设置成当前的手上的食物
+ 	//放下的物品重新进入候选集（其交互球仍与角色重叠，不会再触发 BeginOverlap，需手动注册）
+ 	LastDroppedItem = PickingItem; // 记录重拾锁定（DropRePickLockTime 秒内不可再拾）
+ 	LastDropTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
+ 	AddOverlappingItem(PickingItem);
  	SetPickingItem(nullptr);
  	CharacterActionState = ECharacterActionState::EAS_Unoccupied;
  	CharacterState = ECharacterState::ECS_Idle;
@@ -1018,17 +2192,20 @@ void AShootCharacter::DoPick()
 
  void AShootCharacter::OnPushFoodComplete()
  {
- 	if (PickingItem->ItemMesh->IsAnySimulatingPhysics() == false)
- 	{
- 		PickingItem->ItemMesh->SetSimulatePhysics(true);
- 		PickingItem->ItemMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
- 	}
-	FVector ForwardDirection = GetLaunchVelocity();
+	if (!PickingItem)
+	{
+		return;
+	}
 
- 	PickingItem->ItemMesh->SetPhysicsLinearVelocity(ForwardDirection);
- 	
+	// 抛出去的速度要在脱离挂点之前算：GetLaunchVelocity 依赖当前手部朝向/位置
+	const FVector ForwardDirection = GetLaunchVelocity();
 
- 	PickingItem->DeAttachMeshToSocket();
+	// 先脱离挂点，再打开"物理 + 世界碰撞"。
+	// 顺序不能反：挂在手上时开物理会带着挂点的相对变换被弹飞。
+	PickingItem->DeAttachMeshToSocket();
+	PickingItem->EnablePhysicsDrop();
+	PickingItem->ItemMesh->SetPhysicsLinearVelocity(ForwardDirection);
+
  	OnReleasePickEvent();
  	PickingItem->SetItemState(EItemState::EIS_Idle);
  	SetPickingItem(nullptr);
@@ -1494,8 +2671,16 @@ void AShootCharacter::DoRepairEnd()
  {
 	//GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, TEXT("菜煮好了，放碟子上"));
  	int FoodId = CookingMachine->GetMenuFood();
-	auto FoodActor = Cast<UBaseGameInstance>(GetGameInstance())->foodSystem->CreateFoodActor(FoodId);
- 	if (FoodActor)
+	if (!PickingItem)
+	{
+		return;
+	}
+	// 生成位置给盘子的世界位置：挂点（PointSocket）在资产里没配时，
+	// 成品也会落在盘子上，而不是停在世界原点掉到地板下面。
+	const FVector SpawnLocation = PickingItem->ItemMesh
+		? PickingItem->ItemMesh->GetComponentLocation()
+		: PickingItem->GetActorLocation();
+	auto FoodActor = Cast<UBaseGameInstance>(GetGameInstance())->foodSystem->CreateFoodActor(FoodId, SpawnLocation);
  	{
  		FoodActor->AttachMeshToSocket(PickingItem->ItemMesh, FName("PointSocket"));
  		PickingItem->FoodIdArray.Add(FoodId) ;
@@ -1660,6 +2845,82 @@ void AShootCharacter::DoRepairEnd()
  		}
  		PredictAndDrawParabola();
  	}
+
+	// 采集/浇水时的平滑转身：插值逼近目标朝向，到位后停止（取代原来的瞬时 SetActorRotation）
+	if (bHasInteractFaceRotation)
+	{
+		const FRotator CurrentRot = GetActorRotation();
+		if (CurrentRot.Equals(InteractFaceRotation, 1.f))
+		{
+			bHasInteractFaceRotation = false;
+		}
+		else
+		{
+			SetActorRotation(FMath::RInterpTo(CurrentRot, InteractFaceRotation, DeltaTime, 12.f));
+		}
+	}
+
+	// 冲刺 FOV 过渡（默认关闭）：FOV 变化会放大画面边缘的位移，配合加速更容易产生前冲感。
+	// 需要速度感时在蓝图打开 bUseSprintFOV，幅度保持 ≤2 度。
+	if (bUseSprintFOV && FollowCamera && !FMath::IsNearlyEqual(FollowCamera->FieldOfView, TargetFOV, 0.05f))
+	{
+		FollowCamera->SetFieldOfView(FMath::FInterpTo(FollowCamera->FieldOfView, TargetFOV, DeltaTime, FOVInterpSpeed));
+	}
+
+	// 注意：这里刻意不再按冲刺状态改 CameraLagSpeed。
+	// LagSpeed 一变，相机滞后的距离就跟着跳变，画面会“突”一下往前冲。
+	// 现在全程固定 CameraLagSpeed，并靠 CameraLagMaxDistance 封顶滞后幅度。
+
+	// ============ 交互目标定期重估 ============
+	// 只靠 Overlap 事件的话，玩家绕到墙后 / 物体被搬走 / 两个范围交叠时目标会残留或选错。
+	// 每 InteractionRefreshInterval 秒统一重算一次，代价可以忽略。
+	InteractionRefreshTimer -= DeltaTime;
+	if (InteractionRefreshTimer <= 0.f)
+	{
+		InteractionRefreshTimer = InteractionRefreshInterval;
+		RefreshAllInteractionTargets();
+	}
+
+	// ============ 输入缓冲 / 按住 E 范围拾取 ============
+	// 缓冲：交互动画期间按下的 E 在动画结束后补执行一次
+	// 范围拾取：按住 E 超过阈值后，持续把身边散落物收进背包
+	TickBufferedPick(DeltaTime);
+	TickRangePick(DeltaTime);
+
+	// ============ 交互视线调试（控制台 Shoot.DebugInteract 1） ============
+	if (InteractionDebug::IsEnabled() && GetWorld())
+	{
+		// 把所有"当前选中的交互目标"连成绿线（视线通）/ 红线（被遮挡），
+		// 一眼就能看出按 E 会作用到哪个东西、以及是不是被墙挡住
+		TArray<AActor*, TInlineAllocator<10>> DebugTargets;
+		auto AddDebugTarget = [&DebugTargets](AActor* Target)
+		{
+			if (IsValid(Target))
+			{
+				DebugTargets.AddUnique(Target);
+			}
+		};
+		AddDebugTarget(OverlappingItem);
+		AddDebugTarget(OverlappingPlant);
+		AddDebugTarget(CookingMachine);
+		AddDebugTarget(OverlappingCounter);
+		AddDebugTarget(OverlappingDishwasher);
+		AddDebugTarget(OverlappingAttractCounter);
+		AddDebugTarget(OverlappingGate);
+		AddDebugTarget(OverlappingGuest);
+		AddDebugTarget(OverlappingChairSeat);
+		AddDebugTarget(OverlappingResearchStove);
+
+		const FVector EyeLoc = GetActorLocation() + FVector(0.f, 0.f, 60.f);
+		for (AActor* DebugTarget : DebugTargets)
+		{
+			const FBox B = DebugTarget->GetComponentsBoundingBox(true);
+			const FVector TP = B.IsValid ? B.GetClosestPointTo(EyeLoc) : DebugTarget->GetActorLocation();
+			const bool bClear = HasInteractionLineOfSight(DebugTarget);
+			DrawDebugLine(GetWorld(), EyeLoc, TP, bClear ? FColor::Green : FColor::Red, false, 0.f, 0, 2.f);
+			DrawDebugBox(GetWorld(), B.GetCenter(), B.GetExtent(), FColor::Yellow, false, 0.f, 0, 1.f);
+		}
+	}
 
  }
 

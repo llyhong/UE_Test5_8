@@ -64,8 +64,10 @@ public:
 	 *  MachineID<=0 时返回全部菜品 */
 	UFUNCTION(BlueprintCallable, BlueprintPure)
 	TArray<int32> GetFoodIDsByMachine(int32 MachineID) const;
+	/** 生成成品模型。SpawnLocation 建议传"盘子/灶台的世界位置"：
+	 *  以前固定生成在世界原点，一旦挂点失败成品就停在地图原点（常常在地板以下）。 */
 	UFUNCTION(BlueprintCallable)
-	ABaseFoodActor* CreateFoodActor(int32 FoodID);
+	ABaseFoodActor* CreateFoodActor(int32 FoodID, const FVector& SpawnLocation = FVector::ZeroVector);
 
 private:
 	/** 按 ItemID 取物品行（ItemInfoTable 被换掉会自动重建索引）；取不到返回 null */

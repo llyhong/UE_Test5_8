@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "ShootCharacter.h"
+#include "Interaction/InteractionConfig.h"
 #include "StorageWarehouse.generated.h"
 
 class USphereComponent;
@@ -36,9 +37,18 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Warehouse")
 	TObjectPtr<UStaticMeshComponent> WarehouseMesh;
 
-	/** 交互半径（玩家需进入此范围才能按 E 存物） */
+	/** 交互半径（玩家需进入此范围才能按 E 存物）。
+	 *  OnConstruction（编辑器视口）与 BeginPlay（运行时）都会强制应用到组件上 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Warehouse", meta = (ClampMin = "10.0"))
-	float InteractionRadius = 200.f;
+	float InteractionRadius = InteractionDistance::Counter;
+
+	/** 编辑器里改 InteractionRadius 时立即写进组件，关卡视口中即可看到真实判定球 */
+	virtual void OnConstruction(const FTransform& Transform) override;
+
+	/** 把 InteractionRadius（× Shoot.InteractScale 倍率）写进交互球。
+	 *  OnConstruction / BeginPlay / 运行时改倍率都会调用，必须幂等 */
+	UFUNCTION()
+	void ApplyInteractionScale();
 
 	/** 仓库容量上限（槽位数；<=0 表示不限制） */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Warehouse")

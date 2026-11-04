@@ -9,6 +9,7 @@
 #include "Game/EconomySystem.h"
 #include "Engine/Engine.h"
 #include "Kismet/GameplayStatics.h"
+#include "Interaction/InteractionConfig.h"
 
 AAttractCounter::AAttractCounter()
 {
@@ -19,15 +20,42 @@ AAttractCounter::AAttractCounter()
 
 	InteractionSphere = CreateDefaultSubobject<USphereComponent>(TEXT("InteractionSphere"));
 	InteractionSphere->SetupAttachment(RootComponent);
-	InteractionSphere->SetSphereRadius(160.f);
+	InteractionSphere->SetSphereRadius(InteractionRadius * InteractionScale::Get());
+	// 视口里未选中也画出判定球，摆放关卡时能直接目测交互范围
+	InteractionSphere->ShapeColor = FColor(240, 160, 50);
+	InteractionSphere->bDrawOnlyIfSelected = false;
 	InteractionSphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 	InteractionSphere->SetCollisionResponseToAllChannels(ECR_Overlap);
 	InteractionSphere->SetGenerateOverlapEvents(true); // 必须显式开启，否则不会触发 OnComponentBeginOverlap
 }
 
+void AAttractCounter::OnConstruction(const FTransform& Transform)
+{
+	Super::OnConstruction(Transform);
+
+	// 编辑器视口预览：改 InteractionRadius 立刻反映到组件上，
+	// 摆放关卡时看到的球就是运行时真正生效的判定范围
+	ApplyInteractionScale();
+}
+
+void AAttractCounter::ApplyInteractionScale()
+{
+	if (InteractionSphere)
+	{
+		InteractionSphere->SetSphereRadius(InteractionRadius * InteractionScale::Get(), false);
+		InteractionSphere->SetRelativeLocation(FVector(0.f, 0.f, InteractionCenterHeight));
+		InteractionSphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+		InteractionSphere->SetCollisionResponseToAllChannels(ECR_Overlap);
+		InteractionSphere->SetGenerateOverlapEvents(true);
+	}
+}
+
 void AAttractCounter::BeginPlay()
 {
 	Super::BeginPlay();
+
+	// 统一交互尺度：强制覆盖蓝图里残留的旧半径，保证同类交互点距离一致
+	ApplyInteractionScale();
 
 	InteractionSphere->OnComponentBeginOverlap.AddDynamic(this, &AAttractCounter::OnInteractionOverlap);
 	InteractionSphere->OnComponentEndOverlap.AddDynamic(this, &AAttractCounter::OnInteractionEndOverlap);
@@ -89,7 +117,7 @@ void AAttractCounter::OnInteractionOverlap(UPrimitiveComponent* OverlappedCompon
 {
 	if (AShootCharacter* Character = Cast<AShootCharacter>(OtherActor))
 	{
-		Character->SetOverlappingAttractCounter(this);
+		Character->AddOverlappingAttractCounter(this);
 	}
 }
 
@@ -98,9 +126,7 @@ void AAttractCounter::OnInteractionEndOverlap(UPrimitiveComponent* OverlappedCom
 {
 	if (AShootCharacter* Character = Cast<AShootCharacter>(OtherActor))
 	{
-		if (Character->GetOverlappingAttractCounter() == this)
-		{
-			Character->SetOverlappingAttractCounter(nullptr);
-		}
+		// 只注销自己：多台招揽台范围交叠时，另一台仍是候选目标
+		Character->RemoveOverlappingAttractCounter(this);
 	}
 }

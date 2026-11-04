@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "NPC/ChairTypes.h"
+#include "Interaction/InteractionConfig.h"
 #include "ChairSeat.generated.h"
 
 class UStaticMeshComponent;
@@ -67,9 +68,18 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chair|Components")
 	TObjectPtr<USphereComponent> InteractionSphere;
 
-	/** 交互球半径（玩家需在此范围内才能按 E 与餐桌交互） */
+	/** 交互球半径（玩家需在此范围内才能按 E 与餐桌交互）。
+	 *  OnConstruction（编辑器视口）与 BeginPlay（运行时）都会强制应用到组件上 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Chair", meta = (ClampMin = "10.0"))
-	float InteractionRadius = 180.f;
+	float InteractionRadius = InteractionDistance::Guest;
+
+	/** 编辑器里改 InteractionRadius 时立即写进组件，关卡视口中即可看到真实判定球 */
+	virtual void OnConstruction(const FTransform& Transform) override;
+
+	/** 把 InteractionRadius（× Shoot.InteractScale 倍率）写进交互球。
+	 *  OnConstruction / BeginPlay / 运行时改倍率都会调用，必须幂等 */
+	UFUNCTION()
+	void ApplyInteractionScale();
 
 	// ==================== 座位 ====================
 

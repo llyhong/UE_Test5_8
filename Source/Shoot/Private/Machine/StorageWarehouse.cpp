@@ -16,10 +16,13 @@ AStorageWarehouse::AStorageWarehouse()
 
 	InteractionSphere = CreateDefaultSubobject<USphereComponent>(TEXT("InteractionSphere"));
 	InteractionSphere->SetupAttachment(RootComponent);
-	InteractionSphere->SetSphereRadius(InteractionRadius);
+	InteractionSphere->SetSphereRadius(InteractionRadius * InteractionScale::Get());
 	InteractionSphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 	InteractionSphere->SetCollisionResponseToAllChannels(ECR_Overlap);
 	InteractionSphere->SetGenerateOverlapEvents(true);
+	// 视口里未选中也画出判定球（黄色=仓库），方便摆放时目测交互范围
+	InteractionSphere->ShapeColor = FColor(230, 200, 60);
+	InteractionSphere->bDrawOnlyIfSelected = false;
 
 	// 提示控件：靠近时显示“按 E 存入仓库”等提示。
 	// 控件类由蓝图在 TipsWidgetComp 的 Widget Class 上配置（这里不给默认类，避免蓝图未配时占一个空控件）。
@@ -51,12 +54,28 @@ void AStorageWarehouse::SetTipsVisible(bool bVisible)
 	}
 }
 
+void AStorageWarehouse::OnConstruction(const FTransform& Transform)
+{
+	Super::OnConstruction(Transform);
+
+	// 编辑器视口预览：改 InteractionRadius 立刻反映到组件上
+	ApplyInteractionScale();
+}
+
+void AStorageWarehouse::ApplyInteractionScale()
+{
+	if (InteractionSphere)
+	{
+		InteractionSphere->SetSphereRadius(InteractionRadius * InteractionScale::Get(), false);
+	}
+}
+
 void AStorageWarehouse::BeginPlay()
 {
 	Super::BeginPlay();
 
 	// 让蓝图里调整的 InteractionRadius 生效
-	InteractionSphere->SetSphereRadius(InteractionRadius);
+	ApplyInteractionScale();
 
 	InteractionSphere->OnComponentBeginOverlap.AddDynamic(this, &AStorageWarehouse::OnInteractionOverlap);
 	InteractionSphere->OnComponentEndOverlap.AddDynamic(this, &AStorageWarehouse::OnInteractionEndOverlap);
@@ -67,7 +86,7 @@ void AStorageWarehouse::OnInteractionOverlap(UPrimitiveComponent* OverlappedComp
 {
 	if (AShootCharacter* Character = Cast<AShootCharacter>(OtherActor))
 	{
-		Character->SetOverlappingWarehouse(this);
+		Character->AddOverlappingWarehouse(this);
 		SetTipsVisible(true);
 		OnPlayerNearby(true); // 通知蓝图刷新提示内容（如“按 E 存入仓库（背包 X 件）”）
 	}
@@ -78,10 +97,8 @@ void AStorageWarehouse::OnInteractionEndOverlap(UPrimitiveComponent* OverlappedC
 {
 	if (AShootCharacter* Character = Cast<AShootCharacter>(OtherActor))
 	{
-		if (Character->GetOverlappingWarehouse() == this)
-		{
-			Character->SetOverlappingWarehouse(nullptr);
-		}
+		// 只注销自己，多仓库重叠时不会把别的仓库目标清掉
+		Character->RemoveOverlappingWarehouse(this);
 	}
 	SetTipsVisible(false);
 	OnPlayerNearby(false);
