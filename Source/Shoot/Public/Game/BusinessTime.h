@@ -10,6 +10,16 @@
 class ADirectionalLight;
 class UDirectionalLightComponent;
 
+/** 季节：按 MonthsPerSeason 个月一季循环，默认 1~3 春、4~6 夏、7~9 秋、10~12 冬 */
+UENUM(BlueprintType)
+enum class ESeason : uint8
+{
+	Spring UMETA(DisplayName = "春"),
+	Summer UMETA(DisplayName = "夏"),
+	Autumn UMETA(DisplayName = "秋"),
+	Winter UMETA(DisplayName = "冬"),
+};
+
 /**
  * 游戏内时钟：按"真实秒 / 游戏日"自动推进 年→月→日。
  * 用作开罗式经营模拟的时间轴，驱动 日/月/年 结算。
@@ -49,6 +59,32 @@ public:
 	/** 是否自动推进（关闭后需手动调用 AdvanceDay） */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time")
 	bool bAutoAdvance = true;
+
+	// ========== 季节（由月份换算，驱动野外采集物按季刷新） ==========
+	/** 每季包含的月数（默认 3 个月一季） */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time|Season", meta = (ClampMin = "1", ClampMax = "12"))
+	int32 MonthsPerSeason = 3;
+
+	/** 当前季节（只读；随日期推进自动更新） */
+	UPROPERTY(BlueprintReadOnly, Category = "Time|Season")
+	ESeason CurrentSeason = ESeason::Spring;
+
+	/** 季节切换广播（参数：旧季节、新季节），供野外采集 / 环境 / UI 监听 */
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnSeasonChanged, ESeason, OldSeason, ESeason, NewSeason);
+
+	UPROPERTY(BlueprintAssignable, Category = "Time|Season")
+	FOnSeasonChanged OnSeasonChanged;
+
+	/** 当前季节（按当前月份实时换算，读档后也不会滞后） */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Time|Season")
+	ESeason GetSeason() const { return SeasonFromMonth(Month, MonthsPerSeason); }
+
+	/** 当前季节名（春 / 夏 / 秋 / 冬），供 UI 显示 */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Time|Season")
+	FString GetSeasonName() const;
+
+	/** 由月份换算季节（月份从 1 起；PerSeason 个月一季，超出部分按 4 季循环） */
+	static ESeason SeasonFromMonth(int32 InMonth, int32 InMonthsPerSeason);
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time")
 	bool bShowDebugInfo = false;
@@ -132,6 +168,18 @@ public:
 	/** 夜晚颜色（偏冷蓝） */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time|Sun")
 	FLinearColor NightColor = FLinearColor(0.2f, 0.3f, 0.6f);
+
+	/** 天气对太阳的强度倍率（由 AWeatherSystem 写入，UpdateSun 里与日变化强度相乘） */
+	UPROPERTY(BlueprintReadOnly, Category = "Time|Sun")
+	float WeatherSunIntensityScale = 1.f;
+
+	/** 天气对太阳颜色的染色（与日变化颜色相乘，晴天为白色） */
+	UPROPERTY(BlueprintReadOnly, Category = "Time|Sun")
+	FLinearColor WeatherSunColorTint = FLinearColor::White;
+
+	/** 天气系统每帧写入太阳修正（强度倍率 + 颜色染色） */
+	UFUNCTION(BlueprintCallable, Category = "Time|Sun")
+	void SetWeatherSunModifiers(float InIntensityScale, FLinearColor InColorTint);
 
 	/** 日出小时（默认 6 点）、日落小时（默认 18 点）：两者之间为白天，之外为夜晚 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time|Sun")

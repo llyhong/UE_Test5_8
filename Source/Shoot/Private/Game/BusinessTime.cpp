@@ -5,6 +5,26 @@
 #include "Engine/DirectionalLight.h"
 #include "Components/DirectionalLightComponent.h"
 
+ESeason UTimeSystem::SeasonFromMonth(int32 InMonth, int32 InMonthsPerSeason)
+{
+	const int32 PerSeason = FMath::Clamp(InMonthsPerSeason, 1, 12);
+	const int32 MonthIndex = FMath::Clamp(InMonth, 1, 12) - 1;
+	const int32 SeasonIndex = (MonthIndex / PerSeason) % 4;
+	return static_cast<ESeason>(SeasonIndex);
+}
+
+FString UTimeSystem::GetSeasonName() const
+{
+	switch (GetSeason())
+	{
+	case ESeason::Spring: return TEXT("春");
+	case ESeason::Summer: return TEXT("夏");
+	case ESeason::Autumn: return TEXT("秋");
+	case ESeason::Winter: return TEXT("冬");
+	default: return TEXT("春");
+	}
+}
+
 void UTimeSystem::Init()
 {
 	Year = FMath::Max(1, StartYear);
@@ -12,6 +32,7 @@ void UTimeSystem::Init()
 	Day = FMath::Clamp(StartDay, 1, DaysPerMonth);
 	Accum = 0.f;
 	DayProgress = 0.f;
+	CurrentSeason = SeasonFromMonth(Month, MonthsPerSeason);
 	// 运行时营业状态必须随初始化清零，避免“启动即营业”（CDO 残留 / 旧状态 / 异常广播造成的脏值）
 	bIsBusinessOpen = false;
 	UpdateSun();
@@ -28,6 +49,8 @@ void UTimeSystem::AdvanceDays(int32 Days)
 
 void UTimeSystem::AdvanceOneDay()
 {
+	// 季节以日期换算出的值为准（而非缓存字段）：读档后缓存可能滞后，也不影响换季判定
+	const ESeason PrevSeason = GetSeason();
 	const int32 PrevMonth = Month;
 	const int32 PrevYear = Year;
 
@@ -41,6 +64,14 @@ void UTimeSystem::AdvanceOneDay()
 			Month = 1;
 			Year++;
 		}
+	}
+
+	// 季节先于"新的一天"广播：野外采集物在换季时先清掉上一季的，再按新季节补齐
+	const ESeason NewSeason = GetSeason();
+	if (NewSeason != PrevSeason)
+	{
+		CurrentSeason = NewSeason;
+		OnSeasonChanged.Broadcast(PrevSeason, NewSeason);
 	}
 
 	OnDayChanged.Broadcast(Year, Month, Day);
@@ -128,6 +159,12 @@ void UTimeSystem::CloseBusiness()
 	OnBusinessOpenChanged.Broadcast(false);
 }
 
+void UTimeSystem::SetWeatherSunModifiers(float InIntensityScale, FLinearColor InColorTint)
+{
+	WeatherSunIntensityScale = FMath::Max(0.f, InIntensityScale);
+	WeatherSunColorTint = InColorTint;
+}
+
 void UTimeSystem::UpdateSun()
 {
 	if (!bDriveSun || !SunLight)
@@ -168,13 +205,14 @@ void UTimeSystem::UpdateSun()
 	const float Intensity = bIsDay
 		? FMath::GetMappedRangeValueClamped(FVector2D(0.f, 1.f), FVector2D(NightIntensity, NoonIntensity), Height01)
 		: NightIntensity;
-	DLC->SetIntensity(Intensity);
+	DLC->SetIntensity(Intensity * FMath::Max(0.f, WeatherSunIntensityScale));
 
 	// 颜色：夜晚 NightColor；白天由 SunsetColor（地平线暖橙）到 NoonColor（正午偏白）过渡
 	const FLinearColor Color = bIsDay
 		? FLinearColor::LerpUsingHSV(SunsetColor, NoonColor, FMath::Clamp(Height01, 0.f, 1.f))
 		: NightColor;
-	DLC->SetLightColor(Color);
+	// 天气染色（阴雨压冷 / 沙尘压黄），晴天为白色不影响原色
+	DLC->SetLightColor(Color * WeatherSunColorTint);
 
 	// 方向：太阳在天空中的位置（Z 为上）。白天按高度 / 方位插值，夜晚压到很低角度（强度已近 0，仅占位）
 	const float ElevDeg = FMath::Clamp(Height01, 0.f, 1.f) * 90.f; // 0~90°
