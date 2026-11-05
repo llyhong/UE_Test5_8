@@ -4,9 +4,11 @@
 
 ACameraAreaVolume::ACameraAreaVolume()
 {
-	// 只做区域查询，不参与碰撞，玩家可以直接穿过
-	GetBrushComponent()->SetCollisionProfileName(UCollisionProfile::NoCollision_ProfileName);
-	GetBrushComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	// 必须是 QueryOnly：AVolume::EncompassesPoint 走 GetSquaredDistanceToCollision，
+	// NoCollision 时没有查询体，永远返回 false。全通道 Ignore 保证不阻挡任何东西。
+	GetBrushComponent()->SetCollisionObjectType(ECC_WorldStatic);
+	GetBrushComponent()->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	GetBrushComponent()->SetCollisionResponseToAllChannels(ECR_Ignore);
 	GetBrushComponent()->SetGenerateOverlapEvents(false);
 
 	bColored = true;
