@@ -954,6 +954,21 @@ void AGuestCharacter::GiveUpAndLeave()
 	StartLeaving();
 }
 
+void AGuestCharacter::ScareAway()
+{
+	// 突发事件（老鼠等）把客人吓走：与主动离场同样的流程——取消未完成订单、释放座位、通知管理器
+	if (GuestState == EGuestState::Leaving)
+	{
+		return;
+	}
+
+	if (bShowDebugInfo)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[GuestCharacter] %s 被突发事件吓走，离场并取消未完成订单"), *GetName());
+	}
+	StartLeaving();
+}
+
 void AGuestCharacter::StartLeaving()
 {
 	// 离座：先解除“钉住座位”（恢复行走与避让，否则后面的离场寻路会因为 MOVE_None 走不动）

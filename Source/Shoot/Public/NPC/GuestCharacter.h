@@ -263,6 +263,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Guest")
 	void GiveUpAndLeave();
 
+	/** 被突发事件（老鼠等）吓走：走正常离场流程，未完成订单会被取消、座位释放 */
+	UFUNCTION(BlueprintCallable, Category = "Guest")
+	void ScareAway();
+
 	/** 到达离场点后的回调：销毁 */
 	UFUNCTION()
 	void OnReachLeavePoint();
