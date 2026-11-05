@@ -49,23 +49,23 @@ struct FInventorySlot
 
 public:
 	// 取出时用于生成对应 Actor 的类(保留蓝图子类)
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Inventory")
 	TSubclassOf<AItemActor> ItemClass = nullptr;
 
 	// 物品信息数据表行(取出时回填到新生成的 Actor)
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory", meta = (RowType = "ItemActorInfo"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Inventory", meta = (RowType = "ItemActorInfo"))
 	FDataTableRowHandle ItemInfoRow;
 
 	// 食材ID列表(如碟子里的菜)，取出时回填
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Inventory")
 	TArray<int> FoodIdArray;
 
 	// 显示名(UI 用)
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Inventory")
 	FString DisplayName;
 
 	// 数量：同类物品堆叠(相同 ItemClass 不占新槽位，仅数量+1)
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Inventory")
 	int32 Quantity = 1;
 };
 
@@ -91,28 +91,28 @@ class AShootCharacter : public ACharacter, public IPickupInterface
 	GENERATED_BODY()
 
 	/** Camera boom positioning the camera behind the character */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components", meta = (AllowPrivateAccess = "true"))
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Components", meta = (AllowPrivateAccess = "true"))
 	USpringArmComponent* CameraBoom;
 
 	/** Follow camera */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components", meta = (AllowPrivateAccess = "true"))
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Components", meta = (AllowPrivateAccess = "true"))
 	UCameraComponent* FollowCamera;
 private:
-	UPROPERTY(VisibleInstanceOnly)
+	UPROPERTY(VisibleInstanceOnly, Category = "Shoot|Character")
 	TObjectPtr<AItemActor> OverlappingItem;
 
 	// 交互范围内的全部物品候选集（进入时注册、离开时注销），
 	// OverlappingItem 始终指向其中距离最近的一个，取代旧的"单指针后进者胜"
-	UPROPERTY(VisibleInstanceOnly)
+	UPROPERTY(VisibleInstanceOnly, Category = "Shoot|Character")
 	TArray<TObjectPtr<AItemActor>> OverlappingItems;
 
-	UPROPERTY(VisibleInstanceOnly)
+	UPROPERTY(VisibleInstanceOnly, Category = "Shoot|Character")
 	TObjectPtr<AItemActor> PickingItem;
 
 	// ============ 放下后的重拾锁定 ============
 	// 刚放下的物品在 DropRePickLockTime 秒内不可再被拾取，
 	// 避免连按 E 出现"拾取↔放下"抖动
-	UPROPERTY(EditDefaultsOnly, Category="Pickup")
+	UPROPERTY(EditDefaultsOnly, Category = "Shoot|Pickup")
 	float DropRePickLockTime = 0.3f;
 
 	TObjectPtr<AItemActor> LastDroppedItem = nullptr;
@@ -121,15 +121,15 @@ private:
 	bool IsDropLockActive(AItemActor* Item) const;
 
 	// 当前可交互的植物（靠近时由 APlant 的重叠球注册）
-	UPROPERTY(VisibleInstanceOnly)
+	UPROPERTY(VisibleInstanceOnly, Category = "Shoot|Character")
 	TObjectPtr<APlant> OverlappingPlant;
 
 	// 植物候选集：进入时注册、离开时注销，OverlappingPlant 取其中距离最近的一株
-	UPROPERTY(VisibleInstanceOnly)
+	UPROPERTY(VisibleInstanceOnly, Category = "Shoot|Character")
 	TArray<TObjectPtr<APlant>> OverlappingPlants;
 
 	// 灶台候选集：同上，由 ACookingMachine 注册/注销
-	UPROPERTY(VisibleInstanceOnly)
+	UPROPERTY(VisibleInstanceOnly, Category = "Shoot|Character")
 	TArray<TObjectPtr<ACookingMachine>> OverlappingCookMachines;
 
 	// 以下 7 类交互目标统一采用"候选集 + 最近目标"：
@@ -137,90 +137,90 @@ private:
 	// "视线可达且距离最近"的那一个，不再有"后进者胜"和"先离开者清空目标"。
 
 	// 上菜台候选集
-	UPROPERTY(VisibleInstanceOnly)
+	UPROPERTY(VisibleInstanceOnly, Category = "Shoot|Character")
 	TArray<TObjectPtr<class AServingCounter>> OverlappingServingCounters;
 
-	UPROPERTY(VisibleInstanceOnly)
+	UPROPERTY(VisibleInstanceOnly, Category = "Shoot|Character")
 	TObjectPtr<class AServingCounter> OverlappingCounter;
 
 	// 洗碗机候选集
-	UPROPERTY(VisibleInstanceOnly)
+	UPROPERTY(VisibleInstanceOnly, Category = "Shoot|Character")
 	TArray<TObjectPtr<class ADishwasher>> OverlappingDishwashers;
 
-	UPROPERTY(VisibleInstanceOnly)
+	UPROPERTY(VisibleInstanceOnly, Category = "Shoot|Character")
 	TObjectPtr<class ADishwasher> OverlappingDishwasher;
 
 	// 招揽台候选集
-	UPROPERTY(VisibleInstanceOnly)
+	UPROPERTY(VisibleInstanceOnly, Category = "Shoot|Character")
 	TArray<TObjectPtr<class AAttractCounter>> OverlappingAttractCounters;
 
-	UPROPERTY(VisibleInstanceOnly)
+	UPROPERTY(VisibleInstanceOnly, Category = "Shoot|Character")
 	TObjectPtr<class AAttractCounter> OverlappingAttractCounter;
 
 	// 大门交互台候选集
-	UPROPERTY(VisibleInstanceOnly)
+	UPROPERTY(VisibleInstanceOnly, Category = "Shoot|Character")
 	TArray<TObjectPtr<class AGateCounter>> OverlappingGates;
 
-	UPROPERTY(VisibleInstanceOnly)
+	UPROPERTY(VisibleInstanceOnly, Category = "Shoot|Character")
 	TObjectPtr<class AGateCounter> OverlappingGate;
 
 	// 客人候选集
-	UPROPERTY(VisibleInstanceOnly)
+	UPROPERTY(VisibleInstanceOnly, Category = "Shoot|Character")
 	TArray<TObjectPtr<class AGuestCharacter>> OverlappingGuests;
 
-	UPROPERTY(VisibleInstanceOnly)
+	UPROPERTY(VisibleInstanceOnly, Category = "Shoot|Character")
 	TObjectPtr<class AGuestCharacter> OverlappingGuest;
 
 	// 餐桌候选集
-	UPROPERTY(VisibleInstanceOnly)
+	UPROPERTY(VisibleInstanceOnly, Category = "Shoot|Character")
 	TArray<TObjectPtr<class AChairSeat>> OverlappingChairSeats;
 
-	UPROPERTY(VisibleInstanceOnly)
+	UPROPERTY(VisibleInstanceOnly, Category = "Shoot|Character")
 	TObjectPtr<class AChairSeat> OverlappingChairSeat;
 
 	// 当前可收走的空碟（靠近空碟时由空碟的回收球注册；方案B 上菜闭环，收走后变成手上脏碟）
-	UPROPERTY(VisibleInstanceOnly)
+	UPROPERTY(VisibleInstanceOnly, Category = "Shoot|Character")
 	TArray<TObjectPtr<class AItemActor>> OverlappingEmptyPlates;
 
-	UPROPERTY(VisibleInstanceOnly)
+	UPROPERTY(VisibleInstanceOnly, Category = "Shoot|Character")
 	TObjectPtr<class AItemActor> OverlappingEmptyPlate;
 
 	// 当前可投入食材的研究炉（靠近时由研究炉的重叠球注册）
-	UPROPERTY(VisibleInstanceOnly)
+	UPROPERTY(VisibleInstanceOnly, Category = "Shoot|Character")
 	TArray<TObjectPtr<class AResearchStove>> OverlappingResearchStoves;
 
-	UPROPERTY(VisibleInstanceOnly)
+	UPROPERTY(VisibleInstanceOnly, Category = "Shoot|Character")
 	TObjectPtr<class AResearchStove> OverlappingResearchStove;
 
 	// 当前可存物/取物的仓库（靠近时由仓库的重叠球注册；用于 E 键把背包物品存入仓库）
-	UPROPERTY(VisibleInstanceOnly)
+	UPROPERTY(VisibleInstanceOnly, Category = "Shoot|Character")
 	TArray<TObjectPtr<class AStorageWarehouse>> OverlappingWarehouses;
 
-	UPROPERTY(VisibleInstanceOnly)
+	UPROPERTY(VisibleInstanceOnly, Category = "Shoot|Character")
 	TObjectPtr<class AStorageWarehouse> OverlappingWarehouse;
 
 	// 当前可对话的交互对象（靠近时由 UInteractionDialogueComponent 注册；通用对话系统）
-	UPROPERTY(VisibleInstanceOnly)
+	UPROPERTY(VisibleInstanceOnly, Category = "Shoot|Character")
 	TArray<TObjectPtr<class UInteractionDialogueComponent>> OverlappingDialogues;
 
-	UPROPERTY(VisibleInstanceOnly)
+	UPROPERTY(VisibleInstanceOnly, Category = "Shoot|Character")
 	TObjectPtr<class UInteractionDialogueComponent> OverlappingDialogue;
 
 	// 当前可抓捕的害虫（老鼠等突发事件生成；靠近时由害虫的交互球注册）
-	UPROPERTY(VisibleInstanceOnly)
+	UPROPERTY(VisibleInstanceOnly, Category = "Shoot|Character")
 	TObjectPtr<class APestActor> OverlappingPest;
 
 	// ============ 背包系统 ============
 	// 背包槽位：只记录物体的类型/信息，入包后世界中的物体会被销毁，取出时按类型重新生成
-	UPROPERTY(VisibleInstanceOnly, Category = "Inventory")
+	UPROPERTY(VisibleInstanceOnly, Category = "Shoot|Inventory")
 	TArray<FInventorySlot> InventoryItems;
 
 	// 背包容量上限(<=0 表示不限制)
-	UPROPERTY(EditAnywhere, Category = "Inventory")
+	UPROPERTY(EditAnywhere, Category = "Shoot|Inventory")
 	int32 InventoryCapacity = 0;
 
 	// 背包界面 Widget 类(蓝图继承 UInventoryWidget)
-	UPROPERTY(EditAnywhere, Category = "Inventory")
+	UPROPERTY(EditAnywhere, Category = "Shoot|Inventory")
 	TSubclassOf<UUserWidget> InventoryWidgetClass;
 
 	// 当前打开的背包 Widget 实例(仅持有一个，关闭时不销毁，再次打开复用)
@@ -228,17 +228,17 @@ private:
 	TObjectPtr<UInventoryWidget> InventoryWidget;
 
 	// 商店界面 Widget 类(蓝图继承 UShopWidget)
-	UPROPERTY(EditAnywhere, Category = "Shop")
+	UPROPERTY(EditAnywhere, Category = "Shoot|Shop")
 	TSubclassOf<UUserWidget> ShopWidgetClass;
 
 	// 当前打开的商店 Widget 实例(仅持有一个，关闭时不销毁，再次打开复用)
 	UPROPERTY()
 	TObjectPtr<UShopWidget> ShopWidget;
 
-	UPROPERTY(EditAnywhere, Category = Weapon)
+	UPROPERTY(EditAnywhere, Category = "Shoot|Weapon")
 	AWeapon* EquippedWeapon;
 
-	UPROPERTY(VisibleInstanceOnly)
+	UPROPERTY(VisibleInstanceOnly, Category = "Shoot|Character")
 	TObjectPtr<ACookingMachine> CookingMachine;
 
 	void PlayPickMontage(FName SelectionName);
@@ -274,112 +274,112 @@ bool CanAttack();
 protected:
 
 	/** Jump Input Action */
-	UPROPERTY(EditAnywhere, Category="Input")
+	UPROPERTY(EditAnywhere, Category = "Shoot|Input")
 	UInputAction* JumpAction;
 
 	/** Move Input Action */
-	UPROPERTY(EditAnywhere, Category="Input")
+	UPROPERTY(EditAnywhere, Category = "Shoot|Input")
 	UInputAction* MoveAction;
 
 	/** Look Input Action */
-	UPROPERTY(EditAnywhere, Category="Input")
+	UPROPERTY(EditAnywhere, Category = "Shoot|Input")
 	UInputAction* LookAction;
 
 	/** Mouse Look Input Action */
-	UPROPERTY(EditAnywhere, Category="Input")
+	UPROPERTY(EditAnywhere, Category = "Shoot|Input")
 	UInputAction* MouseLookAction;
 
 	/** Attack Input Action */
-	UPROPERTY(EditAnywhere, Category="Input")
+	UPROPERTY(EditAnywhere, Category = "Shoot|Input")
 	UInputAction* AttackAction;
 
 	/** 拾取 Input Action：在招揽台范围内按下也会触发招揽（与 AttractAction 合并，以本键为准） */
-	UPROPERTY(EditAnywhere, Category="Input")
+	UPROPERTY(EditAnywhere, Category = "Shoot|Input")
 	UInputAction* PickAction;
 	
-	UPROPERTY(EditAnywhere, Category="Input")
+	UPROPERTY(EditAnywhere, Category = "Shoot|Input")
 	UInputAction* PushFoodAction;//扔食物
 
-	UPROPERTY(EditAnywhere, Category="Input")
+	UPROPERTY(EditAnywhere, Category = "Shoot|Input")
 	UInputAction* WheelAction;//
 
 	/** 放入背包 Input Action (Q 键) */
-	UPROPERTY(EditAnywhere, Category="Input")
+	UPROPERTY(EditAnywhere, Category = "Shoot|Input")
 	UInputAction* StoreToInventoryAction;
 
 	/** 从背包取出(生成到手上) Input Action */
-	UPROPERTY(EditAnywhere, Category="Input")
+	UPROPERTY(EditAnywhere, Category = "Shoot|Input")
 	UInputAction* TakeOutInventoryAction;
 
 	/** 打开/关闭背包界面 Input Action (B 键) */
-	UPROPERTY(EditAnywhere, Category="Input")
+	UPROPERTY(EditAnywhere, Category = "Shoot|Input")
 	UInputAction* OpenInventoryAction;
 
 	/** 打开/关闭商店界面 Input Action (P 键) */
-	UPROPERTY(EditAnywhere, Category="Input")
+	UPROPERTY(EditAnywhere, Category = "Shoot|Input")
 	UInputAction* OpenShopAction;
 
 	/** 冲刺 Input Action (LeftShift)：按住加速移动，松开恢复 */
-	UPROPERTY(EditAnywhere, Category="Input")
+	UPROPERTY(EditAnywhere, Category = "Shoot|Input")
 	UInputAction* RushAction;
 
 	// ============ 冲刺 / 速度 ============
 	/** 常规行走速度（RushEnd 恢复到此值） */
-	UPROPERTY(EditDefaultsOnly, Category="Movement")
+	UPROPERTY(EditDefaultsOnly, Category = "Shoot|Movement")
 	float WalkSpeed = 600.f;
 
 	/** 冲刺速度 */
-	UPROPERTY(EditDefaultsOnly, Category="Movement")
+	UPROPERTY(EditDefaultsOnly, Category = "Shoot|Movement")
 	float SprintSpeed = 900.f;
 
 	/** 常规最大加速度（起步跟手程度） */
-	UPROPERTY(EditDefaultsOnly, Category="Movement")
+	UPROPERTY(EditDefaultsOnly, Category = "Shoot|Movement")
 	float WalkAcceleration = 3000.f;
 
 	/** 冲刺最大加速度：起步/转向时更快把实际速度拉到冲刺速
 	 *  （600→900 约 0.06s，观感接近瞬时但不产生速度阶跃） */
-	UPROPERTY(EditDefaultsOnly, Category="Movement")
+	UPROPERTY(EditDefaultsOnly, Category = "Shoot|Movement")
 	float SprintAcceleration = 5200.f;
 
 	/** 常规转向速率（Yaw） */
-	UPROPERTY(EditDefaultsOnly, Category="Movement")
+	UPROPERTY(EditDefaultsOnly, Category = "Shoot|Movement")
 	float WalkRotationRate = 500.f;
 
 	/** 冲刺转向速率（Yaw）：高速下转向更跟手 */
-	UPROPERTY(EditDefaultsOnly, Category="Movement")
+	UPROPERTY(EditDefaultsOnly, Category = "Shoot|Movement")
 	float SprintRotationRate = 720.f;
 
 	/** 起步脉冲：当帧把水平速度直接推到冲刺速度（速度阶跃）。
 	 *  注意：阶跃会让弹簧臂相机“先被甩开再追上来”，表现就是镜头猛地往前一突，
 	 *  因此默认关闭；需要的那点跟手感交给 SprintAcceleration 平滑加速完成。 */
-	UPROPERTY(EditDefaultsOnly, Category="Movement")
+	UPROPERTY(EditDefaultsOnly, Category = "Shoot|Movement")
 	bool bSprintInstantBurst = false;
 
 	/** 相机跟随速度（越大越贴住角色）。
 	 *  冲刺前后必须保持同一值——LagSpeed 一变，滞后量就跳变，镜头会前后抽动。 */
-	UPROPERTY(EditDefaultsOnly, Category="Movement")
+	UPROPERTY(EditDefaultsOnly, Category = "Shoot|Movement")
 	float CameraLagSpeed = 35.f;
 
 	/** 相机允许的最大滞后距离（0 = 不限制）。
 	 *  保持 0：LagSpeed 已固定，稳态滞后只有一二十厘米，无需夹紧；
 	 *  一旦设小值，滞后量会每帧撞上限被硬夹住，反而产生顿感。 */
-	UPROPERTY(EditDefaultsOnly, Category="Movement")
+	UPROPERTY(EditDefaultsOnly, Category = "Shoot|Movement")
 	float CameraLagMaxDistance = 0.f;
 
 	/** 是否启用冲刺 FOV 拉伸。关掉后镜头只提速不变焦，最不容易晕 */
-	UPROPERTY(EditDefaultsOnly, Category="Movement")
+	UPROPERTY(EditDefaultsOnly, Category = "Shoot|Movement")
 	bool bUseSprintFOV = false;
 
 	/** 非冲刺时的相机 FOV */
-	UPROPERTY(EditDefaultsOnly, Category="Movement")
+	UPROPERTY(EditDefaultsOnly, Category = "Shoot|Movement")
 	float NormalFOV = 90.f;
 
 	/** 冲刺时的相机 FOV（小幅拉大做速度感，过大容易晕） */
-	UPROPERTY(EditDefaultsOnly, Category="Movement")
+	UPROPERTY(EditDefaultsOnly, Category = "Shoot|Movement")
 	float SprintFOV = 92.f;
 
 	/** FOV 过渡速度：越大越快到位 */
-	UPROPERTY(EditDefaultsOnly, Category="Movement")
+	UPROPERTY(EditDefaultsOnly, Category = "Shoot|Movement")
 	float FOVInterpSpeed = 10.f;
 
 	/** 当前相机目标 FOV（Tick 中插值逼近） */
@@ -395,15 +395,15 @@ public:
 
 public:
 	
-	UFUNCTION(BlueprintCallable, Category="PickupInterface")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|PickupInterface")
 	virtual void SetOverlappingItem(AItemActor* Item) override;
 
 	// 物品进入交互范围：加入候选集并重选最近目标
-	UFUNCTION(BlueprintCallable, Category="PickupInterface")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|PickupInterface")
 	virtual void AddOverlappingItem(AItemActor* Item) override;
 
 	// 物品离开交互范围：从候选集移除并重选最近目标
-	UFUNCTION(BlueprintCallable, Category="PickupInterface")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|PickupInterface")
 	virtual void RemoveOverlappingItem(AItemActor* Item) override;
 
 	// 从候选集中选出距离最近的物品作为 OverlappingItem（同步描边与 HUD）
@@ -411,20 +411,20 @@ public:
 
 	// ============ 灶台候选集 ============
 	// 进入/离开时由 ACookingMachine 调用；CookingMachine 始终指向候选里最近的一台
-	UFUNCTION(BlueprintCallable, Category="PickupInterface")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|PickupInterface")
 	virtual void AddOverlappingCookMachine(ACookingMachine* Machine) override;
 
-	UFUNCTION(BlueprintCallable, Category="PickupInterface")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|PickupInterface")
 	virtual void RemoveOverlappingCookMachine(ACookingMachine* Machine) override;
 
 	void RefreshBestCookMachine();
 
 	// ============ 植物候选集 ============
 	// 进入/离开时由 APlant 调用；OverlappingPlant 始终指向候选里最近的一株
-	UFUNCTION(BlueprintCallable, Category="PickupInterface")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|PickupInterface")
 	virtual void AddOverlappingPlant(APlant* Plant) override;
 
-	UFUNCTION(BlueprintCallable, Category="PickupInterface")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|PickupInterface")
 	virtual void RemoveOverlappingPlant(APlant* Plant) override;
 
 	void RefreshBestPlant();
@@ -519,11 +519,11 @@ public:
 	UPROPERTY()
 	TObjectPtr<AActor> HighlightTarget;
 
-	UPROPERTY(EditDefaultsOnly, Category="Interaction")
+	UPROPERTY(EditDefaultsOnly, Category = "Shoot|Interaction")
 	bool bEnableInteractionHighlight = true;
 
 	/** 目标重估间隔（秒）：不必每帧，0.15s 足够跟手且几乎无开销 */
-	UPROPERTY(EditDefaultsOnly, Category="Interaction")
+	UPROPERTY(EditDefaultsOnly, Category = "Shoot|Interaction")
 	float InteractionRefreshInterval = 0.15f;
 
 	float InteractionRefreshTimer = 0.f;
@@ -531,105 +531,105 @@ public:
 	/** 上一次生效的 Shoot.InteractScale 倍率：变了就重设世界里所有交互球 */
 	float LastAppliedInteractionScale = 1.f;
 	
-	UFUNCTION(BlueprintCallable, Category="ShootCharacter")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Character")
 	FORCEINLINE AItemActor* GetOverlapItem() const { return OverlappingItem; }
 
 	// 植物交互：靠近时由 APlant 注册/反注册
-	UFUNCTION(BlueprintCallable, Category="Plant")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Plant")
 	void SetOverlappingPlant(APlant* Plant);
 
-	UFUNCTION(BlueprintCallable, Category="ShootCharacter")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Character")
 	FORCEINLINE APlant* GetOverlappingPlant() const { return OverlappingPlant; }
 
 	// 上菜台交互：靠近时由 AServingCounter 注册/反注册
-	UFUNCTION(BlueprintCallable, Category="Serve")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Serve")
 	void SetOverlappingCounter(AServingCounter* Counter);
 
-	UFUNCTION(BlueprintCallable, Category="ShootCharacter")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Character")
 	FORCEINLINE AServingCounter* GetOverlappingCounter() const { return OverlappingCounter; }
 
 	// 招揽台交互：靠近时由 AAttractCounter 注册/反注册
-	UFUNCTION(BlueprintCallable, Category="Attract")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Attract")
 	void SetOverlappingAttractCounter(AAttractCounter* Counter);
 
-	UFUNCTION(BlueprintCallable, Category="ShootCharacter")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Character")
 	FORCEINLINE AAttractCounter* GetOverlappingAttractCounter() const { return OverlappingAttractCounter; }
 
 	// 大门交互：靠近时由 AGateCounter 注册/反注册（用于 E 键开门营业）
-	UFUNCTION(BlueprintCallable, Category="Gate")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Gate")
 	void SetOverlappingGate(class AGateCounter* Gate);
 
-	UFUNCTION(BlueprintCallable, Category="ShootCharacter")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Character")
 	FORCEINLINE AGateCounter* GetOverlappingGate() const { return OverlappingGate; }
 
 	// 客人交互：靠近时由 AGuestCharacter 的交互球注册/反注册（用于 E 键接单）
-	UFUNCTION(BlueprintCallable, Category="Guest")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Guest")
 	void SetOverlappingGuest(AGuestCharacter* Guest);
 
-	UFUNCTION(BlueprintCallable, Category="ShootCharacter")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Character")
 	FORCEINLINE AGuestCharacter* GetOverlappingGuest() const { return OverlappingGuest; }
 
 	// 餐桌交互：靠近时由 AChairSeat 的交互球注册/反注册（用于 E 键点单 / 上菜 / 收空碟）
-	UFUNCTION(BlueprintCallable, Category="Chair")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Chair")
 	void SetOverlappingChairSeat(AChairSeat* Seat);
 
-	UFUNCTION(BlueprintCallable, Category="ShootCharacter")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Character")
 	FORCEINLINE AChairSeat* GetOverlappingChairSeat() const { return OverlappingChairSeat; }
 
 	// 洗碗机交互：靠近时由洗碗机的重叠球注册/反注册（用于 E 键交还脏碟）
-	UFUNCTION(BlueprintCallable, Category="Dishwasher")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Dishwasher")
 	void SetOverlappingDishwasher(ADishwasher* Dishwasher);
 
-	UFUNCTION(BlueprintCallable, Category="ShootCharacter")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Character")
 	FORCEINLINE ADishwasher* GetOverlappingDishwasher() const { return OverlappingDishwasher; }
 
 	// 空碟回收：靠近空碟时由空碟的回收球注册/反注册（用于 E 键收走空碟，方案B）
-	UFUNCTION(BlueprintCallable, Category="Dish")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Dish")
 	void SetOverlappingEmptyPlate(AItemActor* Plate);
 
-	UFUNCTION(BlueprintCallable, Category="ShootCharacter")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Character")
 	FORCEINLINE AItemActor* GetOverlappingEmptyPlate() const { return OverlappingEmptyPlate; }
 
 	// 研究炉交互：靠近时由研究炉的重叠球注册/反注册（用于 E 键投入食材研究新菜谱）
-	UFUNCTION(BlueprintCallable, Category="Research")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Research")
 	void SetOverlappingResearchStove(AResearchStove* Stove);
 
-	UFUNCTION(BlueprintCallable, Category="ShootCharacter")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Character")
 	FORCEINLINE AResearchStove* GetOverlappingResearchStove() const { return OverlappingResearchStove; }
 
 	// 仓库交互：靠近时由 AStorageWarehouse 的重叠球注册/反注册（用于 E 键把背包物品存入仓库）
-	UFUNCTION(BlueprintCallable, Category="Warehouse")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Warehouse")
 	void SetOverlappingWarehouse(AStorageWarehouse* Warehouse);
 
-	UFUNCTION(BlueprintCallable, Category="ShootCharacter")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Character")
 	FORCEINLINE AStorageWarehouse* GetOverlappingWarehouse() const { return OverlappingWarehouse; }
 
 
 	// 害虫交互：靠近时由 APestActor 的交互球注册/反注册（用于 E 键抓捕）
-	UFUNCTION(BlueprintCallable, Category="Pest")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Pest")
 	void SetOverlappingPest(APestActor* Pest);
 
-	UFUNCTION(BlueprintCallable, Category="ShootCharacter")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Character")
 	FORCEINLINE APestActor* GetOverlappingPest() const { return OverlappingPest; }
 
 	// 通用对话交互：靠近时由 UInteractionDialogueComponent 注册/反注册（用于 E 键对话）
-	UFUNCTION(BlueprintCallable, Category="Dialogue")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Dialogue")
 	void SetOverlappingDialogue(UInteractionDialogueComponent* Comp);
 
-	UFUNCTION(BlueprintCallable, Category="ShootCharacter")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Character")
 	FORCEINLINE UInteractionDialogueComponent* GetOverlappingDialogue() const { return OverlappingDialogue; }
 
 	FORCEINLINE void SetPickingItem(AItemActor* Item){PickingItem = Item;}
 
 	/** 交出/放下手上物品后复位手持状态（清空 PickingItem、动作状态与手部 IK）。
 	 *  上菜成功等"物品已交给别人"的分支统一调用，避免各处重复写一长串复位。 */
-	UFUNCTION(BlueprintCallable, Category="ShootCharacter")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Character")
 	void ClearHeldItemState();
 
-	UFUNCTION(BlueprintCallable, Category="ShootCharacter")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Character")
 	FORCEINLINE AItemActor* GetPickingItem() const { return PickingItem; }
 
-	UFUNCTION(BlueprintCallable, Category="ShootCharacter")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Character")
 	void SetEqiuppedWeapon(AWeapon* Weapon)
 	{
 		EquippedWeapon = Weapon;
@@ -640,72 +640,72 @@ public:
 		}
 	}
 
-	UFUNCTION(BlueprintCallable, Category="ShootCharacter")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Character")
 	FORCEINLINE AWeapon* GetEqiuppedWeapon() const { return EquippedWeapon; }
 
 	// ============ 背包系统 API ============
 	// 将手中/世界中的物品记录进背包，并销毁该物体(节省世界实例)；成功广播 OnInventoryChanged。
 	// 注意：这里记录的是"类型"，取出时按 ItemClass 重新生成。
-	UFUNCTION(BlueprintCallable, Category="Inventory")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Inventory")
 	bool AddItemToInventory(AItemActor* Item);
 
 	// 直接把一条背包槽位记录追加进背包（按 ItemClass 堆叠），并广播 OnInventoryChanged。
 	// 用于仓库取回等场景（不需要一个真实 Actor，仅搬运轻量记录）。
-	UFUNCTION(BlueprintCallable, Category="Inventory")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Inventory")
 	bool AddSlotToInventory(const FInventorySlot& Slot);
 
 	// 按槽位索引从背包移除(仅删记录，不会生成物体)；索引无效则失败。
-	UFUNCTION(BlueprintCallable, Category="Inventory")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Inventory")
 	bool RemoveItemFromInventory(int32 SlotIndex);
 
 	// 背包是否包含该槽位
-	UFUNCTION(BlueprintCallable, Category="Inventory")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Inventory")
 	bool HasItemInInventory(int32 SlotIndex) const;
 
 	// 背包槽位列表(只读)
-	UFUNCTION(BlueprintCallable, Category="Inventory")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Inventory")
 	const TArray<FInventorySlot>& GetInventoryItems() const { return InventoryItems; }
 
 	// 背包当前数量
-	UFUNCTION(BlueprintCallable, Category="Inventory")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Inventory")
 	int32 GetInventoryCount() const { return InventoryItems.Num(); }
 
 	// 背包是否已满(InventoryCapacity > 0 且已达上限)
-	UFUNCTION(BlueprintCallable, Category="Inventory")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Inventory")
 	bool IsInventoryFull() const;
 
 	// 把当前手上的物品(PickingItem)记录进背包并销毁之(手上无物品则无效)。
-	UFUNCTION(BlueprintCallable, Category="Inventory")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Inventory")
 	void StoreHeldItemToInventory();
 
 	// 从背包取出指定槽位物品：按记录的类型在手上重新生成 Actor 并作为 PickingItem 持有。
 	// 取出成功后该槽位从背包移除并广播 OnInventoryChanged。返回生成的 Actor(失败返回 nullptr)。
-	UFUNCTION(BlueprintCallable, Category="Inventory")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Inventory")
 	AItemActor* TakeOutInventoryItem(int32 SlotIndex);
 
 	// 取出背包中第一个物品(快捷键用)
-	UFUNCTION(BlueprintCallable, Category="Inventory")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Inventory")
 	void TakeOutFirstInventoryItem();
 
 	// 打开/关闭背包界面(B 键触发)；已打开则关闭，否则创建并刷新。
-	UFUNCTION(BlueprintCallable, Category="Inventory")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Inventory")
 	void ToggleInventory();
 
 	// 背包变化事件(物品增删时广播)
-	UPROPERTY(BlueprintAssignable, Category="Inventory")
+	UPROPERTY(BlueprintAssignable, Category = "Shoot|Inventory")
 	FOnInventoryChanged OnInventoryChanged;
 
 
 	virtual void SetCookMachineItem(ACookingMachine* Item) override;
 	
-	UFUNCTION(BlueprintCallable, Category="ShootCharacter")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Character")
 	FORCEINLINE ACookingMachine* GetCookMachineItem() const { return CookingMachine; }
 
-	UFUNCTION(BlueprintCallable, Category="ShootCharacter")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Character")
 	void SetPickingItemStatus();
 
 	/** 把物品直接拿在手上（挂到手部插槽并设为手持物），不放入背包。bSetAsPickingItem=false 时仅挂到手上不作为主手持物 */
-	UFUNCTION(BlueprintCallable, Category="ShootCharacter")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Character")
 	void HoldItemInHand(AItemActor* Item, bool bSetAsPickingItem = true);
 protected:
 
@@ -741,7 +741,7 @@ protected:
 	/** 正在消费缓冲按键：此时跳过"放下"兜底，避免刚捡起的东西被缓冲键立刻放掉 */
 	bool bConsumingBufferedPick = false;
 
-	UPROPERTY(EditDefaultsOnly, Category="Interaction|Buffer")
+	UPROPERTY(EditDefaultsOnly, Category = "Shoot|Interaction|Buffer")
 	float PickBufferWindow = 0.35f;
 
 	// ============ 按住 E 范围拾取（野外收割） ============
@@ -754,18 +754,18 @@ protected:
 	/** 身边是否贴着设备类交互目标（灶台/上菜台/门等）：有的话不吸，避免把待加工食材吸走 */
 	bool HasBlockingInteractionTarget() const;
 
-	UPROPERTY(EditDefaultsOnly, Category="Interaction|RangePick")
+	UPROPERTY(EditDefaultsOnly, Category = "Shoot|Interaction|RangePick")
 	bool bRangePickEnabled = true;
 
-	UPROPERTY(EditDefaultsOnly, Category="Interaction|RangePick")
+	UPROPERTY(EditDefaultsOnly, Category = "Shoot|Interaction|RangePick")
 	float RangePickRadius = 150.f;
 
 	/** 按住多久后才进入范围拾取（短按仍然只做一次普通交互） */
-	UPROPERTY(EditDefaultsOnly, Category="Interaction|RangePick")
+	UPROPERTY(EditDefaultsOnly, Category = "Shoot|Interaction|RangePick")
 	float RangePickHoldTime = 0.25f;
 
 	/** 连续吸取的间隔 */
-	UPROPERTY(EditDefaultsOnly, Category="Interaction|RangePick")
+	UPROPERTY(EditDefaultsOnly, Category = "Shoot|Interaction|RangePick")
 	float RangePickInterval = 0.12f;
 
 	bool bPickHeld = false;
@@ -792,70 +792,70 @@ protected:
 	
 	void HandleEventCallbackFunc();
 	
-	UFUNCTION(BlueprintCallable)
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Character")
 	void SetWeaponCollisionEnabled(ECollisionEnabled::Type CollisionEnabled);
 	
 public:
 
 	/** Handles move inputs from either controls or UI interfaces */
-	UFUNCTION(BlueprintCallable, Category="Input")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Input")
 	virtual void DoMove(float Right, float Forward);
 
 	/** Handles look inputs from either controls or UI interfaces */
-	UFUNCTION(BlueprintCallable, Category="Input")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Input")
 	virtual void DoLook(float Yaw, float Pitch);
 
 	/** Handles jump pressed inputs from either controls or UI interfaces */
-	UFUNCTION(BlueprintCallable, Category="Input")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Input")
 	virtual void DoJumpStart();
 
 	/** Handles jump pressed inputs from either controls or UI interfaces */
-	UFUNCTION(BlueprintCallable, Category="Input")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Input")
 	virtual void DoJumpEnd();
 
-	UFUNCTION(BlueprintCallable, Category="Input")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Input")
 	virtual void DoAttack();
 
-	UFUNCTION(BlueprintCallable, Category="Input")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Input")
 	virtual void DoPick();
 
-	UFUNCTION(BlueprintCallable, Category="Input")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Input")
 	virtual void DoSpwan();
 
-	UFUNCTION(BlueprintCallable, Category="Input")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Input")
 	virtual void DoSpwanOther();
 	
-	UFUNCTION(BlueprintCallable, Category="Input")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Input")
 	virtual void DoDropDown();
 
-	UFUNCTION(BlueprintCallable, Category="Input")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Input")
 	virtual void OnPushFoodComplete();
 	
-	UFUNCTION(BlueprintCallable, Category="Input")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Input")
 	virtual void DoThrow();
 
-	UFUNCTION(BlueprintCallable, Category="Input")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Input")
 	virtual void DoRepair();
 
-	UFUNCTION(BlueprintCallable, Category="Input")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Input")
 	virtual void DoRepairEnd();
 
-	UFUNCTION(BlueprintCallable, Category="Input")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Input")
 	virtual void DoPutDish();
 
-	UFUNCTION(BlueprintCallable, Category="Input")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Input")
 	virtual void DoGiveDishToGuest();
 
-	UFUNCTION(BlueprintCallable, Category="Input")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Input")
 	virtual void DoPushDishTest();
 
-	UFUNCTION(BlueprintCallable, Category="Character")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Character")
 	void TriggerDeadFunc(int32 RebirthTime);
 	
-	UFUNCTION(BlueprintImplementableEvent, Category="Character Events")
+	UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|Character Events")
 	void OnCountdownFinishedEvent();
 
-	UFUNCTION(BlueprintImplementableEvent, Category="Character Events")
+	UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|Character Events")
 	void OnUpdateCountdownEvent();
 	
 public:
@@ -871,58 +871,84 @@ public:
 	/** 按 bUseTopDownCamera 同步相机臂参数与朝向，每帧调用以支持运行时切换 */
 	void UpdateCameraView();
 
+	/** 按关卡里的相机区域 Volume 更新 bInsideCameraArea / bUseTopDownCamera（带进出回差） */
+	void UpdateCameraAreaState();
+
 	/** 是否使用俯视（Topdown）相机；关闭即恢复原来的第三人称跟随视角 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Camera")
 	bool bUseTopDownCamera = true;
 
 	/** 俯视相机臂长，越大视野越广 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera", meta = (EditCondition = "bUseTopDownCamera", ClampMin = "100.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Camera", meta = (EditCondition = "bUseTopDownCamera", ClampMin = "100.0"))
 	float TopDownArmLength = 1400.0f;
 
 	/** 俯视相机俯仰角（负值向下看，-62 约为斜俯视） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera", meta = (EditCondition = "bUseTopDownCamera", ClampMin = "-89.0", ClampMax = "-15.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Camera", meta = (EditCondition = "bUseTopDownCamera", ClampMin = "-89.0", ClampMax = "-15.0"))
 	float TopDownPitch = -62.0f;
 
 	/** 俯视时相机是否跟随鼠标左右旋转；关闭则固定朝向世界 +X */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera", meta = (EditCondition = "bUseTopDownCamera"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Camera", meta = (EditCondition = "bUseTopDownCamera"))
 	bool bTopDownYawFollowsControl = true;
 
 	/** 非俯视（第三人称跟随）模式下的相机臂长；默认 650，比原 400 更宽松，不贴脸 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera", meta = (EditCondition = "!bUseTopDownCamera", ClampMin = "100.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Camera", meta = (EditCondition = "!bUseTopDownCamera", ClampMin = "100.0"))
 	float ThirdPersonArmLength = 650.0f;
 
 	/** 臂长切换/调整时的插值速度（0 =  instantly） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera", meta = (ClampMin = "0.1"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Camera", meta = (ClampMin = "0.1"))
 	float ArmLengthInterpSpeed = 6.0f;
+
+	/** 是否按关卡里摆放的 CameraAreaVolume 自动切换俯视 / 第三人称；关闭后视角完全由 bUseTopDownCamera 控制 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Camera|Area")
+	bool bAutoSwitchCameraByAreaVolume = true;
+
+	/** 进出判定回差（cm）：已在区域内时查询半径向外扩张，避免站在边界上视角来回闪 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Camera|Area", meta = (ClampMin = "0.0"))
+	float CameraAreaHysteresis = 80.0f;
+
+	/** 俯视 / 第三人称相互切换的平滑速度；越小过渡越慢越柔 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Camera|Area", meta = (ClampMin = "0.1"))
+	float CameraModeBlendSpeed = 2.5f;
+
+	/** 当前是否处在任一相机区域体积内（运行时） */
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Camera|Area")
+	bool bInsideCameraArea = false;
+
+	/** 当前镜头混合权重：0 = 第三人称，1 = 俯视（运行时，可用于调试） */
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Camera|Area")
+	float CameraViewAlpha = 0.0f;
+
+	/** 首帧直接对齐目标视角，避免开局从 CDO 视角缓动过去 */
+	bool bCameraViewInitialized = false;
 	
-	UPROPERTY(BlueprintReadWrite, Category="Character State")
+	UPROPERTY(BlueprintReadWrite, Category = "Shoot|Character State")
      ECharacterState CharacterState = ECharacterState::ECS_Idle;
 	
-     UPROPERTY(BlueprintReadWrite, Category="Character State")
+     UPROPERTY(BlueprintReadWrite, Category = "Shoot|Character State")
 	 ECharacterActionState CharacterActionState = ECharacterActionState::EAS_Unoccupied;
 	
-	 UPROPERTY(EditDefaultsOnly, Category="Montages")
+	 UPROPERTY(EditDefaultsOnly, Category = "Shoot|Montages")
 	 UAnimMontage* AttackMontage;
 
- 	 UPROPERTY(EditDefaultsOnly, Category="Montages")
+ 	 UPROPERTY(EditDefaultsOnly, Category = "Shoot|Montages")
 	 UAnimMontage* PickMontage;
 
-	UPROPERTY(EditDefaultsOnly, Category="Montages")
+	UPROPERTY(EditDefaultsOnly, Category = "Shoot|Montages")
 	UAnimMontage* PutDownMontage;
 
-	 UPROPERTY(EditDefaultsOnly, Category="Montages")
+	 UPROPERTY(EditDefaultsOnly, Category = "Shoot|Montages")
 	 UAnimMontage* ThrowMontage;
 
 	/** 采集（摘取植被）动画：在触发植物收获时播放 */
-	UPROPERTY(EditDefaultsOnly, Category="Montages")
+	UPROPERTY(EditDefaultsOnly, Category = "Shoot|Montages")
 	UAnimMontage* GatheringMontage;
 
 	/** 浇水动画：在触发给植被浇水时播放 */
-	UPROPERTY(EditDefaultsOnly, Category="Montages")
+	UPROPERTY(EditDefaultsOnly, Category = "Shoot|Montages")
 	UAnimMontage* WateringMontage;
 
 	/** 采集时是否让角色转向（朝向）待采摘的植被；关闭则保持原朝向。默认开启。 */
-	UPROPERTY(EditDefaultsOnly, Category="Montages")
+	UPROPERTY(EditDefaultsOnly, Category = "Shoot|Montages")
 	bool bFacePlantWhenGathering = true;
 
 	/** 采集蒙太奇结束委托（用于动画播完后才真正收获并删除植物） */
@@ -950,18 +976,18 @@ public:
 	bool bHasInteractFaceRotation = false;
 
 
-	 UFUNCTION(BlueprintImplementableEvent, Category="Character Events")
+	 UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|Character Events")
 	 void OnPickEvent();	
 
-	 UFUNCTION(BlueprintImplementableEvent, Category="Character Events")
+	 UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|Character Events")
 	 void OnReleasePickEvent();
 
-	UFUNCTION(BlueprintImplementableEvent, Category="Character Events")
+	UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|Character Events")
 	void OnThrowSucessEvent();
 
 public:
 
-	UPROPERTY(EditAnywhere,BlueprintReadWrite,Category="ShootCharacter")
+	UPROPERTY(EditAnywhere,BlueprintReadWrite,Category = "Shoot|Character")
 	TObjectPtr<USkeletalMeshComponent> RetargetMesh;
 
 	FORCEINLINE ECharacterState GetCharacterState() const { return CharacterState; }
@@ -970,21 +996,21 @@ public:
 	//FORCEINLINE void SetCharacterActionState(ECharacterActionState State){ CharacterActionState = State;}
 	//FORCEINLINE void SetCharacterState(ECharacterState State){ CharacterState = State;}
 
-	UPROPERTY(BlueprintReadOnly, Category = IK)
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|IK")
 	float FBIK_Alpha;
 
 	USceneComponent* HandIK_LPoint;
 	USceneComponent* HandIK_RPoint;
 	UShootAnimInstance* CacheAnimInstance;
 	
-	UPROPERTY(EditAnywhere,BlueprintReadWrite)
+	UPROPERTY(EditAnywhere,BlueprintReadWrite, Category = "Shoot|Character")
 	FName ItemSocketName;
 
 	
 	// 倒计时变量
-	UPROPERTY(BlueprintReadOnly, Category  = "ShootCharacter")
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Character")
 	int32 CountdownTime;
-	UPROPERTY(BlueprintReadWrite, Category = "ShootCharacter")
+	UPROPERTY(BlueprintReadWrite, Category = "Shoot|Character")
 	bool FreezeInput = true;
 
 	TObjectPtr<UMaterialInterface> BaseGrayscaleMaterial;
@@ -992,7 +1018,7 @@ public:
 private:
 
 
-	UPROPERTY(EditAnywhere, Category = "Debug")
+	UPROPERTY(EditAnywhere, Category = "Shoot|Debug")
 	bool bRotationPicth = true;
 
 	// 控制变量
@@ -1006,25 +1032,25 @@ private:
 	// 当前目标旋转
 	FRotator TargetTurnRotation;
     
-	UPROPERTY(EditAnywhere, Category = "Projectile")
+	UPROPERTY(EditAnywhere, Category = "Shoot|Projectile")
 	float MaxVerticalAngle = 60.0f;   // 最大仰角
     
-	UPROPERTY(EditAnywhere, Category = "Projectile")
+	UPROPERTY(EditAnywhere, Category = "Shoot|Projectile")
 	float MinVerticalAngle = -30.0f;   // 最小仰角
 	
-	UPROPERTY(EditAnywhere, Category = "Projectile")
+	UPROPERTY(EditAnywhere, Category = "Shoot|Projectile")
 	float MaxPredictionTime = 5.0f;
 	// 绘制参数
-	UPROPERTY(EditAnywhere, Category = "Debug")
+	UPROPERTY(EditAnywhere, Category = "Shoot|Debug")
 	float PointSize = 10.0f;
     
-	UPROPERTY(EditAnywhere, Category = "Debug")
+	UPROPERTY(EditAnywhere, Category = "Shoot|Debug")
 	FColor PointColor = FColor::Green;
     
-	UPROPERTY(EditAnywhere, Category = "Debug")
+	UPROPERTY(EditAnywhere, Category = "Shoot|Debug")
 	bool bDrawLines = true;
     
-	UPROPERTY(EditAnywhere, Category = "Debug")
+	UPROPERTY(EditAnywhere, Category = "Shoot|Debug")
 	FColor LineColor = FColor::Red;
     
 	// 存储的路径点

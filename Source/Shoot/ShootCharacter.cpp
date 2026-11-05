@@ -24,6 +24,8 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "GameFramework/Controller.h"
+#include "Camera/CameraAreaVolume.h"
+#include "EngineUtils.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputActionValue.h"
@@ -2036,12 +2038,39 @@ void AShootCharacter::DoLook(float Yaw, float Pitch)
 	{
 		// 仅保留左右旋转，禁止上下俯仰；俯视模式固定俯仰角，鼠标纵向不再改变视角
 		AddControllerYawInput(Yaw);
-		if (bRotationPicth && !bUseTopDownCamera)
+		// 俯视 / 过渡过程中禁用俯仰，完全回到第三人称后才放开，避免鼠标把俯仰带进切换过程
+		if (bRotationPicth && CameraViewAlpha < 0.01f)
 		{
 			AddControllerPitchInput(Pitch);
 		}
 		
 	}
+}
+
+void AShootCharacter::UpdateCameraAreaState()
+{
+	if (!bAutoSwitchCameraByAreaVolume || GetWorld() == nullptr)
+	{
+		return;
+	}
+
+	const FVector Location = GetActorLocation();
+	// 已在区域内时查询半径向外扩张，形成回差，避免站在边界上视角反复切换
+	const float ExtraRadius = bInsideCameraArea ? CameraAreaHysteresis : 0.0f;
+
+	bool bInside = false;
+	for (TActorIterator<ACameraAreaVolume> It(GetWorld()); It; ++It)
+	{
+		const ACameraAreaVolume* Area = *It;
+		if (Area != nullptr && Area->bCameraAreaActive && Area->IsLocationInside(Location, ExtraRadius))
+		{
+			bInside = true;
+			break;
+		}
+	}
+
+	bInsideCameraArea = bInside;
+	bUseTopDownCamera = bInside;
 }
 
 void AShootCharacter::UpdateCameraView()
@@ -2051,58 +2080,57 @@ void AShootCharacter::UpdateCameraView()
 		return;
 	}
 
+	UpdateCameraAreaState();
+
 	const float DeltaTime = GetWorld() ? GetWorld()->GetDeltaSeconds() : 0.016f;
+	const float TargetAlpha = bUseTopDownCamera ? 1.0f : 0.0f;
 
-	if (!bUseTopDownCamera)
+	if (!bCameraViewInitialized)
 	{
-		// 回到原第三人称：相机臂跟随控制旋转，臂长使用 ThirdPersonArmLength
-		if (CameraBoom->IsUsingAbsoluteRotation())
+		CameraViewAlpha = TargetAlpha;
+		bCameraViewInitialized = true;
+	}
+	else if (CameraModeBlendSpeed > 0.0f)
+	{
+		CameraViewAlpha = FMath::FInterpTo(CameraViewAlpha, TargetAlpha, DeltaTime, CameraModeBlendSpeed);
+		if (FMath::IsNearlyEqual(CameraViewAlpha, TargetAlpha, 0.001f))
 		{
-			CameraBoom->SetUsingAbsoluteRotation(false);
+			CameraViewAlpha = TargetAlpha;
 		}
-		CameraBoom->bUsePawnControlRotation = true;
-
-		const float TargetArm = ThirdPersonArmLength;
-		if (!FMath::IsNearlyEqual(CameraBoom->TargetArmLength, TargetArm, 0.1f))
-		{
-			CameraBoom->TargetArmLength = ArmLengthInterpSpeed > 0.f
-				? FMath::FInterpTo(CameraBoom->TargetArmLength, TargetArm, DeltaTime, ArmLengthInterpSpeed)
-				: TargetArm;
-		}
-		return;
+	}
+	else
+	{
+		CameraViewAlpha = TargetAlpha;
 	}
 
+	// 两种视角统一由世界旋转驱动：切换 bUsePawnControlRotation / 绝对旋转的瞬间会硬跳
+	CameraBoom->bUsePawnControlRotation = false;
 	if (!CameraBoom->IsUsingAbsoluteRotation())
 	{
 		CameraBoom->SetUsingAbsoluteRotation(true);
 	}
-	CameraBoom->bUsePawnControlRotation = false;
 
-	// 臂长平滑过渡：避免切模式时画面距离跳变
-	const float TargetArm = TopDownArmLength;
-	if (!FMath::IsNearlyEqual(CameraBoom->TargetArmLength, TargetArm, 0.1f))
-	{
-		CameraBoom->TargetArmLength = ArmLengthInterpSpeed > 0.f
-			? FMath::FInterpTo(CameraBoom->TargetArmLength, TargetArm, DeltaTime, ArmLengthInterpSpeed)
-			: TargetArm;
-	}
+	const FRotator ControlRotation = GetControlRotation();
+	const FRotator ThirdPersonRotation(ControlRotation.Pitch, ControlRotation.Yaw, 0.0f);
 
-	float Yaw = 0.0f;
+	FRotator TopDownRotation(TopDownPitch, 0.0f, 0.0f);
 	if (bTopDownYawFollowsControl)
 	{
-		if (const AController* OwningController = GetController())
-		{
-			Yaw = OwningController->GetControlRotation().Yaw;
-		}
+		TopDownRotation.Yaw = ControlRotation.Yaw;
 	}
 
-	// 俯视朝向也做平滑插值，避免 0/360 跳变和模式切换时瞬间甩镜头
-	const FRotator DesiredRotation(TopDownPitch, Yaw, 0.0f);
-	const FRotator CurrentRotation = CameraBoom->GetComponentRotation();
-	if (!CurrentRotation.Equals(DesiredRotation, 0.01f))
-	{
-		CameraBoom->SetWorldRotation(FMath::RInterpTo(CurrentRotation, DesiredRotation, DeltaTime, 8.0f));
-	}
+	// 两个目标朝向之间按混合权重球面插值，过渡时俯仰、朝向连续变化
+	const FRotator DesiredRotation = FQuat::Slerp(
+		ThirdPersonRotation.Quaternion(),
+		TopDownRotation.Quaternion(),
+		CameraViewAlpha).Rotator();
+	CameraBoom->SetWorldRotation(DesiredRotation);
+
+	// 臂长随同一权重过渡，保证距离和俯仰同步到位
+	const float TargetArm = FMath::Lerp(ThirdPersonArmLength, TopDownArmLength, CameraViewAlpha);
+	CameraBoom->TargetArmLength = ArmLengthInterpSpeed > 0.0f
+		? FMath::FInterpTo(CameraBoom->TargetArmLength, TargetArm, DeltaTime, ArmLengthInterpSpeed)
+		: TargetArm;
 }
 
 void AShootCharacter::DoJumpStart()
