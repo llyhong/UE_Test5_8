@@ -7,8 +7,25 @@
 #include "DrawDebugHelpers.h"
 #include "GameFramework/Pawn.h"
 #include "Components/StaticMeshComponent.h"
+#include "Game/BaseGameInstance.h"
+#include "Game/BusinessTime.h"
 #include "Item/ItemActor.h"
 #include "LandscapeHeightfieldCollisionComponent.h"
+
+namespace
+{
+	const TCHAR* SeasonToText(ESeason Season)
+	{
+		switch (Season)
+		{
+		case ESeason::Spring: return TEXT("春");
+		case ESeason::Summer: return TEXT("夏");
+		case ESeason::Autumn: return TEXT("秋");
+		case ESeason::Winter: return TEXT("冬");
+		default: return TEXT("?");
+		}
+	}
+}
 
 AItemScatterSpawner::AItemScatterSpawner()
 {
@@ -54,6 +71,7 @@ void AItemScatterSpawner::BeginPlay()
 	Super::BeginPlay();
 
 	EnsureRandomReady();
+	EnsureTimeSystemBound();
 
 	if (bSpawnOnBeginPlay)
 	{
@@ -63,6 +81,13 @@ void AItemScatterSpawner::BeginPlay()
 
 void AItemScatterSpawner::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	if (BoundTimeSystem)
+	{
+		BoundTimeSystem->OnDayChanged.RemoveAll(this);
+		BoundTimeSystem->OnSeasonChanged.RemoveAll(this);
+		BoundTimeSystem = nullptr;
+	}
+
 	// 回收到本生成器撒出的实例，避免切关卡/重开后残留
 	for (FScatterSlot& Slot : Slots)
 	{
@@ -80,6 +105,15 @@ void AItemScatterSpawner::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 
+	// 关卡可能用 BusinessSimulation 蓝图子类重建时钟：每次 Tick 做一次幂等重绑检查（不重复加委托）
+	EnsureTimeSystemBound();
+
+	// 自动重生关闭时无需每帧轮询；每日刷新与换季由时间系统事件驱动
+	if (!bAutoRespawn)
+	{
+		return;
+	}
+
 	if (!bRandReady)
 	{
 		EnsureRandomReady();
@@ -87,14 +121,11 @@ void AItemScatterSpawner::Tick(float DeltaSeconds)
 
 	UpdateRespawnTimers(DeltaSeconds);
 
-	if (bAutoRespawn)
+	CheckAccum += DeltaSeconds;
+	if (CheckAccum >= PickCheckInterval)
 	{
-		CheckAccum += DeltaSeconds;
-		if (CheckAccum >= PickCheckInterval)
-		{
-			CheckAccum = 0.f;
-			CheckPickedUpItems();
-		}
+		CheckAccum = 0.f;
+		CheckPickedUpItems();
 	}
 }
 
@@ -106,6 +137,140 @@ void AItemScatterSpawner::EnsureRandomReady()
 	}
 	Rand.Initialize(RandomSeed != 0 ? RandomSeed : FMath::Rand());
 	bRandReady = true;
+}
+
+// ==================== 季节 / 每日刷新 ====================
+
+void AItemScatterSpawner::EnsureTimeSystemBound()
+{
+	UWorld* World = GetWorld();
+	UBaseGameInstance* GI = World ? Cast<UBaseGameInstance>(World->GetGameInstance()) : nullptr;
+	UTimeSystem* Current = (GI && GI->businessSimulation) ? GI->businessSimulation->TimeSystem.Get() : nullptr;
+
+	if (Current == BoundTimeSystem.Get())
+	{
+		return;
+	}
+
+	if (BoundTimeSystem)
+	{
+		BoundTimeSystem->OnDayChanged.RemoveAll(this);
+		BoundTimeSystem->OnSeasonChanged.RemoveAll(this);
+		BoundTimeSystem = nullptr;
+	}
+
+	if (Current)
+	{
+		BoundTimeSystem = Current;
+		CurrentSeason = Current->GetSeason();
+		Current->OnDayChanged.AddDynamic(this, &AItemScatterSpawner::HandleDayChanged);
+		Current->OnSeasonChanged.AddDynamic(this, &AItemScatterSpawner::HandleSeasonChanged);
+	}
+}
+
+ESeason AItemScatterSpawner::GetCurrentSeason() const
+{
+	if (BoundTimeSystem)
+	{
+		return BoundTimeSystem->GetSeason();
+	}
+
+	if (const UWorld* World = GetWorld())
+	{
+		if (const UBaseGameInstance* GI = Cast<UBaseGameInstance>(World->GetGameInstance()))
+		{
+			if (GI->businessSimulation && GI->businessSimulation->TimeSystem)
+			{
+				return GI->businessSimulation->TimeSystem->GetSeason();
+			}
+		}
+	}
+
+	return CurrentSeason;
+}
+
+void AItemScatterSpawner::HandleDayChanged(int32 InYear, int32 InMonth, int32 InDay)
+{
+	if (!bRefreshDaily)
+	{
+		return;
+	}
+
+	EnsureRandomReady();
+	RollDailyEntryAvailability();
+
+	// SpawnCount 可能被运行时调大：先补够坑位数
+	while (Slots.Num() < SpawnCount)
+	{
+		FScatterSlot NewSlot;
+		Slots.Add(NewSlot);
+	}
+
+	int32 AliveCount = GetAliveCount();
+	if (AliveCount >= SpawnCount)
+	{
+		return;
+	}
+
+	RebuildWorldReserved();
+
+	int32 Refilled = 0;
+	for (int32 i = 0; i < Slots.Num(); ++i)
+	{
+		if (AliveCount >= SpawnCount)
+		{
+			break;
+		}
+
+		FScatterSlot& Slot = Slots[i];
+		// 已被占用，或在等自动重生，就不重复刷
+		if (IsValid(Slot.Actor) || Slot.RespawnCountdown > 0.f)
+		{
+			continue;
+		}
+		if (Rand.FRand() > DailyRefreshChance)
+		{
+			continue;
+		}
+
+		const int32 EntryIndex = PickEntryIndex(true);
+		if (EntryIndex == INDEX_NONE)
+		{
+			// 今天摇中的项都已达上限 / 都不在季节内
+			continue;
+		}
+
+		Slot.EntryIndex = EntryIndex;
+		if (SpawnIntoSlot(i, false))
+		{
+			++AliveCount;
+			++Refilled;
+		}
+	}
+
+	UE_LOG(LogTemp, Verbose, TEXT("[ItemScatterSpawner] 分区 %s 第 %d 天（%d-%02d-%02d，%s）补刷 %d 个"),
+		*ZoneLabel.ToString(), InDay, InYear, InMonth, InDay, SeasonToText(GetCurrentSeason()), Refilled);
+}
+
+void AItemScatterSpawner::HandleSeasonChanged(ESeason OldSeason, ESeason NewSeason)
+{
+	CurrentSeason = NewSeason;
+
+	UE_LOG(LogTemp, Log, TEXT("[ItemScatterSpawner] 分区 %s 换季：%s → %s"),
+		*ZoneLabel.ToString(), SeasonToText(OldSeason), SeasonToText(NewSeason));
+
+	if (!bSeasonAware || !bClearOnSeasonChange)
+	{
+		return;
+	}
+
+	// 过期不候：上一季的野外采集物全部消失（玩家手里拿着的保留），再按新季节重新撒
+	const bool bHadSlots = Slots.Num() > 0;
+	ClearAllSpawned();
+	if (bHadSlots || bSpawnOnBeginPlay)
+	{
+		SpawnAll();
+	}
 }
 
 // ==================== 生成 ====================
@@ -122,13 +287,21 @@ void AItemScatterSpawner::SpawnAll()
 	}
 
 	RebuildWorldReserved();
+	RollDailyEntryAvailability();
 
 	// 先按 SpawnCount 建好坑位，再逐个尝试落位；落不下的坑位会在之后的重生流程里继续尝试
 	Slots.Reserve(SpawnCount);
 	for (int32 i = 0; i < SpawnCount; ++i)
 	{
 		FScatterSlot NewSlot;
-		NewSlot.EntryIndex = PickEntryIndex();
+
+		// 开局按"当天稀有度"选材；若所有稀有项都没摇中，兜底再挑一次，避免野外空无一物
+		int32 EntryIndex = PickEntryIndex(true);
+		if (EntryIndex == INDEX_NONE)
+		{
+			EntryIndex = PickEntryIndex(false);
+		}
+		NewSlot.EntryIndex = EntryIndex;
 		Slots.Add(NewSlot);
 
 		if (!SpawnIntoSlot(Slots.Num() - 1, false))
@@ -183,15 +356,11 @@ AItemActor* AItemScatterSpawner::SpawnIntoSlot(int32 SlotIndex, bool bUseOrigina
 		return nullptr;
 	}
 
-	// 决定这一坑用哪种食材（原坑那类已满则换一类）
+	// 决定这一坑用哪种食材（原坑那类不可用——已满 / 不在当前季节——则换一类）
 	int32 EntryIndex = Slot.EntryIndex;
-	if (!Entries.IsValidIndex(EntryIndex))
+	if (!IsEntryAvailable(EntryIndex, false))
 	{
-		EntryIndex = PickEntryIndex();
-	}
-	else if (Entries[EntryIndex].MaxAlive > 0 && CountAliveOfEntry(EntryIndex) >= Entries[EntryIndex].MaxAlive)
-	{
-		EntryIndex = PickEntryIndex();
+		EntryIndex = PickEntryIndex(false);
 	}
 	if (!Entries.IsValidIndex(EntryIndex) || !Entries[EntryIndex].ItemClass)
 	{
@@ -280,7 +449,11 @@ void AItemScatterSpawner::ClearAllSpawned()
 		if (IsValid(Slot.Actor))
 		{
 			Slot.Actor->OnDestroyed.RemoveAll(this);
-			Slot.Actor->Destroy();
+			// 玩家手上拿着的（换季时）不回收，已离开野外；不做 Destroy，避免把玩家物品一起删掉
+			if (!IsHeldByPlayer(Slot.Actor))
+			{
+				Slot.Actor->Destroy();
+			}
 		}
 	}
 	Slots.Reset();
@@ -463,21 +636,61 @@ bool AItemScatterSpawner::IsSpawnedByMe(const AItemActor* Item) const
 
 // ==================== 选食材 ====================
 
-int32 AItemScatterSpawner::PickEntryIndex()
+bool AItemScatterSpawner::IsEntryAvailable(int32 EntryIndex, bool bUseDailyFilter) const
+{
+	if (!Entries.IsValidIndex(EntryIndex))
+	{
+		return false;
+	}
+
+	const FScatterSpawnEntry& Entry = Entries[EntryIndex];
+	if (!Entry.ItemClass)
+	{
+		return false;
+	}
+
+	// 季节过滤：Seasons 留空 = 四季通用
+	if (bSeasonAware && Entry.Seasons.Num() > 0 && !Entry.Seasons.Contains(GetCurrentSeason()))
+	{
+		return false;
+	}
+
+	// 每类数量上限
+	if (Entry.MaxAlive > 0 && CountAliveOfEntry(EntryIndex) >= Entry.MaxAlive)
+	{
+		return false;
+	}
+
+	// 当天稀有度：DailySpawnChance 没摇中的项当天不参与刷新
+	if (bUseDailyFilter && DailyEntryAvailable.IsValidIndex(EntryIndex) && !DailyEntryAvailable[EntryIndex])
+	{
+		return false;
+	}
+
+	return true;
+}
+
+void AItemScatterSpawner::RollDailyEntryAvailability()
+{
+	EnsureRandomReady();
+
+	DailyEntryAvailable.Reset(Entries.Num());
+	for (const FScatterSpawnEntry& Entry : Entries)
+	{
+		const float Chance = FMath::Clamp(Entry.DailySpawnChance, 0.f, 1.f);
+		DailyEntryAvailable.Add(Chance >= 1.f || Rand.FRand() <= Chance);
+	}
+}
+
+int32 AItemScatterSpawner::PickEntryIndex(bool bUseDailyFilter)
 {
 	float TotalWeight = 0.f;
 	for (int32 i = 0; i < Entries.Num(); ++i)
 	{
-		const FScatterSpawnEntry& Entry = Entries[i];
-		if (!Entry.ItemClass)
+		if (IsEntryAvailable(i, bUseDailyFilter))
 		{
-			continue;
+			TotalWeight += FMath::Max(Entries[i].Weight, 0.01f);
 		}
-		if (Entry.MaxAlive > 0 && CountAliveOfEntry(i) >= Entry.MaxAlive)
-		{
-			continue;
-		}
-		TotalWeight += FMath::Max(Entry.Weight, 0.01f);
 	}
 
 	if (TotalWeight <= 0.f)
@@ -486,33 +699,23 @@ int32 AItemScatterSpawner::PickEntryIndex()
 	}
 
 	float Pick = Rand.FRandRange(0.f, TotalWeight);
+	int32 LastAvailable = INDEX_NONE;
 	for (int32 i = 0; i < Entries.Num(); ++i)
 	{
-		const FScatterSpawnEntry& Entry = Entries[i];
-		if (!Entry.ItemClass)
+		if (!IsEntryAvailable(i, bUseDailyFilter))
 		{
 			continue;
 		}
-		if (Entry.MaxAlive > 0 && CountAliveOfEntry(i) >= Entry.MaxAlive)
-		{
-			continue;
-		}
-		Pick -= FMath::Max(Entry.Weight, 0.01f);
+		LastAvailable = i;
+		Pick -= FMath::Max(Entries[i].Weight, 0.01f);
 		if (Pick <= 0.f)
 		{
 			return i;
 		}
 	}
 
-	// 数值误差兜底：返回最后一个可用项
-	for (int32 i = Entries.Num() - 1; i >= 0; --i)
-	{
-		if (Entries[i].ItemClass)
-		{
-			return i;
-		}
-	}
-	return INDEX_NONE;
+	// 数值误差兜底：返回最后一个可用项（而不是像旧版那样返回任意有类的项）
+	return LastAvailable;
 }
 
 int32 AItemScatterSpawner::CountAliveOfEntry(int32 EntryIndex) const

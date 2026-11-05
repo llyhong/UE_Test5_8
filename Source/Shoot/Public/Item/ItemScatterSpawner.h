@@ -4,9 +4,11 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Game/BusinessTime.h"
 #include "ItemScatterSpawner.generated.h"
 
 class AItemActor;
+class UTimeSystem;
 
 /** 生成 / 回收食材时广播，供蓝图挂特效、音效、提示 */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FScatterItemEvent, AItemActor*, Item);
@@ -41,6 +43,15 @@ struct FScatterSpawnEntry
 	/** 该类同一时间最多存在几个；0 = 不单独限制（只受 SpawnCount / MaxAliveTotal 约束） */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scatter", meta = (ClampMin = "0"))
 	int32 MaxAlive = 0;
+
+	/** 可出现的季节；留空 = 四季都能出现。野外采集按此过滤（"过期不候"）。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scatter|Season")
+	TArray<ESeason> Seasons;
+
+	/** 参与每日刷新 / 开局生成的概率（0~1）：稀有采集物调低（如 0.15），
+	 *  让它们不是每天都有；1 = 每次刷新都参与。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scatter|Season", meta = (ClampMin = "0", ClampMax = "1"))
+	float DailySpawnChance = 1.f;
 };
 
 /** 运行时记录的一个"坑位"：原始位置 + 当前占用它的实例 + 重生倒计时 */
@@ -220,6 +231,34 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scatter|Debug")
 	int32 RandomSeed = 0;
 
+	// ==================== 配置：季节 / 分区 / 每日刷新 ====================
+
+	/** 分区名（仅调试与 UI 显示用，如 FarmEdge / Forest / Mine / Beach）。
+	 *  稀有度梯度靠"分区摆不同生成器 + 各分区自己的 Entries/Weight/DailySpawnChance"实现：
+	 *  农场周边放常见项，森林深处/矿洞/海滩放稀有项。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scatter|Season")
+	FName ZoneLabel = TEXT("FarmEdge");
+
+	/** 是否按 Entries 里的 Seasons 过滤：开启后只在当前季节出现对应采集物 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scatter|Season")
+	bool bSeasonAware = true;
+
+	/** 换季时清掉上一季的全部生成物并按新季节重新生成（"过期不候"）；玩家手上拿着的不回收 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scatter|Season")
+	bool bClearOnSeasonChange = true;
+
+	/** 每到新的一天尝试把空坑位补满到 SpawnCount（模拟每天随机长出新采集物） */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scatter|Season")
+	bool bRefreshDaily = true;
+
+	/** 每日刷新时每个空坑位的补满概率（0~1）：0.5 = 每天约一半空位长出新采集物 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scatter|Season", meta = (ClampMin = "0", ClampMax = "1"))
+	float DailyRefreshChance = 0.5f;
+
+	/** 当前季节（只读；随日期推进自动更新） */
+	UPROPERTY(BlueprintReadOnly, Category = "Scatter|Season")
+	ESeason CurrentSeason = ESeason::Spring;
+
 	/** 在场景里画出生成区域（编辑器与运行时都可见） */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scatter|Debug")
 	bool bDrawDebugArea = false;
@@ -252,6 +291,10 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Scatter")
 	int32 GetAliveCount() const;
 
+	/** 当前季节（按时间系统实时读取；时间系统未就绪时退回本 Actor 记录的季节） */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Scatter|Season")
+	ESeason GetCurrentSeason() const;
+
 	/** 当前正在等待重生的坑位数量 */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Scatter")
 	int32 GetPendingRespawnCount() const;
@@ -268,6 +311,13 @@ protected:
 	/** 关卡里已存在、需要避让的其他 AItemActor 位置（每次生成前刷新一次） */
 	UPROPERTY()
 	TArray<FVector> WorldReservedPoints;
+
+	/** 当天每条 Entry 是否参与刷新（与 Entries 同下标；由 RollDailyEntryAvailability 填充） */
+	TArray<bool> DailyEntryAvailable;
+
+	/** 已绑定的事件时钟（弱引用，随关卡卸载失效） */
+	UPROPERTY()
+	TObjectPtr<UTimeSystem> BoundTimeSystem;
 
 	FRandomStream Rand;
 
@@ -289,8 +339,26 @@ protected:
 	/** 判断某个水平位置是否满足避让（够远） */
 	bool IsLocationFree(const FVector& InLocation) const;
 
-	/** 按权重挑一个 Entry 下标（会跳过已达 MaxAlive 上限的项）；没有可用项返回 INDEX_NONE */
-	int32 PickEntryIndex();
+	/** 按权重挑一个 Entry 下标（会跳过已达 MaxAlive 上限、非当前季节、以及当天未"摇中"的项）；
+	 *  bUseDailyFilter=true 时额外应用 DailySpawnChance。没有可用项返回 INDEX_NONE */
+	int32 PickEntryIndex(bool bUseDailyFilter = false);
+
+	/** 某一项此刻是否可用：有类、季节匹配、未达 MaxAlive、且（可选）当天摇中 */
+	bool IsEntryAvailable(int32 EntryIndex, bool bUseDailyFilter) const;
+
+	/** 每天（含开局 / 换季）为每条 Entry 掷一次 DailySpawnChance，决定今天是否参与刷新 */
+	void RollDailyEntryAvailability();
+
+	/** 确保绑定到当前时间系统的事件（关卡可能用蓝图子类重建时钟，这里做幂等重绑） */
+	void EnsureTimeSystemBound();
+
+	/** 新的一天：按 DailyRefreshChance 给空坑位补生成 */
+	UFUNCTION()
+	void HandleDayChanged(int32 InYear, int32 InMonth, int32 InDay);
+
+	/** 换季：清掉上一季生成物并按新季节重撒（过期不候） */
+	UFUNCTION()
+	void HandleSeasonChanged(ESeason OldSeason, ESeason NewSeason);
 
 	/** 统计某一项当前存活的实例数 */
 	int32 CountAliveOfEntry(int32 EntryIndex) const;
