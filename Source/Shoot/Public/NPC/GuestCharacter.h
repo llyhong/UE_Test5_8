@@ -57,7 +57,7 @@ public:
 	virtual void Tick(float DeltaSeconds) override;
 
 	/** 目标座位 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guest")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Guest")
 	TObjectPtr<AChairSeat> SeatActor;
 
 	/** 生成并管理本客人的管理器（用于销毁前反注册），由 AGuestManager 设置。
@@ -72,70 +72,70 @@ public:
 	void ReleaseSeatIfOccupied();
 
 	/** 离场目标点（场景边缘） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guest")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Guest")
 	FVector LeaveLocation = FVector::ZeroVector;
 
 	/** 进食持续时间（秒） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guest")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Guest")
 	float EatDuration = 5.0f;
 
 	/** 等待上菜超时（秒），超时直接离开 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guest")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Guest")
 	float WaitFoodTimeout = 30.0f;
 
 	/** 排队等待超时（秒）：长时间等不到座位则离场并扣除声誉 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guest")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Guest")
 	float QueueWaitTimeout = 20.0f;
 
 	/** 走向座位超时（秒）：超过该时长仍未坐下（被桌子/碰撞挡住、导航不可达），则放弃并离场、释放座位 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guest")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Guest")
 	float SeatWalkTimeout = 20.0f;
 
 	/** 特殊客人完成订单时额外提升的声誉（仅在 GuestType==Special 时生效，叠加在 EconomySystem 完成订单的基础声誉之上） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guest")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Guest")
 	int32 SpecialReputationBonus = 3;
 
 	/** 是否输出客人的排队/入座/离场等调试信息（屏幕消息与 UE_LOG） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guest|Debug")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Guest|Debug")
 	bool bShowDebugInfo = true;
 
 	/** 接单方式：自动接单 / 需要玩家接单（默认需要玩家接单；GuestManager 会统一下发覆盖） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guest|Order")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Guest|Order")
 	EGuestOrderAcceptMode OrderAcceptMode = EGuestOrderAcceptMode::NeedPlayerAccept;
 
 	/** 客人吃完后是否留下空碟占据座位（玩家按 E 回收才释放）。
 	 *  落座时会被 UBaseGameInstance::bUseDirtyPlateFlow（全局总开关）覆盖；
 	 *  这里单独设 true/false 可让某类客人强制启用/关闭（用于特殊客人）。默认 true。 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guest")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Guest")
 	bool bUseDirtyPlateFlow = true;
 
 	/** 坐下后把客人钉在座位上：禁用移动与 RVO 避让、禁止被物理推挤，并在 Tick 中把位置校正回座位。
 	 *  避免玩家靠近 / 放下物品 / 其他客人经过时把坐着的客人从椅子上挤开。默认开启。 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guest|Seat")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Guest|Seat")
 	bool bPinToSeatWhenSitting = true;
 
 	/** 钉住时允许的位置偏差（厘米）：超过该值才把客人拉回座位，避免每帧写 Transform 抖动 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guest|Seat", meta = (ClampMin = "0.0", EditCondition = "bPinToSeatWhenSitting"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Guest|Seat", meta = (ClampMin = "0.0", EditCondition = "bPinToSeatWhenSitting"))
 	float SeatPinTolerance = 1.0f;
 
 	/** 坐上 / 离开座位时切换“钉住”状态（坐下时记录座位变换并锁死移动；离座时恢复行走与避让） */
-	UFUNCTION(BlueprintCallable, Category = "Guest|Seat")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Guest|Seat")
 	void SetSeatedPinned(bool bPinned);
 
 	/** 当前是否处于“钉在座位上”的状态 */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Guest|Seat")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Guest|Seat")
 	bool IsSeatedPinned() const { return bSeatedPinned; }
 
 	/** 当前状态 */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Guest")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Guest")
 	EGuestState GuestState = EGuestState::WalkingIn;
 
 	/** 客人类型：普通 / 特殊（特殊客人完成订单获得更高声誉）。由 AGuestManager 按概率在生成时设置 */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Guest")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Guest")
 	EGuestType GuestType = EGuestType::Normal;
 
 	/** 当前排队序号（-1 表示未在队列中），由 AGuestManager 维护 */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Guest")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Guest")
 	int32 QueueIndex = -1;
 
 	/** 玩家端菜上菜后摆在桌上的那道菜（进食结束后转为“空碟”占据座位） */
@@ -143,15 +143,15 @@ public:
 	TObjectPtr<AItemActor> PlateOnTable;
 
 	/** 坐下点餐后产生的订单（未点餐 / 已上菜 / 已超时为 null） */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Guest")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Guest")
 	TObjectPtr<UOrderHandle> CurrentOrder = nullptr;
 
 	/** 交互范围：玩家靠近后可按 E 接单（仅"需要玩家接单"模式使用） */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Guest|Components")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Guest|Components")
 	TObjectPtr<USphereComponent> InteractionSphere;
 
 	/** 交互判定半径。OnConstruction（编辑器视口）与 BeginPlay（运行时）都会强制应用到组件上 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guest|Components", meta = (ClampMin = "10.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Guest|Components", meta = (ClampMin = "10.0"))
 	float InteractionRadius = InteractionDistance::Guest;
 
 	/** 编辑器里改 InteractionRadius 时立即写进组件，关卡视口中即可看到真实判定球 */
@@ -172,15 +172,15 @@ public:
 	FTimerHandle LeaveTimeoutTimerHandle;
 
 	/** 头顶状态气泡组件（屏幕空间，始终面向相机）。仅在“需要点餐”（WaitingOrder）与“等餐即将超时”时显示，其余状态隐藏 */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Guest|Status")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Guest|Status")
 	TObjectPtr<UWidgetComponent> StatusWidgetComp;
 
 	/** 等餐时订单剩余时间不足该值（秒）才额外显示头顶气泡，提醒玩家快要超时 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guest|Status", meta = (ClampMin = "0.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Guest|Status", meta = (ClampMin = "0.0"))
 	float StatusWidgetRemainSeconds = 10.f;
 
 	/** 头顶气泡（TipsWidget）隐藏距离：玩家（ShootCharacter）离本客人超过该距离时隐藏气泡；<=0 表示不限制距离。蓝图可配置 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guest|Status", meta = (ClampMin = "0.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Guest|Status", meta = (ClampMin = "0.0"))
 	float StatusWidgetHideDistance = 800.f;
 
 	/** 是否已用餐：离场时据此区分“吃饱了”与“等不及走了”的台词 */
@@ -202,7 +202,7 @@ public:
 	float GetOrderRemainSeconds() const;
 
 	/** 头顶状态变化广播（GuestStatusWidget 蓝图在 Construct 时绑定监听，从配置表按状态抽台词/颜色/贴图显示） */
-	UPROPERTY(BlueprintAssignable, Category = "Guest|Status")
+	UPROPERTY(BlueprintAssignable, Category = "Shoot|Guest|Status")
 	FGuestStatusUpdatedSignature OnGuestStatusUpdated;
 
 	/** 由 AI 控制器在 Possess 后调用：开始走向座位 */
@@ -225,46 +225,46 @@ public:
 	void SitDown();
 
 	/** 外部（玩家上菜逻辑）调用：开始进食 */
-	UFUNCTION(BlueprintCallable, Category = "Guest")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Guest")
 	void StartEating();
 
 	/** 是否允许玩家端菜上菜（正在等餐且手持菜品时） */
-	UFUNCTION(BlueprintCallable, Category = "Guest")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Guest")
 	bool CanPlayerServeDish() const;
 
 	/** 玩家端菜走到面前按 E：把菜品摆到桌上并完成该客人的订单（开始进食）。返回是否上菜成功 */
-	UFUNCTION(BlueprintCallable, Category = "Guest")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Guest")
 	bool TryServeDish(AShootCharacter* Player, AItemActor* Dish);
 
 	/** 进食结束：把桌上菜品转为空碟占据座位，随后离座（方案B） */
 	void FinishEating();
 
 	/** 客人点餐：向订单系统请求一个绑定自身的订单，成功返回 true */
-	UFUNCTION(BlueprintCallable, Category = "Guest")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Guest")
 	bool PlaceOrder();
 
 	/** 是否允许玩家接单：需要玩家接单模式 + 正在等餐 + 尚未点单 */
-	UFUNCTION(BlueprintCallable, Category = "Guest|Order")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Guest|Order")
 	bool CanAcceptOrderByPlayer() const;
 
 	/** 玩家按 E 接单：为该客人生成订单，成功返回 true */
-	UFUNCTION(BlueprintCallable, Category = "Guest|Order")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Guest|Order")
 	bool AcceptOrderByPlayer();
 
 	/** 订单被完成（上菜成功）时的回调：开始进食（由订单系统调用） */
-	UFUNCTION(BlueprintCallable, Category = "Guest|Order")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Guest|Order")
 	void OnOrderServed();
 
 	/** 订单超时失败时的回调：离场（由订单系统调用） */
-	UFUNCTION(BlueprintCallable, Category = "Guest|Order")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Guest|Order")
 	void OnOrderFailed();
 
 	/** 由 AI 控制器在座位寻路彻底失败时调用：让客人直接离场，避免卡在原地 */
-	UFUNCTION(BlueprintCallable, Category = "Guest")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Guest")
 	void GiveUpAndLeave();
 
 	/** 被突发事件（老鼠等）吓走：走正常离场流程，未完成订单会被取消、座位释放 */
-	UFUNCTION(BlueprintCallable, Category = "Guest")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Guest")
 	void ScareAway();
 
 	/** 到达离场点后的回调：销毁 */
@@ -276,29 +276,29 @@ protected:
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 	/** 状态变化通知蓝图（UI / 特效） */
-	UFUNCTION(BlueprintImplementableEvent, Category = "Guest")
+	UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|Guest")
 	void OnGuestStateChanged(EGuestState NewState);
 
 	/** 特殊客人被成功接待（上菜完成）时通知蓝图（供金色特效 / 音效 / 飘字）。
 	 *  仅在 GuestType == Special 的上菜成功路径触发。 */
-	UFUNCTION(BlueprintImplementableEvent, Category = "Guest")
+	UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|Guest")
 	void OnSpecialGuestServed();
 
 	/** 设置状态并广播变化 */
 	void SetGuestState(EGuestState NewState);
 
 	/** 动画状态标记：供 ShootAnimInstance 读取以驱动状态机（替代 PlayAnimMontage） */
-	UPROPERTY(BlueprintReadOnly, Category = "Guest|Anim")
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Guest|Anim")
 	bool bIsSitting = false;
 
-	UPROPERTY(BlueprintReadOnly, Category = "Guest|Anim")
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Guest|Anim")
 	bool bIsEating = false;
 
-	UPROPERTY(BlueprintReadOnly, Category = "Guest|Anim")
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Guest|Anim")
 	bool bIsLeaving = false;
 
 	/** 是否处于“钉在座位上”的状态（坐下后锁死位置，离座前一直有效） */
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Guest|Seat")
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Shoot|Guest|Seat")
 	bool bSeatedPinned = false;
 
 	/** 坐下时记录的目标世界变换：座位失效（已转为空碟流程）时仍用它把客人钉在原地 */

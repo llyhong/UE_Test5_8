@@ -33,24 +33,24 @@ struct FScatterSpawnEntry
 	GENERATED_BODY()
 
 	/** 要生成的食材 Actor 类（如 BP_RawMushroom、BP_Tomato …） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scatter")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Scatter")
 	TSubclassOf<AItemActor> ItemClass;
 
 	/** 随机权重（越大出现越多），<=0 视为 1 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scatter", meta = (ClampMin = "0.01", UIMin = "0.01"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Scatter", meta = (ClampMin = "0.01", UIMin = "0.01"))
 	float Weight = 1.f;
 
 	/** 该类同一时间最多存在几个；0 = 不单独限制（只受 SpawnCount / MaxAliveTotal 约束） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scatter", meta = (ClampMin = "0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Scatter", meta = (ClampMin = "0"))
 	int32 MaxAlive = 0;
 
 	/** 可出现的季节；留空 = 四季都能出现。野外采集按此过滤（"过期不候"）。 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scatter|Season")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Scatter|Season")
 	TArray<ESeason> Seasons;
 
 	/** 参与每日刷新 / 开局生成的概率（0~1）：稀有采集物调低（如 0.15），
 	 *  让它们不是每天都有；1 = 每次刷新都参与。 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scatter|Season", meta = (ClampMin = "0", ClampMax = "1"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Scatter|Season", meta = (ClampMin = "0", ClampMax = "1"))
 	float DailySpawnChance = 1.f;
 };
 
@@ -115,120 +115,120 @@ public:
 	// ==================== 配置：生成什么 ====================
 
 	/** 生成项列表：每一项 = 一种食材类 + 权重 + 该类数量上限。可加多条混撒。 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scatter|Items")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Scatter|Items")
 	TArray<FScatterSpawnEntry> Entries;
 
 	// ==================== 配置：洒在哪 ====================
 
 	/** 区域形状：圆形(可带内圈) / 矩形 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scatter|Area")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Scatter|Area")
 	EScatterAreaShape AreaShape = EScatterAreaShape::Circle;
 
 	/** 外半径（Circle 用）：以本 Actor 位置为圆心 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scatter|Area",
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Scatter|Area",
 		meta = (ClampMin = "0", EditCondition = "AreaShape==EScatterAreaShape::Circle", EditConditionHides))
 	float SpawnRadius = 600.f;
 
 	/** 内半径（Circle 用）：留空区域，0 = 实心圆；配成环形可沿农场外围一圈撒 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scatter|Area",
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Scatter|Area",
 		meta = (ClampMin = "0", EditCondition = "AreaShape==EScatterAreaShape::Circle", EditConditionHides))
 	float InnerRadius = 0.f;
 
 	/** 矩形半尺寸（Box 用）：Z 分量不参与采样 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scatter|Area",
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Scatter|Area",
 		meta = (EditCondition = "AreaShape==EScatterAreaShape::Box", EditConditionHides))
 	FVector BoxExtent = FVector(600.f, 600.f, 0.f);
 
 	/** 随机朝向范围（Yaw，度）：默认 0~360 完全随机；设成 0~0 则朝向固定 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scatter|Area")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Scatter|Area")
 	FVector2D YawRange = FVector2D(0.f, 360.f);
 
 	// ==================== 配置：贴地 ====================
 
 	/** 生成点向下打线贴合地面；关掉则直接用采样点的 Z（采样 Z 取本 Actor 的 Z） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scatter|Ground")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Scatter|Ground")
 	bool bSnapToGround = true;
 
 	/** 打线起点：采样点上方多少 cm */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scatter|Ground", meta = (EditCondition = "bSnapToGround", ClampMin = "0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Scatter|Ground", meta = (EditCondition = "bSnapToGround", ClampMin = "0"))
 	float TraceUp = 800.f;
 
 	/** 打线长度：采样点下方多少 cm */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scatter|Ground", meta = (EditCondition = "bSnapToGround", ClampMin = "0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Scatter|Ground", meta = (EditCondition = "bSnapToGround", ClampMin = "0"))
 	float TraceDown = 2000.f;
 
 	/** 沿地面法线的抬高量（cm）：0=贴地，正值略微悬空，负值略微陷入 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scatter|Ground", meta = (EditCondition = "bSnapToGround"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Scatter|Ground", meta = (EditCondition = "bSnapToGround"))
 	float GroundOffset = 0.f;
 
 	/** 让物品的 Z 轴对齐地面法线（斜坡上不歪）；关掉则保持竖直 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scatter|Ground", meta = (EditCondition = "bSnapToGround"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Scatter|Ground", meta = (EditCondition = "bSnapToGround"))
 	bool bAlignToGroundNormal = true;
 
 	/** 地面检测使用的碰撞通道 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scatter|Ground", meta = (EditCondition = "bSnapToGround"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Scatter|Ground", meta = (EditCondition = "bSnapToGround"))
 	TEnumAsByte<ECollisionChannel> GroundChannel = ECC_Visibility;
 
 	/** 是否只把 Actor 生成在地形（Landscape）上：开启后向下打线会跳过屋顶 / 楼板等非地形命中，
 	 *  继续向下查找 Landscape 表面；整条打线都碰不到地形时该点被丢弃。
 	 *  适合户外农场区域（防止食材生成到屋顶上）；若某生成器区域是普通静态网格地面，请关闭此项。 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scatter|Ground", meta = (EditCondition = "bSnapToGround"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Scatter|Ground", meta = (EditCondition = "bSnapToGround"))
 	bool bOnlyOnLandscape = true;
 
 	// ==================== 配置：数量与避让 ====================
 
 	/** 开局（BeginPlay）要生成的总个数 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scatter|Count", meta = (ClampMin = "0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Scatter|Count", meta = (ClampMin = "0"))
 	int32 SpawnCount = 12;
 
 	/** 全场同时存在的总上限；0 = 不限制（只用 SpawnCount 控制初始数量） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scatter|Count", meta = (ClampMin = "0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Scatter|Count", meta = (ClampMin = "0"))
 	int32 MaxAliveTotal = 0;
 
 	/** 两个生成点之间的最小水平距离（cm）：互相避让，避免重叠 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scatter|Spacing", meta = (ClampMin = "0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Scatter|Spacing", meta = (ClampMin = "0"))
 	float MinSpacing = 150.f;
 
 	/** 同时避开关卡里已手动摆放的其他 AItemActor（含其他生成器撒出的） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scatter|Spacing")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Scatter|Spacing")
 	bool bAvoidWorldItems = true;
 
 	/** 单个点位最多尝试几次采样；尝试满仍找不到空位就跳过这个点 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scatter|Spacing", meta = (ClampMin = "1"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Scatter|Spacing", meta = (ClampMin = "1"))
 	int32 MaxPlaceAttempts = 40;
 
 	// ==================== 配置：采摘后重生 ====================
 
 	/** BeginPlay 时自动生成（关掉则只能在蓝图里手动调 SpawnAll） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scatter|Respawn")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Scatter|Respawn")
 	bool bSpawnOnBeginPlay = true;
 
 	/** 摘走后自动重生 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scatter|Respawn")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Scatter|Respawn")
 	bool bAutoRespawn = true;
 
 	/** 重生延迟下限（秒） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scatter|Respawn",
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Scatter|Respawn",
 		meta = (EditCondition = "bAutoRespawn", ClampMin = "0"))
 	float RespawnDelayMin = 25.f;
 
 	/** 重生延迟上限（秒）：每个坑位在 [Min,Max] 内独立随机，避免整齐划一 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scatter|Respawn",
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Scatter|Respawn",
 		meta = (EditCondition = "bAutoRespawn", ClampMin = "0"))
 	float RespawnDelayMax = 60.f;
 
 	/** true=重生回原来那个点；false=在原区域里重新随机一个不重叠的位置 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scatter|Respawn",
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Scatter|Respawn",
 		meta = (EditCondition = "bAutoRespawn"))
 	bool bRespawnAtOriginalPoint = true;
 
 	/** 检测"是否被玩家拿走"的轮询间隔（秒） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scatter|Respawn",
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Scatter|Respawn",
 		meta = (EditCondition = "bAutoRespawn", ClampMin = "0.1"))
 	float PickCheckInterval = 0.5f;
 
 	/** 随机种子：0 = 每次运行都不同；填非 0 可复现同一套位置（调试用） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scatter|Debug")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Scatter|Debug")
 	int32 RandomSeed = 0;
 
 	// ==================== 配置：季节 / 分区 / 每日刷新 ====================
@@ -236,71 +236,71 @@ public:
 	/** 分区名（仅调试与 UI 显示用，如 FarmEdge / Forest / Mine / Beach）。
 	 *  稀有度梯度靠"分区摆不同生成器 + 各分区自己的 Entries/Weight/DailySpawnChance"实现：
 	 *  农场周边放常见项，森林深处/矿洞/海滩放稀有项。 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scatter|Season")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Scatter|Season")
 	FName ZoneLabel = TEXT("FarmEdge");
 
 	/** 是否按 Entries 里的 Seasons 过滤：开启后只在当前季节出现对应采集物 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scatter|Season")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Scatter|Season")
 	bool bSeasonAware = true;
 
 	/** 换季时清掉上一季的全部生成物并按新季节重新生成（"过期不候"）；玩家手上拿着的不回收 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scatter|Season")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Scatter|Season")
 	bool bClearOnSeasonChange = true;
 
 	/** 每到新的一天尝试把空坑位补满到 SpawnCount（模拟每天随机长出新采集物） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scatter|Season")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Scatter|Season")
 	bool bRefreshDaily = true;
 
 	/** 每日刷新时每个空坑位的补满概率（0~1）：0.5 = 每天约一半空位长出新采集物 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scatter|Season", meta = (ClampMin = "0", ClampMax = "1"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Scatter|Season", meta = (ClampMin = "0", ClampMax = "1"))
 	float DailyRefreshChance = 0.5f;
 
 	/** 当前季节（只读；随日期推进自动更新） */
-	UPROPERTY(BlueprintReadOnly, Category = "Scatter|Season")
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Scatter|Season")
 	ESeason CurrentSeason = ESeason::Spring;
 
 	/** 在场景里画出生成区域（编辑器与运行时都可见） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Scatter|Debug")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Scatter|Debug")
 	bool bDrawDebugArea = false;
 
 	// ==================== 对外事件 ====================
 
 	/** 成功生成一个食材时广播 */
-	UPROPERTY(BlueprintAssignable, Category = "Scatter|Events")
+	UPROPERTY(BlueprintAssignable, Category = "Shoot|Scatter|Events")
 	FScatterItemEvent OnItemSpawned;
 
 	/** 某个坑位空了（被摘走 / 被销毁，即将进入重生倒计时）时广播 */
-	UPROPERTY(BlueprintAssignable, Category = "Scatter|Events")
+	UPROPERTY(BlueprintAssignable, Category = "Shoot|Scatter|Events")
 	FScatterItemEvent OnItemRemoved;
 
 	// ==================== 蓝图接口 ====================
 
 	/** 清空现有全部生成物，并按 SpawnCount 重新生成一遍（可用于"换一天"重置） */
-	UFUNCTION(BlueprintCallable, Category = "Scatter")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Scatter")
 	void SpawnAll();
 
 	/** 只生成一个；EntryIndex<0 时按权重随机挑一种 */
-	UFUNCTION(BlueprintCallable, Category = "Scatter")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Scatter")
 	AItemActor* SpawnOne(int32 EntryIndex = -1);
 
 	/** 销毁本生成器撒出的全部实例（不影响玩家手上拿着的），并把坑位清空 */
-	UFUNCTION(BlueprintCallable, Category = "Scatter")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Scatter")
 	void ClearAllSpawned();
 
 	/** 当前仍在场景里的实例数量 */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Scatter")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Scatter")
 	int32 GetAliveCount() const;
 
 	/** 当前季节（按时间系统实时读取；时间系统未就绪时退回本 Actor 记录的季节） */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Scatter|Season")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Scatter|Season")
 	ESeason GetCurrentSeason() const;
 
 	/** 当前正在等待重生的坑位数量 */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Scatter")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Scatter")
 	int32 GetPendingRespawnCount() const;
 
 	/** 立即重生指定坑位（调试用） */
-	UFUNCTION(BlueprintCallable, Category = "Scatter")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Scatter")
 	void RespawnSlotNow(int32 SlotIndex);
 
 protected:

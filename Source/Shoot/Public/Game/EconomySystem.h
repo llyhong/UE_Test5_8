@@ -27,23 +27,23 @@ struct FEconomyConfigRow : public FTableRowBase
 	GENERATED_BODY()
 public:
 	/** 完成订单时增加的声誉 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Economy")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Economy")
 	int32 ReputationGainOnComplete = 5;
 
 	/** 订单失败（超时未上）时扣除的声誉 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Economy")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Economy")
 	int32 ReputationLossOnFail = 3;
 
 	/** 完成订单的固定金钱奖励（与价格奖励叠加） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Economy")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Economy")
 	int32 MoneyPerOrder = 0;
 
 	/** 完成订单金钱 = MoneyPerOrder + OrderPrice * MoneyPriceMultiplier */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Economy")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Economy")
 	float MoneyPriceMultiplier = 1.0f;
 
 	/** 完成订单至少获得的金钱（避免价格为 0 时白干） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Economy")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Economy")
 	int32 MinMoneyOnComplete = 1;
 };
 
@@ -57,23 +57,23 @@ struct FEconomyShopItem : public FTableRowBase
 	GENERATED_BODY()
 public:
 	/** 道具唯一 ID（与 BuyItem(ItemID) 对应） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shop")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Shop")
 	int32 ItemID = 0;
 
 	/** 展示名称 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shop")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Shop")
 	FText DisplayName;
 
 	/** 购买花费的金钱 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shop")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Shop")
 	int32 Cost = 0;
 
 	/** 描述 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shop")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Shop")
 	FText Description;
 
 	/** 图标（可选） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shop")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Shop")
 	TObjectPtr<UTexture2D> Icon = nullptr;
 };
 
@@ -111,72 +111,72 @@ class SHOOT_API UEconomySystem : public UObject
 
 public:
 	/** 配置数据表（RowStruct = FEconomyConfigRow）。为空则用内置默认值 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Economy")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Economy")
 	UDataTable* ConfigTable = nullptr;
 
 	/** 配置表行名 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Economy")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Economy")
 	FName ConfigRowName = TEXT("Default");
 
 	/** 内置默认配置（未配置 ConfigTable 时使用） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Economy")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Economy")
 	FEconomyConfigRow DefaultConfig;
 
 	/** 商店商品数据表（RowStruct = FEconomyShopItem）。为空则用内置默认商品列表 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Economy|Shop")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Economy|Shop")
 	UDataTable* ShopItemsTable = nullptr;
 
 	/** 内置默认商品列表（未配置 ShopItemsTable 时使用） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Economy|Shop")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Economy|Shop")
 	TArray<FEconomyShopItem> DefaultShopItems;
 
 	/** 返回当前生效的商店商品列表（优先取数据表，否则取内置默认） */
-	UFUNCTION(BlueprintCallable, Category = "Economy|Shop")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Economy|Shop")
 	TArray<FEconomyShopItem> GetShopItems() const;
 
 	/** 初始化：读取配置表并加载存档数据 */
-	UFUNCTION(BlueprintCallable, Category = "Economy")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Economy")
 	void Init();
 
-	UFUNCTION(BlueprintCallable, Category = "Economy")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Economy")
 	int32 GetReputation() const { return Reputation; }
 
-	UFUNCTION(BlueprintCallable, Category = "Economy")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Economy")
 	int32 GetMoney() const { return Money; }
 
 	/** 订单完成：增加声誉 + 获得金钱（Money 由 OrderPrice 换算） */
-	UFUNCTION(BlueprintCallable, Category = "Economy")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Economy")
 	void OnOrderCompleted(int32 OrderPrice);
 
 	/** 订单失败：扣除声誉 */
-	UFUNCTION(BlueprintCallable, Category = "Economy")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Economy")
 	void OnOrderFailed();
 
 	/** 花费金钱：足够则扣减并返回 true，不足返回 false */
-	UFUNCTION(BlueprintCallable, Category = "Economy")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Economy")
 	bool SpendMoney(int32 Amount, EMoneySource Source = EMoneySource::None);
 
 	/** 购买/升级道具：花费 Cost 金钱，成功后该道具计数 +1 */
-	UFUNCTION(BlueprintCallable, Category = "Economy")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Economy")
 	bool BuyItem(int32 ItemID, int32 Cost);
 
 	/** 已拥有某道具的数量 */
-	UFUNCTION(BlueprintCallable, Category = "Economy")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Economy")
 	int32 GetOwnedItemCount(int32 ItemID) const;
 
 	/** 直接增减（调试/外部调用） */
-	UFUNCTION(BlueprintCallable, Category = "Economy")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Economy")
 	void AddReputation(int32 Delta);
 
-	UFUNCTION(BlueprintCallable, Category = "Economy")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Economy")
 	void AddMoney(int32 Delta, EMoneySource Source = EMoneySource::None);
 
 	/** 声誉变化广播（NewValue, Delta） */
-	UPROPERTY(BlueprintAssignable, Category = "Economy")
+	UPROPERTY(BlueprintAssignable, Category = "Shoot|Economy")
 	FEconomyChanged OnReputationChanged;
 
 	/** 金钱变化广播（NewValue, Delta, Source） */
-	UPROPERTY(BlueprintAssignable, Category = "Economy")
+	UPROPERTY(BlueprintAssignable, Category = "Shoot|Economy")
 	FEconomyMoneyChanged OnMoneyChanged;
 
 	/** 写入存档 */

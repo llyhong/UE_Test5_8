@@ -86,7 +86,7 @@ class SHOOT_API UNeedUserWidget : public UUserWidget
 
 public:
 	// 指向挂载该 Widget 的 AnimalCharacter（由 C++ 在创建时注入）
-	UPROPERTY(BlueprintReadOnly, Category = "Animal|Needs")
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Animal|Needs")
 	TObjectPtr<AAnimalCharacter> OwningAnimal = nullptr;
 };
 
@@ -97,11 +97,11 @@ struct FAnimalTextLine
 	GENERATED_BODY()
 
 	// 对应的事件/状态文本（如 发现玩家/逃跑/饥饿/口渴 等）
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Text")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Text")
 	FText Text;
 
 	// 权重：GetRandomLine 时按权重随机抽取，越大越容易抽到
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Text", meta = (ClampMin = "0.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Text", meta = (ClampMin = "0.0"))
 	float Weight = 1.f;
 };
 
@@ -111,7 +111,7 @@ struct FAnimalNeedLineSet
 {
 	GENERATED_BODY()
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Text")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Text")
 	TArray<FText> Lines;
 };
 
@@ -125,31 +125,31 @@ class SHOOT_API UAnimalTextCollection : public UDataAsset
 
 public:
 	// 动物显示名称（如 鹿 / 鸡 / 马），可用于 UI
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Text")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Text")
 	FText DisplayName;
 
 	// 警觉/发现玩家时的台词（显示 "?" 阶段）
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Text")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Text")
 	FText AlertLine;
 
 	// 开始逃跑时的台词（显示 "!" 阶段）
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Text")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Text")
 	FText FleeLine;
 
 	// 日常待机随机台词（Idle/Roam 时偶尔发出）
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Text")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Text")
 	TArray<FAnimalTextLine> RandomLines;
 
 	// 需求状态台词：无需求/饿/渴/又饿又渴 → 供 BubbleWidget 显示（每个状态可配多条，按状态取后随机抽一条）
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Text")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Text")
 	TMap<EAnimalNeedState, FAnimalNeedLineSet> NeedStateLines;
 
 	// 工具：按 EAnimalNeedState 取需求台词；未配置则返回空
-	UFUNCTION(BlueprintPure, Category = "Text")
+	UFUNCTION(BlueprintPure, Category = "Shoot|Text")
 	FText GetNeedLine(EAnimalNeedState State) const;
 
 	// 工具：从 RandomLines 按权重随机取一行；为空则返回空
-	UFUNCTION(BlueprintPure, Category = "Text")
+	UFUNCTION(BlueprintPure, Category = "Shoot|Text")
 	FText GetRandomLine() const;
 };
 
@@ -163,6 +163,6 @@ class SHOOT_API UAnimalBubbleWidget : public UNeedUserWidget
 
 public:
 	// 显示一次气泡文本，Duration 秒后自动隐藏（由蓝图实现具体表现）
-	UFUNCTION(BlueprintImplementableEvent, Category = "Animal|Bubble")
+	UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|Animal|Bubble")
 	void ShowBubbleText(const FText& Text, float Duration);
 };

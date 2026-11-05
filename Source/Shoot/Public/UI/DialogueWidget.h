@@ -22,18 +22,18 @@ class SHOOT_API UDialogueWidget : public UUserWidget
 
 public:
 	/** 用对话数据填充界面。蓝图实现以创建 / 刷新标题、正文与按钮 */
-	UFUNCTION(BlueprintImplementableEvent, Category = "Dialogue")
+	UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|Dialogue")
 	void SetupDialogue(const FDialogueData& Data);
 
 	/** 按钮被点击时由蓝图按钮的 OnClicked 调用，转发给对话组件 */
-	UFUNCTION(BlueprintCallable, Category = "Dialogue")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Dialogue")
 	void ReportButtonClicked(int32 ButtonID);
 
 	/** 按钮点击委托：对话组件监听以分发业务逻辑 */
-	UPROPERTY(BlueprintAssignable, Category = "Dialogue")
+	UPROPERTY(BlueprintAssignable, Category = "Shoot|Dialogue")
 	FOnDialogueButtonClicked OnButtonClicked;
 
 	/** 关联上下文（通常是拥有该对话的 Actor 或对话组件），蓝图可读取获取更多信息 */
-	UPROPERTY(BlueprintReadOnly, Category = "Dialogue")
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Dialogue")
 	TObjectPtr<UObject> DialogueContext;
 };

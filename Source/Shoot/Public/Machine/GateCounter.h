@@ -29,21 +29,21 @@ public:
 	virtual void BeginPlay() override;
 
 	/** 外观模型（门 / 招牌等），蓝图可替换 */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Components")
 	TObjectPtr<UStaticMeshComponent> GateMesh;
 
 	/** 交互范围：玩家进入后注册为可开门 */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Components")
 	TObjectPtr<USphereComponent> InteractionSphere;
 
 	// ============ 交互判定尺度（统一标准，见 InteractionConfig.h） ============
 	/** 交互判定半径。C++ 在 OnConstruction（编辑器视口）与 BeginPlay（运行时）都会强制应用，
 	 *  会覆盖组件上残留的旧值；要单独调这台设备就改这里，不要直接改组件上的半径 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction", meta = (ClampMin = "10.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Interaction", meta = (ClampMin = "10.0"))
 	float InteractionRadius = InteractionDistance::Gate;
 
 	/** 判定球心相对 Actor 原点的高度：抬到物体中部，否则贴地的球只在脚踝高度有判定 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Interaction")
 	float InteractionCenterHeight = InteractionDistance::CenterHeight;
 
 	/** 编辑器里改上面的值时立即写进组件，关卡视口中即可看到真实判定球 */
@@ -54,19 +54,19 @@ public:
 	void ApplyInteractionScale();
 
 	/** 交互提示控件（如“按 E 开门营业”）：靠近时显示，离开隐藏；蓝图可在组件上配置 Widget Class */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Components")
 	TObjectPtr<UWidgetComponent> TipsWidget;
 
 	/** 调试：靠近时打印重叠注册信息，便于排查“靠近没反应” */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Gate|Debug")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Gate|Debug")
 	bool bDebug = false;
 
 	/** 玩家按 E 开门营业：成功返回 true（已营业也返回 true），未到营业时间返回 false */
-	UFUNCTION(BlueprintCallable, Category = "Gate")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Gate")
 	bool OpenBusiness();
 
 	/** 开门结果通知（蓝图可播放特效 / 音效 / 飘字）：bSuccess=true 已开始营业，false 未到营业时间 */
-	UFUNCTION(BlueprintImplementableEvent, Category = "Gate")
+	UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|Gate")
 	void OnOpenResult(bool bSuccess);
 
 	UFUNCTION()

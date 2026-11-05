@@ -14,9 +14,9 @@ class SHOOT_API ABaseFoodActor : public AActor
 public:	
 	// Sets default values for this actor's properties
 	ABaseFoodActor();
-	UFUNCTION(BlueprintCallable, Category="Food Actor")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Food Actor")
 	void AttachMeshToSocket(USceneComponent* InParent, const FName& InSocketName);
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Food")
 	UStaticMeshComponent* ItemMesh;
 protected:
 	// Called when the game starts or when spawned

@@ -24,27 +24,27 @@ public:
 	virtual void BeginPlay() override;
 
 	/** 灯泡外观（可选；蓝图可挂招牌 / 灯笼模型，营业时一并可见） */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Components")
 	TObjectPtr<UStaticMeshComponent> BulbMesh;
 
 	/** 实际光源 */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Components")
 	TObjectPtr<UPointLightComponent> Light;
 
 	/** 营业时灯的强度（打烊时为 0） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Light")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Light")
 	float LitIntensity = 1500.f;
 
 	/** 营业时灯的颜色（默认暖黄，营造营业氛围） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Light")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Light")
 	FLinearColor LitColor = FLinearColor(1.f, 0.78f, 0.42f);
 
 	/** 营业时灯光影响半径（cm） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Light")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Light")
 	float LitRadius = 600.f;
 
 	/** 根据营业状态开关灯（true=点亮） */
-	UFUNCTION(BlueprintCallable, Category = "Light")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Light")
 	void SetLit(bool bLit);
 
 	/** 营业状态变化回调（绑定到 TimeSystem） */

@@ -21,10 +21,10 @@ class SHOOT_API ADish : public AItemActor
 
 public:
 	/** 移除碟子时广播（蓝图可监听做反馈，沿用原 AItemActor 委托名） */
-	UPROPERTY(BlueprintAssignable, Category = "Dish")
+	UPROPERTY(BlueprintAssignable, Category = "Shoot|Dish")
 	FRemoveActorEvent FRemoveActorEvent;
 
 	/** 触发生碟子移除逻辑（保持原 AItemActor::OnRemoveActorEvent 行为） */
-	UFUNCTION(BlueprintCallable, Category = "Dish")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Dish")
 	void OnRemoveActorEvent();
 };

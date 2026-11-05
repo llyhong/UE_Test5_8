@@ -19,19 +19,19 @@ struct FPlantGrowthStage
 
 public:
 	/** 阶段名（如：种子 / 发芽 / 结果），用于 UI 显示 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Growth")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Growth")
 	FName StageName = NAME_None;
 
 	/** 该阶段所需的生长时间（秒），受 FPlantInfo::GrowthSpeed 影响 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Growth")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Growth")
 	float StageDuration = 5.f;
 
 	/** 该阶段显示的模型（可直接在编辑器选择，留空则保持上一阶段模型） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Growth")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Growth")
 	TObjectPtr<UStaticMesh> StageMesh;
 
 	/** 该阶段的缩放 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Growth")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Growth")
 	FVector StageScale = FVector::OneVector;
 };
 
@@ -46,77 +46,77 @@ struct FPlantInfo : public FTableRowBase
 
 public:
 	// ========== 生长阶段（可配置，按数组顺序推进） ==========
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Growth")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Growth")
 	TArray<FPlantGrowthStage> GrowthStages;
 
 	/** 生长速度倍率（>1 更快，<1 更慢） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Growth")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Growth")
 	float GrowthSpeed = 1.f;
 
 	// ========== 浇水 ==========
 	/** 是否需要浇水（缺水分时停止生长） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Water")
 	bool bRequiresWater = true;
 
 	/** 水分上限 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Water")
 	float WaterMax = 100.f;
 
 	/** 每秒消耗的水量（缺水分则停止生长） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Water")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Water")
 	float WaterConsumeRate = 1.f;
 
 	// ========== 驱虫 ==========
 	/** 是否会生虫（生虫时停止生长，需要驱虫） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pest")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Pest")
 	bool bCanGetPest = true;
 
 	/** 每隔多少秒可能生虫（<=0 表示不会随机生虫，只能手动测试/外部触发） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pest")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Pest")
 	float PestInterval = 30.f;
 
 	// ========== 果实 ==========
 	/** 是否在植物上显示果实模型：false 时不会在树上长出可见果实（如番茄/玉米这类整株模型本身就是成熟形态的作物），
 	 *  但成熟后依然可以采摘并获得果实，熟度 / 品质 / 采摘逻辑完全不变。 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fruit")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Fruit")
 	bool bShowFruitOnPlant = true;
 
 	/** 结出的果实类型（采摘时按此类型产出，必须配置才能采摘） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fruit")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Fruit")
 	TSubclassOf<AItemActor> FruitClass = nullptr;
 
 	/** 成熟时结出的果实数量 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fruit")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Fruit")
 	int32 FruitCount = 1;
 
 	/** 果实挂点（植物模型上的插槽名）。多个果实时按 “基础名_索引” 自动对齐到对应插槽（如 Fruit_0 / Fruit_1 / Fruit_2…）；不足时回退到基础名。
 	 *  仅在 bShowFruitOnPlant=true 时有效（不显示果实时无需挂点）。 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fruit", meta = (EditCondition = "bShowFruitOnPlant"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Fruit", meta = (EditCondition = "bShowFruitOnPlant"))
 	FName FruitAttachSocket = NAME_None;
 
 	/** 被玩家摘果后是否自动重新开始结果（循环生长，否则摘一次后停止） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fruit")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Fruit")
 	bool bAutoRefruit = false;
 
 	/** 自动重新结果时，每隔多少秒再长出一个果实（秒）。<=0 表示摘后立即一次性重新结满；>0 表示逐个生长（每隔该秒数长一个） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fruit")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Fruit")
 	float RefruitInterval = 0.f;
 
 	/** 摘果后，重新开始成长（重置回第一阶段）之前需要等待的秒数；0=立即重新开始（无延迟）。
 	 *  延迟期间植被保持“已收获/等待”状态，不重新生长也不可再次采摘。 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fruit")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Fruit")
 	float RegrowDelayAfterHarvest = 0.f;
 
 	// ========== 熟度（结果阶段内的“成熟 / 熟过头”子阶段） ==========
 	/** 是否启用熟度子阶段：结果后继续计时，区分“成熟”与“熟过头”，从而决定采摘品质 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ripeness")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Ripeness")
 	bool bEnableRipeness = true;
 
 	/** 进入结果阶段后，经过多久（秒）达到“成熟”（此窗口内采摘 = 佳品） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ripeness", meta = (EditCondition = "bEnableRipeness", ClampMin = "0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Ripeness", meta = (EditCondition = "bEnableRipeness", ClampMin = "0"))
 	float RipeTime = 8.f;
 
 	/** 进入结果阶段后，经过多久（秒）达到“熟过头”（此窗口后采摘 = 次品） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ripeness", meta = (EditCondition = "bEnableRipeness", ClampMin = "0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Ripeness", meta = (EditCondition = "bEnableRipeness", ClampMin = "0"))
 	float OverripeTime = 25.f;
 };

@@ -33,75 +33,75 @@ public:
 	// ========== 组件（参考 Cropout 镜头控制） ==========
 
 	/** 相机摇臂 */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Components")
 	TObjectPtr<USpringArmComponent> CameraBoom;
 
 	/** 跟随相机 */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Components")
 	TObjectPtr<UCameraComponent> FollowCamera;
 
 	/** 光标（3D 指示器） */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Components")
 	TObjectPtr<UStaticMeshComponent> Cursor;
 
 	/** 静态网格体组件 */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Components")
 	TObjectPtr<UStaticMeshComponent> MeshComponent;
 
 	/** 碰撞盒子 */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Components")
 	TObjectPtr<UBoxComponent> Collision;
 
 	/** 悬浮移动组件（用于 AddMovementInput） */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Components")
 	TObjectPtr<UFloatingPawnMovement> MovementComponent;
 
 	// ========== 输入 ==========
 
 	/** 键盘移动 Action（Axis2D 类型，绑定 WASD / 方向键） */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Shoot|Input")
 	TObjectPtr<UInputAction> MoveAction;
 
 	/** 交互按键 Action（绑定 E 键） */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Shoot|Input")
 	TObjectPtr<UInputAction> InteractAction;
 
 	// ========== 移动 ==========
 
 	/** 移动速度 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Movement")
 	float MoveSpeed = 600.0f;
 
 	/** 旋转插值速度 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Movement")
 	float RotationInterpSpeed = 10.0f;
 
 	// ========== 悬停缩放 ==========
 
 	/** 悬停时 Actor 的缩放倍数 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Overlap")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Overlap")
 	float HoverScale = 1.2f;
 
 	/** 缩放动画插值速度 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Overlap")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Overlap")
 	float ScaleAnimInterpSpeed = 8.0f;
 
 	// ========== Mesh Ping-Pong 缩放动画 ==========
 
 	/** 是否启用 Mesh Ping-Pong 动画 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MeshPingPong")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|MeshPingPong")
 	bool bEnableMeshPingPong = true;
 
 	/** Ping-Pong 最小缩放 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MeshPingPong")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|MeshPingPong")
 	float MeshPingPongMinScale = 0.9f;
 
 	/** Ping-Pong 最大缩放 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MeshPingPong")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|MeshPingPong")
 	float MeshPingPongMaxScale = 1.1f;
 
 	/** Ping-Pong 动画速度 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MeshPingPong")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|MeshPingPong")
 	float MeshPingPongSpeed = 2.0f;
 
 	/** Ping-Pong 累计时间 */
@@ -110,27 +110,27 @@ public:
 	// ========== 地面跟随（Mesh 贴地） ==========
 
 	/** 是否启用 Mesh 贴地移动 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GroundFollow")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GroundFollow")
 	bool bEnableGroundFollow = true;
 
 	/** 向下检测地面的距离 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GroundFollow")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GroundFollow")
 	float GroundTraceDistance = 500.0f;
 
 	/** 贴地高度偏移（正=离地更高） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GroundFollow")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GroundFollow")
 	float GroundFollowOffset = 0.0f;
 
 	/** 贴地平滑插值速度 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GroundFollow")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GroundFollow")
 	float GroundFollowInterpSpeed = 12.0f;
 
 	/** 是否启用斜坡旋转对齐 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GroundFollow")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GroundFollow")
 	bool bEnableSlopeAlign = true;
 
 	/** 斜坡旋转对齐插值速度 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GroundFollow")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GroundFollow")
 	float SlopeRotationInterpSpeed = 8.0f;
 
 protected:

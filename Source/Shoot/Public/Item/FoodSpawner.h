@@ -25,15 +25,15 @@ public:
 	 *  >0 表示剩余数量，每次拾取生成后减一，减到 0 即停。
 	 * 在蓝图实例上按食材种类设置（如番茄箱设 5）。
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Spawn")
 	int32 RemainingCount = -1;
 
 	/** 是否还能生成：仓库驱动模式下取决于仓库是否有该食材库存；否则原逻辑（无限或剩余>0） */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Spawn")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Spawn")
 	bool CanSpawn() const;
 
 	/** 成功生成一次后消耗一个数量（无限模式不影响），并写回存档 */
-	UFUNCTION(BlueprintCallable, Category = "Spawn")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Spawn")
 	void ConsumeOne();
 
 	/** 关卡加载时从存档恢复剩余数量（首次则写入初始默认值） */
@@ -44,7 +44,7 @@ public:
 	 * 由「关卡名 + Actor 名」做确定性哈希得到：编辑器 / PIE / 打包 exe 三种环境下完全一致，
 	 * 因此不依赖只存在于编辑器构建的 Actor GUID（AActor::GetActorGuid 在打包版不存在）。
 	 */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Spawn|Save", meta = (DisplayName = "存档标识(自动)"))
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Spawn|Save", meta = (DisplayName = "存档标识(自动)"))
 	FGuid SpawnerGuid;
 
 	/**
@@ -52,19 +52,19 @@ public:
 	 * 关卡里给箱子改过名字、或箱子是运行时生成的（名字不稳定）时，填一个固定字符串，
 	 * 就能保证重命名之后仍然读回同一份存档数据。
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn|Save")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Spawn|Save")
 	FName SpawnerKeyOverride;
 
 	/** 取存档标识（首次调用时计算并缓存）；本类读写存档都用它，也可在蓝图里查看 */
-	UFUNCTION(BlueprintCallable, Category = "Spawn|Save")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Spawn|Save")
 	FGuid GetSpawnerSaveGuid();
 
 	/** 触发生成时广播（蓝图可挂特效/音效，或自行处理生成相关逻辑） */
-	UPROPERTY(BlueprintAssignable, Category = "Spawn")
+	UPROPERTY(BlueprintAssignable, Category = "Shoot|Spawn")
 	FSpawnActorEvent OnSpawnActor;
 
 	/** 触发生成广播（保持原 AItemActor::OnSpawnActorEvent 的行为） */
-	UFUNCTION(BlueprintCallable, Category = "Spawn")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Spawn")
 	void OnSpawnActorEvent();
 
 private:

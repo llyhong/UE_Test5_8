@@ -73,97 +73,97 @@ public:
 	/** 天气切换广播（参数：旧天气 ID、新天气 ID） */
 	DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnWeatherChanged, FName, OldWeatherID, FName, NewWeatherID);
 
-	UPROPERTY(BlueprintAssignable, Category = "Weather")
+	UPROPERTY(BlueprintAssignable, Category = "Shoot|Weather")
 	FOnWeatherChanged OnWeatherChanged;
 
 	// ========== 配置 ==========
 	/** 天气预设表（行结构 FWeatherPreset，RowName 即天气 ID） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Weather")
 	TObjectPtr<UDataTable> WeatherTable;
 
 	/** 起始天气 ID（留空则开局自动按季节随机） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Weather")
 	FName StartWeatherID;
 
 	/** BeginPlay 时若 StartWeatherID 为空，是否自动选一个天气 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Weather")
 	bool bAutoSelectOnBeginPlay = true;
 
 	/** 是否每天按季节权重自动切换天气 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Weather")
 	bool bAutoSelectDaily = true;
 
 	/** 预设未填 TransitionSeconds 时的默认过渡时长（秒） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather", meta = (ClampMin = "0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Weather", meta = (ClampMin = "0"))
 	float DefaultTransitionSeconds = 12.f;
 
 	/** 随机种子（0 = 每次运行随机） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Weather")
 	int32 RandomSeed = 0;
 
 	/** 云参数集合（默认尝试加载 UDS 的 UDS_VolumetricClouds_MPC；留空则只驱动云材质） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather|Clouds")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Weather|Clouds")
 	TObjectPtr<UMaterialParameterCollection> CloudParameterCollection;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Weather")
 	bool bShowDebugInfo = false;
 
 	// ========== 场景绑定（留空时 BeginPlay 自动按类型查找） ==========
-	UPROPERTY(EditAnywhere, Category = "Weather|Scene")
+	UPROPERTY(EditAnywhere, Category = "Shoot|Weather|Scene")
 	TObjectPtr<ASkyLight> SkyLightActor;
 
-	UPROPERTY(EditAnywhere, Category = "Weather|Scene")
+	UPROPERTY(EditAnywhere, Category = "Shoot|Weather|Scene")
 	TObjectPtr<AExponentialHeightFog> HeightFogActor;
 
-	UPROPERTY(EditAnywhere, Category = "Weather|Scene")
+	UPROPERTY(EditAnywhere, Category = "Shoot|Weather|Scene")
 	TObjectPtr<AVolumetricCloud> VolumetricCloudActor;
 
-	UPROPERTY(EditAnywhere, Category = "Weather|Scene")
+	UPROPERTY(EditAnywhere, Category = "Shoot|Weather|Scene")
 	TObjectPtr<AWindDirectionalSource> WindSourceActor;
 
 	/** 降水粒子跟随玩家时的高度偏移 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather|Precipitation")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Weather|Precipitation")
 	float PrecipitationFollowHeight = 400.f;
 
 	/** 雷电闪光强度 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather|Lightning", meta = (ClampMin = "0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Weather|Lightning", meta = (ClampMin = "0"))
 	float LightningFlashIntensity = 20000.f;
 
 	/** 单次闪电衰减时长（秒） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather|Lightning", meta = (ClampMin = "0.01"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Weather|Lightning", meta = (ClampMin = "0.01"))
 	float LightningFlashDuration = 0.25f;
 
 	/** 闪电光源相对玩家上方的高度 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weather|Lightning")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Weather|Lightning")
 	float LightningLightHeight = 1500.f;
 
 	// ========== 运行时查询（供 UI / 其他系统） ==========
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Weather")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Weather")
 	FName GetCurrentWeatherID() const { return CurrentWeatherID; }
 
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Weather")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Weather")
 	bool IsWeatherTransitioning() const { return bTransitioning; }
 
 	/** 取当前天气预设（表里找不到返回 false） */
-	UFUNCTION(BlueprintCallable, Category = "Weather")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Weather")
 	bool GetCurrentWeatherInfo(FWeatherPreset& OutPreset) const;
 
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Weather")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Weather")
 	FText GetCurrentWeatherName() const { return CurrentPreset.DisplayName; }
 
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Weather")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Weather")
 	FText GetCurrentWeatherDescription() const { return CurrentPreset.Description; }
 
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Weather")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Weather")
 	TSoftObjectPtr<UTexture2D> GetCurrentWeatherIcon() const { return CurrentPreset.Icon; }
 
 	// ========== 控制 ==========
 	/** 切到指定天气（bInstant=true 跳过过渡）；ID 不存在返回 false */
-	UFUNCTION(BlueprintCallable, Category = "Weather")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Weather")
 	bool SetWeatherByID(FName InWeatherID, bool bInstant = false);
 
 	/** 立即按当前季节权重抽一个天气并切换 */
-	UFUNCTION(BlueprintCallable, Category = "Weather")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Weather")
 	bool SelectDailyWeather();
 
 protected:

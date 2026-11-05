@@ -17,10 +17,10 @@ class SHOOT_API ATopDownCharacter : public ACharacter
 	GENERATED_BODY()
 private:
 	
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components", meta = (AllowPrivateAccess = "true"))
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Components", meta = (AllowPrivateAccess = "true"))
 	class UCameraComponent* TopDownCameraComponent;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Components", meta = (AllowPrivateAccess = "true"))
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Components", meta = (AllowPrivateAccess = "true"))
 	class USpringArmComponent* CameraBoom;
 	
 public:
@@ -34,7 +34,7 @@ public:
 
 	FORCEINLINE class USpringArmComponent* GetCameraBoom() const { return CameraBoom; }
 
-	UFUNCTION(BlueprintCallable, Category="Input")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Input")
 	virtual void DoMove(float Right, float Forward);
 
 protected:
@@ -43,22 +43,22 @@ protected:
 
 protected:
 
-	UPROPERTY(EditAnywhere, Category="Input")
+	UPROPERTY(EditAnywhere, Category = "Shoot|Input")
 	UNiagaraSystem* FXCursor;
 	
-	UPROPERTY(EditAnywhere, Category="Input")
+	UPROPERTY(EditAnywhere, Category = "Shoot|Input")
 	float ShortPressThreshold;
 	
-	UPROPERTY(EditAnywhere, Category="Input")
+	UPROPERTY(EditAnywhere, Category = "Shoot|Input")
 	UInputMappingContext* DefaultMappingContext;
 	
-	UPROPERTY(EditAnywhere, Category="Input")
+	UPROPERTY(EditAnywhere, Category = "Shoot|Input")
 	UInputAction* SetDestinationClickAction;
 
-	UPROPERTY(EditAnywhere, Category="Input")
+	UPROPERTY(EditAnywhere, Category = "Shoot|Input")
 	UInputAction* SetDestinationTouchAction;
 	
-	UPROPERTY(EditAnywhere, Category="Input")
+	UPROPERTY(EditAnywhere, Category = "Shoot|Input")
 	UInputAction* MoveAction;
 
 	uint32 bMoveToMouseCursor : 1;

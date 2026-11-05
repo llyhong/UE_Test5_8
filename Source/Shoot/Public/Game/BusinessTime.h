@@ -35,184 +35,184 @@ public:
 	DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBusinessOpenChanged, bool, bOpen);
 
 	/** 起始日期 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Time")
 	int32 StartYear = 1;
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Time")
 	int32 StartMonth = 1;
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Time")
 	int32 StartDay = 1;
 
 	/** 每月天数（用于月末翻月） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time", meta = (ClampMin = "1", ClampMax = "31"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Time", meta = (ClampMin = "1", ClampMax = "31"))
 	int32 DaysPerMonth = 30;
 
 	/** 一天的“营业日”起止小时：DayProgress=0 映射 DayStartHour，=1 映射 DayEndHour（如 8~22），而非 0~24 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time", meta = (ClampMin = "0", ClampMax = "24"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Time", meta = (ClampMin = "0", ClampMax = "24"))
 	float DayStartHour = 8.f;
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time", meta = (ClampMin = "0", ClampMax = "24"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Time", meta = (ClampMin = "0", ClampMax = "24"))
 	float DayEndHour = 22.f;
 
 	/** 每个游戏日对应的真实秒数（越小时间流逝越快；<=0 则停止推进） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time", meta = (ClampMin = "0.1"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Time", meta = (ClampMin = "0.1"))
 	float RealSecondsPerDay = 100.f;
 
 	/** 是否自动推进（关闭后需手动调用 AdvanceDay） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Time")
 	bool bAutoAdvance = true;
 
 	// ========== 季节（由月份换算，驱动野外采集物按季刷新） ==========
 	/** 每季包含的月数（默认 3 个月一季） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time|Season", meta = (ClampMin = "1", ClampMax = "12"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Time|Season", meta = (ClampMin = "1", ClampMax = "12"))
 	int32 MonthsPerSeason = 3;
 
 	/** 当前季节（只读；随日期推进自动更新） */
-	UPROPERTY(BlueprintReadOnly, Category = "Time|Season")
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Time|Season")
 	ESeason CurrentSeason = ESeason::Spring;
 
 	/** 季节切换广播（参数：旧季节、新季节），供野外采集 / 环境 / UI 监听 */
 	DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnSeasonChanged, ESeason, OldSeason, ESeason, NewSeason);
 
-	UPROPERTY(BlueprintAssignable, Category = "Time|Season")
+	UPROPERTY(BlueprintAssignable, Category = "Shoot|Time|Season")
 	FOnSeasonChanged OnSeasonChanged;
 
 	/** 当前季节（按当前月份实时换算，读档后也不会滞后） */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Time|Season")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Time|Season")
 	ESeason GetSeason() const { return SeasonFromMonth(Month, MonthsPerSeason); }
 
 	/** 当前季节名（春 / 夏 / 秋 / 冬），供 UI 显示 */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Time|Season")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Time|Season")
 	FString GetSeasonName() const;
 
 	/** 由月份换算季节（月份从 1 起；PerSeason 个月一季，超出部分按 4 季循环） */
 	static ESeason SeasonFromMonth(int32 InMonth, int32 InMonthsPerSeason);
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Time")
 	bool bShowDebugInfo = false;
 
 	// ========== 营业时段（小时制：与 DayProgress 映射的 DayStartHour~DayEndHour 同一坐标系） ==========
 	/** 可开始营业的小时（默认 8 = 早上 8 点；玩家到大门按 E 开门后才真正营业） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time|Business")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Time|Business")
 	float OpenHour = 18.f;
 
 	/** 自动打烊小时（默认 22 = 晚上 10 点）：到点自动结束营业（灯灭、清场） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time|Business")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Time|Business")
 	float CloseHour = 22.f;
 
 	/** 是否自动营业：开启后进入营业时段（OpenHour）即自动开门，无需玩家到大门按 E 开门。
 	 *  默认关闭——餐厅默认“打烊/备货、灯灭”，需玩家到大门按 E 开门才真正营业并点亮营业灯饰。 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time|Business")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Time|Business")
 	bool bAutoOpenBusiness = false;
 
 	/** 当前营业状态（运行时）：玩家已开门且仍处于营业时段内才为 true */
-	UPROPERTY(BlueprintReadOnly, Category = "Time|Business")
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Time|Business")
 	bool bIsBusinessOpen = false;
 
 	/** 营业状态变化广播（true=开门营业，false=打烊），供灯饰 / 客人系统 / UI 监听 */
-	UPROPERTY(BlueprintAssignable, Category = "Time|Business")
+	UPROPERTY(BlueprintAssignable, Category = "Shoot|Time|Business")
 	FOnBusinessOpenChanged OnBusinessOpenChanged;
 
 	/** 当前日期（只读） */
-	UPROPERTY(BlueprintReadOnly, Category = "Time")
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Time")
 	int32 Year = 1;
-	UPROPERTY(BlueprintReadOnly, Category = "Time")
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Time")
 	int32 Month = 1;
-	UPROPERTY(BlueprintReadOnly, Category = "Time")
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Time")
 	int32 Day = 1;
 
 	/** 当天进度 0~1（用于 UI 进度条） */
-	UPROPERTY(BlueprintReadOnly, Category = "Time")
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Time")
 	float DayProgress = 0.f;
 
 	/** 当前一天内的小时（落在 DayStartHour~DayEndHour，默认 8~22），由 DayProgress 映射；营业 / 太阳都以此为准 */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Time")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Time")
 	float GetCurrentHour() const { return DayStartHour + DayProgress * (DayEndHour - DayStartHour); }
 
 	/** 当前是否处于可营业时段（OpenHour <= 小时 < CloseHour；假设不跨午夜） */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Time|Business")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Time|Business")
 	bool IsWithinBusinessHours() const;
 
 	/** 是否已营业（玩家已开门且仍在营业时段内） */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Time|Business")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Time|Business")
 	bool IsBusinessOpen() const { return bIsBusinessOpen; }
 
 	/** 玩家到大门按 E 开门营业：成功返回 true（已营业也返回 true），未到营业时段返回 false */
-	UFUNCTION(BlueprintCallable, Category = "Time|Business")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Time|Business")
 	bool OpenBusiness();
 
 	/** 手动打烊（玩家可提前关门，或夜间自动打烊时调用） */
-	UFUNCTION(BlueprintCallable, Category = "Time|Business")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Time|Business")
 	void CloseBusiness();
 
 	// ========== 太阳（DirectionalLight）随一天时间变化 ==========
 	/** 要随日出日落驱动的平行光（太阳）。为空时由关卡在 BeginPlay 自动按标签"Sun"或首个 DirectionalLight 绑定 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time|Sun")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Time|Sun")
 	TObjectPtr<ADirectionalLight> SunLight;
 
 	/** 是否自动驱动太阳（角度 / 颜色 / 强度随 DayProgress 变化）；关闭则只走日期 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time|Sun")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Time|Sun")
 	bool bDriveSun = true;
 
 	/** 正午太阳强度 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time|Sun", meta = (ClampMin = "0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Time|Sun", meta = (ClampMin = "0"))
 	float NoonIntensity = 3.f;
 	/** 夜晚（日落后）太阳强度（很低，靠灯饰补光） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time|Sun", meta = (ClampMin = "0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Time|Sun", meta = (ClampMin = "0"))
 	float NightIntensity = 0.05f;
 
 	/** 正午太阳颜色（偏白） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time|Sun")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Time|Sun")
 	FLinearColor NoonColor = FLinearColor(1.f, 0.98f, 0.92f);
 	/** 日出 / 日落颜色（偏暖橙） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time|Sun")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Time|Sun")
 	FLinearColor SunsetColor = FLinearColor(1.f, 0.55f, 0.2f);
 	/** 夜晚颜色（偏冷蓝） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time|Sun")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Time|Sun")
 	FLinearColor NightColor = FLinearColor(0.2f, 0.3f, 0.6f);
 
 	/** 天气对太阳的强度倍率（由 AWeatherSystem 写入，UpdateSun 里与日变化强度相乘） */
-	UPROPERTY(BlueprintReadOnly, Category = "Time|Sun")
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Time|Sun")
 	float WeatherSunIntensityScale = 1.f;
 
 	/** 天气对太阳颜色的染色（与日变化颜色相乘，晴天为白色） */
-	UPROPERTY(BlueprintReadOnly, Category = "Time|Sun")
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Time|Sun")
 	FLinearColor WeatherSunColorTint = FLinearColor::White;
 
 	/** 天气系统每帧写入太阳修正（强度倍率 + 颜色染色） */
-	UFUNCTION(BlueprintCallable, Category = "Time|Sun")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Time|Sun")
 	void SetWeatherSunModifiers(float InIntensityScale, FLinearColor InColorTint);
 
 	/** 日出小时（默认 6 点）、日落小时（默认 18 点）：两者之间为白天，之外为夜晚 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time|Sun")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Time|Sun")
 	float SunriseHour = 6.f;
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Time|Sun")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Time|Sun")
 	float SunsetHour = 18.f;
 
 	/** 根据当前 DayProgress 更新太阳方向 / 颜色 / 强度（SunLight 为空或 bDriveSun=false 时跳过） */
-	UFUNCTION(BlueprintCallable, Category = "Time|Sun")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Time|Sun")
 	void UpdateSun();
 
 	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnDateChanged, int32, Year, int32, Month, int32, Day);
 
 	/** 每过一天触发（年/月变化当天也会先触发本事件，再触发 OnMonth/OnYear） */
-	UPROPERTY(BlueprintAssignable, Category = "Time")
+	UPROPERTY(BlueprintAssignable, Category = "Shoot|Time")
 	FOnDateChanged OnDayChanged;
 	/** 跨月时触发（含跨年那次） */
-	UPROPERTY(BlueprintAssignable, Category = "Time")
+	UPROPERTY(BlueprintAssignable, Category = "Shoot|Time")
 	FOnDateChanged OnMonthChanged;
 	/** 跨年时触发 */
-	UPROPERTY(BlueprintAssignable, Category = "Time")
+	UPROPERTY(BlueprintAssignable, Category = "Shoot|Time")
 	FOnDateChanged OnYearChanged;
 
 	/** 初始化起始日期并清零累计器（由 UBusinessSimulation::Init 调用） */
-	UFUNCTION(BlueprintCallable, Category = "Time")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Time")
 	void Init();
 
 	/** 暂停 / 恢复走时 */
-	UFUNCTION(BlueprintCallable, Category = "Time")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Time")
 	void SetPaused(bool bPaused) { bPausedState = bPaused; }
 
 	/** 手动推进 n 天（调试 / 暂停态下使用） */
-	UFUNCTION(BlueprintCallable, Category = "Time")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Time")
 	void AdvanceDays(int32 Days);
 
 	// ---- FTickableGameObject ----

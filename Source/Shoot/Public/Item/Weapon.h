@@ -34,22 +34,22 @@ protected:
 private:
 	void BoxTrace(FHitResult& BoxHit);
 	
-	UPROPERTY(VisibleAnywhere, Category = "Weapon Properties")
+	UPROPERTY(VisibleAnywhere, Category = "Shoot|Weapon Properties")
 	UBoxComponent* WeaponBox;
 
-	UPROPERTY(EditAnywhere, Category = "Weapon Properties")
+	UPROPERTY(EditAnywhere, Category = "Shoot|Weapon Properties")
 	FVector BoxTraceExtent = FVector(5.f);
 
-	UPROPERTY(EditAnywhere, Category = "Weapon Properties")
+	UPROPERTY(EditAnywhere, Category = "Shoot|Weapon Properties")
 	bool bShowBoxDebug = false;
 	
-	UPROPERTY(VisibleAnywhere)
+	UPROPERTY(VisibleAnywhere, Category = "Shoot|Item")
 	USceneComponent* BoxTraceStart;
 
-	UPROPERTY(VisibleAnywhere)
+	UPROPERTY(VisibleAnywhere, Category = "Shoot|Item")
 	USceneComponent* BoxTraceEnd;
 
-	UPROPERTY(EditAnywhere, Category = "Weapon Properties")
+	UPROPERTY(EditAnywhere, Category = "Shoot|Weapon Properties")
 	float Damage = 20.f;
 	
 public:
@@ -60,6 +60,6 @@ public:
 
 	// 攻击命中动物：读取动物当前血量，耗尽则触发 Die，否则扣血(更新血量)。
 	// 仅当持有者处于攻击状态时结算(武器碰撞箱只在攻击时启用，这里再兜底校验)。
-	UFUNCTION(BlueprintCallable, Category = "Combat")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Combat")
 	void DealDamageToAnimal(AAnimalCharacter* Animal, const FVector& ImpactPoint);
 };

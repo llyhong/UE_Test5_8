@@ -34,21 +34,21 @@ public:
 	virtual void BeginPlay() override;
 
 	/** 洗碗机外观模型（可在蓝图/实例上选择网格） */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Components")
 	UStaticMeshComponent* DishwasherMesh;
 
 	/** 交互范围：玩家进入后注册为可交还碟子的洗碗机 */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Components")
 	USphereComponent* InteractionSphere;
 
 	// ============ 交互判定尺度（统一标准，见 InteractionConfig.h） ============
 	/** 交互判定半径。C++ 在 OnConstruction（编辑器视口）与 BeginPlay（运行时）都会强制应用，
 	 *  会覆盖组件上残留的旧值；要单独调这台设备就改这里，不要直接改组件上的半径 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction", meta = (ClampMin = "10.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Interaction", meta = (ClampMin = "10.0"))
 	float InteractionRadius = InteractionDistance::Counter;
 
 	/** 判定球心相对 Actor 原点的高度：抬到物体中部，否则贴地的球只在脚踝高度有判定 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Interaction")
 	float InteractionCenterHeight = InteractionDistance::CenterHeight;
 
 	/** 编辑器里改上面的值时立即写进组件，关卡视口中即可看到真实判定球 */
@@ -59,16 +59,16 @@ public:
 	void ApplyInteractionScale();
 
 	/** 交互提示控件（如“按 E 洗碟子”）：靠近时显示，离开隐藏；蓝图可在组件上配置 Widget Class */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Components")
 	TObjectPtr<UWidgetComponent> TipsWidget;
 
 	/** 本关碟子总数：>0 时在 BeginPlay 覆盖盘子系统(APlateSystem)的 TotalCount；
 	 *  <=0 表示沿用盘子系统已有的配置（InitPlateSystem 传入的值）。 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dishwasher", meta = (ClampMin = "0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Dishwasher", meta = (ClampMin = "0"))
 	int32 TotalPlates = 0;
 
 	/** 是否只接受“脏碟”（玩家从桌上收走的碟子）。关闭则手持任何物品都能交还。 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dishwasher")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Dishwasher")
 	bool bRequireDirtyPlate = true;
 
 	/**
@@ -76,23 +76,23 @@ public:
 	 * @param Plate 玩家当前手持的碟子（脏碟）
 	 * @return true 表示交还成功（碟子已被销毁）；false 表示失败（碟子仍由玩家持有）
 	 */
-	UFUNCTION(BlueprintCallable, Category = "Dishwasher")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Dishwasher")
 	bool SubmitPlate(AItemActor* Plate);
 
 	/** 当前可用碟子数（读取盘子系统） */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Dishwasher")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Dishwasher")
 	int32 GetAvailablePlates() const;
 
 	/** 碟子总数（读取盘子系统） */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Dishwasher")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Dishwasher")
 	int32 GetTotalPlates() const;
 
 	/** 交还成功通知（蓝图可重载：播放特效 / 音效 / UI 提示） */
-	UFUNCTION(BlueprintImplementableEvent, Category = "Dishwasher")
+	UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|Dishwasher")
 	void OnPlateReturned(int32 AvailablePlates);
 
 	/** 交还失败通知（蓝图可重载：播放提示）。Reason: "NoPlate" / "NotDirty" / "NoPlateSystem" */
-	UFUNCTION(BlueprintImplementableEvent, Category = "Dishwasher")
+	UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|Dishwasher")
 	void OnPlateReturnFailed(const FString& Reason);
 
 	UFUNCTION()

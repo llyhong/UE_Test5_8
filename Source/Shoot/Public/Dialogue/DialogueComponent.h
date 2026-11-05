@@ -31,11 +31,11 @@ public:
 	UInteractionDialogueComponent();
 
 	/** 对话界面 Widget 类（蓝图继承 UDialogueWidget） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Dialogue")
 	TSubclassOf<UDialogueWidget> DialogueWidgetClass;
 
 	/** 交互球半径。OnRegister（编辑器视口）与 BeginPlay（运行时）都会强制应用到组件上 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Dialogue")
 	float InteractionRadius = InteractionDistance::Counter;
 
 	/** 编辑器里改 InteractionRadius 时立即写进组件，关卡视口中即可看到真实判定球 */
@@ -50,43 +50,43 @@ public:
 	void ApplyInteractionScale();
 
 	/** 是否绘制交互半径调试球（绿色线框），便于在编辑器 / 运行时调整 InteractionRadius */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Debug")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Dialogue|Debug")
 	bool bDebugDrawRadius = false;
 
 	/** 调试球颜色 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Debug")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Dialogue|Debug")
 	FColor DebugRadiusColor = FColor::Green;
 
 	/** 交互提示 Widget 类（“按 E 对话”） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Dialogue")
 	TSubclassOf<UUserWidget> PromptWidgetClass;
 
 	/** 玩家离开交互范围时是否自动关闭对话（满足“离开自动隐藏”需求） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Dialogue")
 	bool bAutoCloseOnLeave = true;
 
 	/** 当 Owner 未实现 IDialogueProvider 时使用的默认标题（可选） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Dialogue")
 	FText DefaultTitle;
 
 	/** 开始对话（玩家按 E 触发）。已对话时忽略 */
-	UFUNCTION(BlueprintCallable, Category = "Dialogue")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Dialogue")
 	void StartDialogue(APawn* Interactor);
 
 	/** 关闭对话（取消按钮或程序调用；玩家离开时也会调用） */
-	UFUNCTION(BlueprintCallable, Category = "Dialogue")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Dialogue")
 	void CloseDialogue();
 
 	/** 当前对话框是否处于打开状态（供切换开/关使用） */
-	UFUNCTION(BlueprintCallable, Category = "Dialogue")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Dialogue")
 	bool IsDialogueOpen() const { return ActiveDialogueWidget != nullptr; }
 
 	/** 是否在对话中（Owner 的 AnimBP 可读取以切换待机 / 交谈动画） */
-	UPROPERTY(BlueprintReadWrite, Category = "Dialogue")
+	UPROPERTY(BlueprintReadWrite, Category = "Shoot|Dialogue")
 	bool bIsTalking = false;
 
 	/** 蓝图实现：开始 / 结束对话时驱动待机 / 交谈动画 */
-	UFUNCTION(BlueprintImplementableEvent, Category = "Dialogue")
+	UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|Dialogue")
 	void OnDialogueStateChanged(bool bOpen);
 
 protected:

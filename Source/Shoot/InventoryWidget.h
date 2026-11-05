@@ -19,14 +19,14 @@ class SHOOT_API UInventoryWidget : public UUserWidget
 
 public:
 	// 背包界面的所属角色(ShootCharacter 打开时赋值)
-	UPROPERTY(BlueprintReadOnly, Category = "Inventory")
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Inventory")
 	TObjectPtr<AShootCharacter> OwnerCharacter;
 
 	// 刷新背包显示：由蓝图实现，从 OwnerCharacter->GetInventoryItems() 读取槽位填充格子
-	UFUNCTION(BlueprintImplementableEvent, Category = "Inventory")
+	UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|Inventory")
 	void RefreshInventory();
 
 	// 关闭背包界面(蓝图按钮可调用)
-	UFUNCTION(BlueprintCallable, Category = "Inventory")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Inventory")
 	void CloseInventory();
 };

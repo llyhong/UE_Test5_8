@@ -34,21 +34,21 @@ public:
 	virtual void BeginPlay() override;
 
 	/** 上菜台外观模型（可在蓝图/实例上选择网格） */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Components")
 	UStaticMeshComponent* CounterMesh;
 
 	/** 交互范围：玩家进入后注册为可提交菜品的上菜台 */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Components")
 	USphereComponent* InteractionSphere;
 
 	// ============ 交互判定尺度（统一标准，见 InteractionConfig.h） ============
 	/** 交互判定半径。C++ 在 OnConstruction（编辑器视口）与 BeginPlay（运行时）都会强制应用，
 	 *  会覆盖组件上残留的旧值；要单独调这台设备就改这里，不要直接改组件上的半径 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction", meta = (ClampMin = "10.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Interaction", meta = (ClampMin = "10.0"))
 	float InteractionRadius = InteractionDistance::Counter;
 
 	/** 判定球心相对 Actor 原点的高度：抬到物体中部，否则贴地的球只在脚踝高度有判定 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Interaction")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Interaction")
 	float InteractionCenterHeight = InteractionDistance::CenterHeight;
 
 	/** 编辑器里改上面的值时立即写进组件，关卡视口中即可看到真实判定球 */
@@ -59,22 +59,22 @@ public:
 	void ApplyInteractionScale();
 
 	/** 菜单数据表（RowStruct = FMenuData）。用于校验提交的成品是否在菜单中 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Serve", meta = (RowStruct = "MenuData"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Serve", meta = (RowStruct = "MenuData"))
 	UDataTable* MenuDataTable = nullptr;
 
 	/** 是否要求必须存在“正在等餐”的客人才算上菜成功（否则仅校验菜单通过后即成功） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Serve")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Serve")
 	bool bRequireWaitingGuest = true;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Serve")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Serve")
 	bool bUseMenuControll = true;
 
 	/** 上菜是否把成品送到客人座位处（false 则维持旧行为：菜在柜台即销毁） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Serve")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Serve")
 	bool bDeliverToSeat = true;
 
 	/** 成品送到客人位置后停留时长（秒）：停留结束才销毁，让玩家看到“菜到了客人面前” */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Serve", meta = (ClampMin = "0.1"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Serve", meta = (ClampMin = "0.1"))
 	float ServeArriveDelay = 1.0f;
 
 	/**
@@ -82,15 +82,15 @@ public:
 	 * @param Dish 玩家当前手持的成品（AItemActor，需带有效的 MenuFoodID）
 	 * @return true 表示成功上菜（Dish 已被消费并销毁）；false 表示失败（Dish 仍由玩家持有）
 	 */
-	UFUNCTION(BlueprintCallable, Category = "Serve")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Serve")
 	bool SubmitDish(AItemActor* Dish);
 
 	/** 上菜成功通知（蓝图可重载：播放特效 / 加分 / UI 提示） */
-	UFUNCTION(BlueprintImplementableEvent, Category = "Serve")
+	UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|Serve")
 	void OnServeSuccess(int32 FoodID);
 
 	/** 上菜失败通知（蓝图可重载：播放提示）。Reason: "NotInMenu" / "NoWaitingGuest" */
-	UFUNCTION(BlueprintImplementableEvent, Category = "Serve")
+	UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|Serve")
 	void OnServeFail(int32 FoodID, const FString& Reason);
 
 	UFUNCTION()

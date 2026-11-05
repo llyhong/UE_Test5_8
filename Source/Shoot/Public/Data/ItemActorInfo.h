@@ -23,16 +23,16 @@ struct FItemActorInfo : public FTableRowBase
 public:
 	/** 物品 ID（兼容兜底用）：行名为纯数字时以行名为准，本字段仅在行名不是数字时生效。
 	 *  取值请用 ResolveItemID(RowName) / FItemActorInfo::GetItemIDFromRowName(RowName) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Data")
 	int32 ItemID = -1;
 
 	/** 物品描述 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Data")
 	FString ItemDes;
 
 	/** 物品图标：食材 / 物品在 UI 上显示的图标（DT_ItemInfo / DT_FoodID 按行配置）。
 	 *  菜品 / 订单 UI 也按 FMenuData::MenuItems 的 key（食材 ItemID）到这里查同一张图 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Data")
 	TObjectPtr<UTexture2D> Icon = nullptr;
 
 	/** 从行名解析物品 ID：行名为纯数字（约定 RowName == ItemID）时返回该值，否则返回 INDEX_NONE */

@@ -13,16 +13,16 @@ struct FPlayerInfo
 	GENERATED_BODY() // 必须包含的宏
 
 	// 定义属性
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlayerInfo")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|PlayerInfo")
 	FString Name;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlayerInfo")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|PlayerInfo")
 	int32 ModelID;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlayerInfo")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|PlayerInfo")
 	int32 Coin;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PlayerInfo")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|PlayerInfo")
 	int32 UserID;
 
 };
@@ -46,7 +46,7 @@ struct  FOrderData
 public:
 	/** 本单包含的菜品 ID：每一项都是菜品表（MenuDataTable / FMenuData）的 FoodID。
 	 *  一般 1 道；自定义套餐（ULevelOrderCfg::Orders）可多道。 */
-	UPROPERTY(EditAnywhere,BlueprintReadWrite)
+	UPROPERTY(EditAnywhere,BlueprintReadWrite, Category = "Shoot|Data")
 	TArray<int32> FoodIDs;
 };
 
@@ -55,9 +55,9 @@ struct  FAppearOrder
 {
 	GENERATED_BODY()
 public:
-	UPROPERTY(EditAnywhere,BlueprintReadWrite)
+	UPROPERTY(EditAnywhere,BlueprintReadWrite, Category = "Shoot|Data")
 	int AppearOrderID;
-	UPROPERTY(EditAnywhere,BlueprintReadWrite)
+	UPROPERTY(EditAnywhere,BlueprintReadWrite, Category = "Shoot|Data")
 	float AppearTime;
 };
 
@@ -66,16 +66,16 @@ struct FFoodInfo  : public FTableRowBase
 {
 	GENERATED_BODY() // 必须包含的宏
 	
-	UPROPERTY(EditAnywhere,BlueprintReadWrite)
+	UPROPERTY(EditAnywhere,BlueprintReadWrite, Category = "Shoot|Data")
 	int32 MachineImageID;
 	// 定义属性
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Data")
 	TObjectPtr<UTexture2D> MachineIcon;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Data")
 	TArray<TObjectPtr<UTexture2D>> OriFoodIcon;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Data")
 	FString Title;
 };
 
@@ -87,13 +87,13 @@ public:
 	/** 可选的"自定义套餐"：需要一单多道菜时才配（只填 FoodIDs，每项 = 菜品表的 FoodID）。
 	 *  留空则订单池完全由菜品表（MenuDataTable）里 Probabilitys>0 的菜品各成一单。
 	 *  价格 / 等待时间 / 套餐名 / 机器图片 / 权重一律由菜品表派生，不再在这里配置。 */
-	UPROPERTY(EditAnywhere,BlueprintReadWrite)
+	UPROPERTY(EditAnywhere,BlueprintReadWrite, Category = "Shoot|Data")
 	TArray<FOrderData> Orders;
-	UPROPERTY(EditAnywhere,BlueprintReadWrite)
+	UPROPERTY(EditAnywhere,BlueprintReadWrite, Category = "Shoot|Data")
 	TArray<FAppearOrder> AppearTimes;
-	UPROPERTY(EditAnywhere,BlueprintReadWrite)
+	UPROPERTY(EditAnywhere,BlueprintReadWrite, Category = "Shoot|Data")
 	int MaxWaitOrderNum;
-	UPROPERTY(EditAnywhere,BlueprintReadWrite)
+	UPROPERTY(EditAnywhere,BlueprintReadWrite, Category = "Shoot|Data")
 	float TargetScore;
 };
 

@@ -20,23 +20,23 @@ struct FGuestStatusRow : public FTableRowBase
 	GENERATED_BODY()
 
 	/** 该配置行适用的客人状态 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guest|Status")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Guest|Status")
 	EGuestState State = EGuestState::Waiting;
 
 	/** 是否为“已吃饱满意”的离场专属行（仅 Leaving 状态区分；其余状态忽略） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guest|Status")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Guest|Status")
 	bool bSatisfied = false;
 
 	/** 该状态的候选台词，随机抽一句显示 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guest|Status")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Guest|Status")
 	TArray<FText> Lines;
 
 	/** 该状态对应的显示颜色（文本 / 气泡主色） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guest|Status")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Guest|Status")
 	FLinearColor Color = FLinearColor::White;
 
 	/** 该状态对应的贴图（如生气表情）；为空则不显示图标 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guest|Status")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Guest|Status")
 	TObjectPtr<UTexture2D> Icon = nullptr;
 };
 
@@ -57,28 +57,28 @@ class SHOOT_API UGuestStatusWidget : public UUserWidget
 public:
 
 	/** 拥有本头顶气泡的客人（由 AGuestCharacter 在状态变化时主动赋值）；蓝图可直接取用，也可自行 Cast */
-	UPROPERTY(BlueprintReadOnly, Category = "Guest|Status")
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Guest|Status")
 	TObjectPtr<AGuestCharacter> OwnerCharacter;
 
 	/** C++ 在把 OwnerCharacter 赋值完成后调用一次，蓝图可在此安全地绑定 OwnerCharacter 的 OnGuestStatusUpdated（Construct 时 OwnerCharacter 尚为 null，故不能在 Construct 里绑定） */
-	UFUNCTION(BlueprintImplementableEvent, Category = "Guest|Status")
+	UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|Guest|Status")
 	void OnOwnerCharacterSet();
 
 
 	/** 是否自动周期性切换台词（每隔随机一段时间，通知蓝图重新抽一句，营造“聊天气泡”频繁换话的感觉） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guest|Status")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Guest|Status")
 	bool bAutoSwitchLine = true;
 
 	/** 自动切换台词的间隔随机区间下限（秒）：每位客人不同，且每次切换后重新随机，避免整齐划一 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guest|Status", meta = (EditCondition = "bAutoSwitchLine", ClampMin = "0.5"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Guest|Status", meta = (EditCondition = "bAutoSwitchLine", ClampMin = "0.5"))
 	float LineSwitchMin = 4.0f;
 
 	/** 自动切换台词的间隔随机区间上限（秒） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Guest|Status", meta = (EditCondition = "bAutoSwitchLine", ClampMin = "0.5"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Guest|Status", meta = (EditCondition = "bAutoSwitchLine", ClampMin = "0.5"))
 	float LineSwitchMax = 10.0f;
 
 	/** 周期性切换台词时通知蓝图：蓝图应读取 OwnerCharacter 当前状态，重新从配置表抽一句并刷新文本/图标 */
-	UFUNCTION(BlueprintImplementableEvent, Category = "Guest|Status")
+	UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|Guest|Status")
 	void OnSwitchLine();
 
 protected:

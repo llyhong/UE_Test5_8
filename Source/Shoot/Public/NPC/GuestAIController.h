@@ -31,28 +31,28 @@ public:
 	void MoveToSeatActor(AActor* Target, AGuestCharacter* Guest);
 
 	/** 座位寻路最大重试次数（应对生成点尚未落地 / 导航未就绪导致的 Failed） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GuestAI")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GuestAI")
 	int32 MaxSeatMoveRetries = 5;
 
 	/** 座位寻路每次重试的间隔（秒） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GuestAI")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GuestAI")
 	float SeatMoveRetryInterval = 0.3f;
 
 	/** 入座判定距离（cm）：与座位距离小于该值即视为到达并坐下 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GuestAI")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GuestAI")
 	float SeatArriveRadius = 120.0f;
 
 	/** 入座“卡住吸附”距离（cm）：客人已停止移动（被桌子/碰撞挡住）且与座位小于该值，也视为到达并坐下。
 	 *  用于应对终点被桌椅碰撞阻挡、导航投影点离座位较远的情况，避免客人停在桌边却坐不上去。 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GuestAI")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GuestAI")
 	float SeatStuckRadius = 250.0f;
 
 	/** 是否输出寻路/到达等调试信息（屏幕消息与 UE_LOG） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GuestAI|Debug")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GuestAI|Debug")
 	bool bShowDebugInfo = false;
 
 	/** 徘徊到达判定距离（cm）：与徘徊点距离小于该值即视为到达 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GuestAI")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GuestAI")
 	float WanderAcceptRadius = 60.0f;
 
 	/** 在 Center 附近 Radius 范围内开始随机徘徊（走走停停）。PauseMin/PauseMax 为每次驻足时长范围（秒） */

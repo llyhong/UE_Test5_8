@@ -18,19 +18,19 @@ struct FEventSpawnArea
 	GENERATED_BODY()
 
 	/** 区域标签：配置表里用同名字符串引用（如 Kitchen / DiningRoom） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Event")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Event")
 	FName Label = TEXT("Kitchen");
 
 	/** 圆心（世界坐标；关卡里改本 Actor 的位置不影响这里，直接在数组元素上填） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Event")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Event")
 	FVector Center = FVector::ZeroVector;
 
 	/** 半径（cm） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Event", meta = (ClampMin = "0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Event", meta = (ClampMin = "0"))
 	float Radius = 350.f;
 
 	/** 是否向下打线贴地 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Event")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Event")
 	bool bSnapToGround = true;
 };
 
@@ -71,52 +71,52 @@ public:
 
 	// ==================== 配置 ====================
 	/** 突发事件配置表（行结构 FRandomEventInfo；RowName 即 EventID） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RandomEvent|Config")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|RandomEvent|Config")
 	TObjectPtr<UDataTable> EventTable;
 
 	/** 生成区域列表：配置表用 SpawnAreaLabel 引用；找不到时退回本 Actor 位置 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RandomEvent|Config")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|RandomEvent|Config")
 	TArray<FEventSpawnArea> SpawnAreas;
 
 	/** 是否自动随机触发（关闭后只能蓝图/控制台手动 StartEventByName，适合调试） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RandomEvent|Config")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|RandomEvent|Config")
 	bool bAutoTrigger = true;
 
 	/** 检查间隔（秒）：每隔这么久掷一次骰子。越小事件越密集 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RandomEvent|Config", meta = (ClampMin = "1.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|RandomEvent|Config", meta = (ClampMin = "1.0"))
 	float CheckIntervalSeconds = 15.f;
 
 	/** 两次事件之间的全局冷却（秒，从上一次结算算起） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RandomEvent|Config", meta = (ClampMin = "0.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|RandomEvent|Config", meta = (ClampMin = "0.0"))
 	float MinTimeBetweenEventsSeconds = 60.f;
 
 	/** 随机种子：0 = 每局不同；非 0 可复现（调试用） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RandomEvent|Config")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|RandomEvent|Config")
 	int32 RandomSeed = 0;
 
 	/** 打印触发 / 结算日志与屏幕提示 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RandomEvent|Debug")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|RandomEvent|Debug")
 	bool bShowDebugInfo = true;
 
 	// ==================== 运行时状态 ====================
 	/** 当前事件 ID（RowName）；None 表示没有进行中的事件 */
-	UPROPERTY(BlueprintReadOnly, Category = "RandomEvent|Runtime")
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|RandomEvent|Runtime")
 	FName ActiveEventID;
 
 	/** 当前事件配置副本（HUD 可直接读取） */
-	UPROPERTY(BlueprintReadOnly, Category = "RandomEvent|Runtime")
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|RandomEvent|Runtime")
 	FRandomEventInfo ActiveEventInfo;
 
 	/** 当前事件剩余时间（秒）；<=0 且仍激活表示没有超时限制 */
-	UPROPERTY(BlueprintReadOnly, Category = "RandomEvent|Runtime")
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|RandomEvent|Runtime")
 	float ActiveEventRemainingSeconds = 0.f;
 
 	/** 已处理数量（抓住的害虫数） */
-	UPROPERTY(BlueprintReadOnly, Category = "RandomEvent|Runtime")
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|RandomEvent|Runtime")
 	int32 ActiveClearedCount = 0;
 
 	/** 需要处理的总数量 */
-	UPROPERTY(BlueprintReadOnly, Category = "RandomEvent|Runtime")
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|RandomEvent|Runtime")
 	int32 ActiveTotalCount = 0;
 
 	/** 当前事件生成出来的害虫（内部持有，避免被 GC） */
@@ -124,44 +124,44 @@ public:
 	TArray<TObjectPtr<APestActor>> ActivePests;
 
 	// ==================== 事件 ====================
-	UPROPERTY(BlueprintAssignable, Category = "RandomEvent|Events")
+	UPROPERTY(BlueprintAssignable, Category = "Shoot|RandomEvent|Events")
 	FOnRandomEventStarted OnEventStarted;
 
-	UPROPERTY(BlueprintAssignable, Category = "RandomEvent|Events")
+	UPROPERTY(BlueprintAssignable, Category = "Shoot|RandomEvent|Events")
 	FOnRandomEventResolved OnEventResolved;
 
-	UPROPERTY(BlueprintAssignable, Category = "RandomEvent|Events")
+	UPROPERTY(BlueprintAssignable, Category = "Shoot|RandomEvent|Events")
 	FOnRandomEventProgress OnEventProgress;
 
 	// ==================== 蓝图接口 ====================
 	/** 手动触发指定事件（调试 / 剧情用）；成功返回 true */
-	UFUNCTION(BlueprintCallable, Category = "RandomEvent")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|RandomEvent")
 	bool StartEventByName(FName EventID);
 
 	/** 结算当前事件：成功=奖励声誉；失败=扣声誉，并按配置吓跑客人 */
-	UFUNCTION(BlueprintCallable, Category = "RandomEvent")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|RandomEvent")
 	void ResolveActiveEvent(bool bSuccess);
 
 	/** 静默结束当前事件（不结算、不扣声誉）：清掉生成物 */
-	UFUNCTION(BlueprintCallable, Category = "RandomEvent")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|RandomEvent")
 	void CancelActiveEvent();
 
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "RandomEvent")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|RandomEvent")
 	bool HasActiveEvent() const { return ActiveEventID != NAME_None; }
 
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "RandomEvent")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|RandomEvent")
 	FText GetActiveEventTitle() const { return ActiveEventInfo.Title; }
 
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "RandomEvent")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|RandomEvent")
 	FText GetActiveEventDescription() const { return ActiveEventInfo.Description; }
 
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "RandomEvent")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|RandomEvent")
 	float GetActiveEventRemainingSeconds() const { return ActiveEventRemainingSeconds; }
 
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "RandomEvent")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|RandomEvent")
 	int32 GetActiveClearedCount() const { return ActiveClearedCount; }
 
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "RandomEvent")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|RandomEvent")
 	int32 GetActiveTotalCount() const { return ActiveTotalCount; }
 
 protected:

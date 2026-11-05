@@ -29,44 +29,44 @@ class SHOOT_API UFoodSystem : public UObject
 public:
 	/** 物品信息表（DT_ItemInfo，RowStruct = FItemActorInfo）：食材图标/描述按 ItemID 从这里取。
 	 *  直接改这个属性后，下次取图标会自动重建索引（也可显式调 InitItemInfoTable） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Item")
 	TObjectPtr<UDataTable> ItemInfoTable = nullptr;
 
 	void InitMenuData(UDataTable* MenuDataTable);
 
 	/** 初始化物品表（DT_FoodID / DT_ItemInfo）；传 null 时清空索引（食材图标会取不到） */
-	UFUNCTION(BlueprintCallable)
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Food")
 	void InitItemInfoTable(UDataTable* ItemDataTable);
 
-	UFUNCTION(BlueprintCallable)
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Food")
 	FMenuData GetMenuData(int32 FoodID);
 
 	/** 按 ItemID 取物品/食材图标（DT_FoodID / DT_ItemInfo 的 Icon）；取不到时返回 null */
-	UFUNCTION(BlueprintCallable, BlueprintPure)
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Food")
 	UTexture2D* GetItemIcon(int32 ItemID);
 
 	/** 按 ItemID 取食材图标（FItemActorInfo::Icon，与 GetItemIcon 同一字段）；取不到时返回 null */
-	UFUNCTION(BlueprintCallable, BlueprintPure)
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Food")
 	UTexture2D* GetItemFoodIcon(int32 ItemID);
 
 	/** 按 FoodID 取菜品成品图标（菜品表 MenuIcon）；没配 MenuIcon 时退回第一个食材的图标 */
-	UFUNCTION(BlueprintCallable, BlueprintPure)
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Food")
 	UTexture2D* GetFoodIcon(int32 FoodID);
 
 	/** 按 FoodID + 食材 ItemID 取该食材的图标（FItemActorInfo::Icon）；取不到时返回 null */
-	UFUNCTION(BlueprintCallable, BlueprintPure)
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Food")
 	UTexture2D* GetFoodItemIcon(int32 FoodID, int32 ItemID);
 
 	/** 该菜品用到的食材 ItemID 列表（MenuItems 的键，与 GetFoodItemIcon 的 ItemID 对应） */
-	UFUNCTION(BlueprintCallable, BlueprintPure)
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Food")
 	TArray<int32> GetFoodItemIDs(int32 FoodID) const;
 	/** 按机器 ID 取可制作的菜品 ID 列表：菜品的 MachineID 为 0 视为通用；
 	 *  MachineID<=0 时返回全部菜品 */
-	UFUNCTION(BlueprintCallable, BlueprintPure)
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Food")
 	TArray<int32> GetFoodIDsByMachine(int32 MachineID) const;
 	/** 生成成品模型。SpawnLocation 建议传"盘子/灶台的世界位置"：
 	 *  以前固定生成在世界原点，一旦挂点失败成品就停在地图原点（常常在地板以下）。 */
-	UFUNCTION(BlueprintCallable)
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Food")
 	ABaseFoodActor* CreateFoodActor(int32 FoodID, const FVector& SpawnLocation = FVector::ZeroVector);
 
 private:

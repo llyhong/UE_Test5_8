@@ -27,19 +27,19 @@ public:
 	virtual void Tick(float DeltaTime) override;
 
 	/** Widget 组件 */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Components")
 	TObjectPtr<UWidgetComponent> WidgetComp;
 
 	/** 关联的 Data Table Row */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Data")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Data")
 	FDataTableRowHandle LevelDataTableRow;
 
 	/** 光标悬停进入时触发（蓝图可重写） */
-	UFUNCTION(BlueprintImplementableEvent, Category = "Cursor")
+	UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|Cursor")
 	void OnBeginCursorOverlap();
 
 	/** 光标悬停离开时触发（蓝图可重写） */
-	UFUNCTION(BlueprintImplementableEvent, Category = "Cursor")
+	UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|Cursor")
 	void OnEndCursorOverlap();
 
 	/** 显示 Widget */

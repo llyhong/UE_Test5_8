@@ -26,7 +26,7 @@ public:
 	//Blueprint Native Event NO.139
 	virtual void GetHit_Implementation(const FVector& ImpactPoint, AActor* Hitter) override;
 private:
-	UPROPERTY(VisibleAnywhere)
+	UPROPERTY(VisibleAnywhere, Category = "Shoot|Breakable")
 	UGeometryCollectionComponent* GeometryCollection;
 	
 };

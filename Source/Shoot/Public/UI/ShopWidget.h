@@ -21,35 +21,35 @@ class SHOOT_API UShopWidget : public UUserWidget
 
 public:
 	// 商店界面的所属角色(ShootCharacter 打开时赋值)
-	UPROPERTY(BlueprintReadOnly, Category = "Shop")
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Shop")
 	TObjectPtr<AShootCharacter> OwnerCharacter;
 
 	// 绑定经济系统（创建后由角色调用）
-	UFUNCTION(BlueprintCallable, Category = "Shop")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Shop")
 	void BindEconomy(UEconomySystem* Eco);
 
 	// 返回配置的商品列表（蓝图用于生成商品条目）
-	UFUNCTION(BlueprintCallable, Category = "Shop")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Shop")
 	TArray<FEconomyShopItem> GetShopItems() const;
 
 	// 购买指定商品（按 ItemID 从配置表取价格）。成功返回 true
-	UFUNCTION(BlueprintCallable, Category = "Shop")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Shop")
 	bool BuyShopItem(int32 ItemID);
 
 	// 已拥有某道具的数量（展示已购次数）
-	UFUNCTION(BlueprintCallable, Category = "Shop")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Shop")
 	int32 GetOwnedItemCount(int32 ItemID) const;
 
 	// 当前金钱（按钮置灰/提示用）
-	UFUNCTION(BlueprintCallable, Category = "Shop")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Shop")
 	int32 GetMoney() const;
 
 	// 蓝图实现：刷新商品列表/金钱显示
-	UFUNCTION(BlueprintImplementableEvent, Category = "Shop")
+	UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|Shop")
 	void RefreshShop();
 
 	// 关闭商店界面（蓝图按钮可调用）
-	UFUNCTION(BlueprintCallable, Category = "Shop")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Shop")
 	void CloseShop();
 
 protected:

@@ -13,15 +13,15 @@ struct SHOOT_API FDialogueButton
 
 public:
 	/** 按钮显示文本 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Dialogue")
 	FText Label;
 
 	/** 按钮标识 ID，点击时回传给 Provider（约定 -1 为“取消/关闭”，由组件统一处理） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Dialogue")
 	int32 ButtonID = 0;
 
 	/** 是否可点击（如金钱不足的升级按钮可置灰） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Dialogue")
 	bool bEnabled = true;
 };
 
@@ -32,13 +32,13 @@ struct SHOOT_API FDialogueData
 	GENERATED_BODY()
 
 public:
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Dialogue")
 	FText Title;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Dialogue")
 	FText Body;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Dialogue")
 	TArray<FDialogueButton> Buttons;
 };
 

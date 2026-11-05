@@ -22,10 +22,10 @@ class SHOOT_API IDialogueProvider
 
 public:
 	/** 提供对话内容（标题 / 正文 / 按钮）。C++ 与蓝图均可实现 */
-	UFUNCTION(BlueprintNativeEvent, Category = "Dialogue")
+	UFUNCTION(BlueprintNativeEvent, Category = "Shoot|Dialogue")
 	FDialogueData RequestDialogueData(APawn* Interactor);
 
 	/** 处理按钮点击（ButtonID 由按钮定义给出） */
-	UFUNCTION(BlueprintNativeEvent, Category = "Dialogue")
+	UFUNCTION(BlueprintNativeEvent, Category = "Shoot|Dialogue")
 	void HandleDialogueButton(APawn* Interactor, int32 ButtonID);
 };

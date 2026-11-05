@@ -33,27 +33,27 @@ struct FStaffMember
 {
 	GENERATED_BODY()
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Staff")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Staff")
 	FString Name;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Staff")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Staff")
 	EStaffRole Role = EStaffRole::Cook;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Staff")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Staff")
 	int32 Cooking = 1;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Staff")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Staff")
 	int32 Service = 1;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Staff")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Staff")
 	int32 Management = 1;
 
 	/** 每月工资（结算时从营收中扣除） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Staff")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Staff")
 	int32 Wage = 100;
 
 	/** 是否已入职（true=在编，参与属性聚合与发薪） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Staff")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Staff")
 	bool bHired = false;
 };
 
@@ -68,38 +68,38 @@ class SHOOT_API UStaffSystem : public UObject
 
 public:
 	/** 在编 + 待入职候选名册（HireStaff 后 bHired=true 才计入加成与发薪） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Staff")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Staff")
 	TArray<FStaffMember> Roster;
 
 	/** 招募一名员工；HireCost 不足则返回 -1，否则返回在 Roster 中的下标 */
-	UFUNCTION(BlueprintCallable, Category = "Staff")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Staff")
 	int32 HireStaff(const FStaffMember& Candidate, int32 HireCost);
 
 	/** 培养某员工某项属性 +1；TrainingCost 由调用方先扣款，返回是否成功（下标越界则失败） */
-	UFUNCTION(BlueprintCallable, Category = "Staff")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Staff")
 	bool TrainStaff(int32 Index, EStaffAttribute Attr, int32 TrainingCost);
 
 	/** 解雇（移出名册，停止发薪与加成） */
-	UFUNCTION(BlueprintCallable, Category = "Staff")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Staff")
 	void FireStaff(int32 Index);
 
 	/** 在编员工每月工资总额 */
-	UFUNCTION(BlueprintCallable, Category = "Staff")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Staff")
 	int32 GetTotalMonthlyWages() const;
 
 	/** 服务质量（0~N）：在编员工服务属性之和，用于提升声誉增速与招客 */
-	UFUNCTION(BlueprintCallable, Category = "Staff")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Staff")
 	float GetServiceQuality() const;
 
 	/** 管理加成（整数点）：在编经理管理属性之和，用于降低每日维护支出 */
-	UFUNCTION(BlueprintCallable, Category = "Staff")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Staff")
 	int32 GetManagementBonus() const;
 
 	/** 出餐速度倍率：1 + 烹饪属性之和 * 0.02（每点 +2%） */
-	UFUNCTION(BlueprintCallable, Category = "Staff")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Staff")
 	float GetCookingSpeedMultiplier() const;
 
 	/** 招客加成（整数）：服务属性之和 / 10，作为额外可容纳客人数 */
-	UFUNCTION(BlueprintCallable, Category = "Staff")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Staff")
 	int32 GetCustomerAttractionBonus() const;
 };

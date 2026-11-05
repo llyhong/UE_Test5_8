@@ -49,7 +49,7 @@ protected:
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 public:	
-	UPROPERTY(BlueprintReadOnly, Category = "Gameplay")
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Gameplay")
 	bool IsPlaying = false;
 
 	/**
@@ -57,131 +57,131 @@ public:
 	 * 即可在该蓝图里可视化调整经营参数（每日租金 / 维护 / 赛事奖金 / TimeSystemClass 等），无需改 C++。
 	 * 留空则使用 GameInstance 默认的 UBusinessSimulation。仅在首次进入且类不匹配时重建，不会跨关卡重复重置日期。
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Business")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Business")
 	TSubclassOf<UBusinessSimulation> BusinessSimulationClass;
 
 	/** 便捷引用：返回当前生效的经营模拟（实际由 GameInstance 持有）；未就绪时返回 nullptr */
-	UFUNCTION(BlueprintCallable, Category = "Business")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Business")
 	UBusinessSimulation* GetBusinessSimulation() const;
 	// Called every frame
-	UPROPERTY(BlueprintReadOnly, Category = "Gameplay")
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Gameplay")
 	float StartTime = 0;
-	UPROPERTY(EditAnywhere,BlueprintReadWrite, Category = "Gameplay")
+	UPROPERTY(EditAnywhere,BlueprintReadWrite, Category = "Shoot|Gameplay")
 	float EndTime = 300;
-	UPROPERTY(BlueprintAssignable, Category = "Events")
+	UPROPERTY(BlueprintAssignable, Category = "Shoot|Events")
 	FOrderEvent2 OnFailOrder;
 	virtual void Tick(float DeltaTime) override;
-	UFUNCTION(BlueprintCallable)
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Level")
 	void InitOrderSystem(UDataAsset* MenuDataTable);
 
 	/** 按当前 LevelID 切换订单配置并重启订单系统（切换关卡时复用，不重新 Spawn Actor） */
 	void RebuildOrderSystem();
-	UFUNCTION(BlueprintCallable)
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Level")
 	void InitPlateSystem(int PlateCount, float SpawnPlateTime);
 
 	// ========== 盘子系统（碟子）==========
 	/** 开局默认碟子总数：关卡蓝图没有调用 InitPlateSystem 时，BeginPlay 用此值自动创建盘子系统。
 	 *  场景里摆放的洗碗机（BP_Dishwasher 的 TotalPlates > 0）会覆盖这个数。 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Plate")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Plate")
 	int32 DefaultPlateCount = 5;
 
 	/** 自动补碟间隔（秒）。洗碗机模式下应关闭自动补碟（见 bAutoRegenPlates） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Plate")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Plate")
 	float PlateSpawnTime = 10.f;
 
 	/** 是否让盘子系统自动补碟。洗碗机闭环下必须 false（碟子只能靠玩家交还脏碟回收） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Plate")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Plate")
 	bool bAutoRegenPlates = false;
 
 	/** 把场景中洗碗机（BP_Dishwasher）上配置的 TotalPlates 应用到盘子系统，并把可用碟子补满到该总数。
 	 *  BeginPlay 与 InitPlateSystem 都会调用，保证"开局就有洗碗机设定好的碟子数"。 */
-	UFUNCTION(BlueprintCallable, Category = "Plate")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Plate")
 	void ApplyDishwasherPlateConfig();
 
 	/** 每秒把当前时间与营业状态推给 HUD（白天/傍晚/打烊一目了然） */
 	UFUNCTION()
 	void RefreshClock();
-	UPROPERTY(BlueprintReadOnly, Category = "Gameplay")
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Gameplay")
 	TObjectPtr<AOrderSystem> orderSystem;
 
 	/**
 	 * 各关卡的订单配置映射：Key = LevelID，Value = 该关卡的 ULevelOrderCfg 资源。
 	 * BeginPlay 时按本关卡的 LevelID 取对应配置自动创建订单系统；找不到对应项则回退到 DefaultOrderConfig。
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Order")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Order")
 	TMap<int32, TObjectPtr<ULevelOrderCfg>> LevelOrderConfigs;
 
 	/**
 	 * 兜底订单配置（ULevelOrderCfg）。当 LevelOrderConfigs 里没有当前 LevelID 的项时使用。
 	 * 默认值指向 Content/_Demo/Data/Order/Level_06_Order_Shit，可在蓝图默认值里改。
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Order")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Order")
 	TObjectPtr<ULevelOrderCfg> DefaultOrderConfig ;
-	UPROPERTY(BlueprintReadOnly, Category = "Gameplay")
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Gameplay")
 	TObjectPtr<APlateSystem> PlateSystem;
-	UFUNCTION(BlueprintCallable)
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Level")
 	void Play();
-	UFUNCTION(BlueprintCallable)
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Level")
 	float GetRemainTime();
 	void LevelFinish();
-	UFUNCTION(BlueprintImplementableEvent, Category="Gameplay")
+	UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|Gameplay")
 	void OnLevelFinish();
-	UFUNCTION(BlueprintCallable, Category="Gameplay")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Gameplay")
 	static void AddScore(AActor* actor,int detal);
-	UFUNCTION(BlueprintCallable, Category="Gameplay")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Gameplay")
 	static int GetScore(AActor* actor);
 
 	// ========== 关卡目标（通过条件，DataTable 配置） ==========
 	/** 关卡目标数据表（RowStruct = FLevelGoalRow）。为空则使用 UBaseGameInstance::LevelGoalTable；都为空则本关无通过条件 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Level|Goal")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Level|Goal")
 	TObjectPtr<UDataTable> LevelGoalTable;
 
 	/** 达成目标后是否立即结束本关（复用现有 LevelFinish 流程）。
 	 *  false（默认）：仅解锁食材并广播 OnLevelGoalAchieved，关卡继续（玩家可使用已解锁食材）；
 	 *  true：达成即“通过”本关，结束关卡。 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Level|Goal")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Level|Goal")
 	bool bFinishLevelOnGoalAchieved = false;
 
 	/** 解析后的本关目标（无效/未配置则 bGoalConfigured=false，无通过条件） */
-	UPROPERTY(BlueprintReadOnly, Category = "Level|Goal")
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Level|Goal")
 	FLevelGoalRow ResolvedGoal;
 
-	UPROPERTY(BlueprintReadOnly, Category = "Level|Goal")
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Level|Goal")
 	bool bGoalConfigured = false;
 
 	/** 是否已达成目标 */
-	UPROPERTY(BlueprintReadOnly, Category = "Level|Goal")
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Level|Goal")
 	bool bGoalAchieved = false;
 
 	/** 关卡是否已结束（防止时间到与达成目标重复触发 LevelFinish） */
 	bool bLevelFinished = false;
 
 	/** 本关累计赚取的钱（仅正向收入，用于目标判定） */
-	UPROPERTY(BlueprintReadOnly, Category = "Level|Goal")
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Level|Goal")
 	int32 MoneyEarnedThisLevel = 0;
 
 	/** 本关累计服务的客人数量（完成订单数） */
-	UPROPERTY(BlueprintReadOnly, Category = "Level|Goal")
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Level|Goal")
 	int32 GuestsServedThisLevel = 0;
 
 	/** 目标达成广播（蓝图做庆祝 / 解锁提示 UI） */
-	UFUNCTION(BlueprintImplementableEvent, Category = "Level|Goal")
+	UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|Level|Goal")
 	void OnLevelGoalAchieved();
 
 	/** 目标达成广播（携带本关统计，供 HUD 显示通关结算面板）。由 AchieveLevelGoal 自动广播 */
-	UPROPERTY(BlueprintAssignable, Category = "Level|Goal")
+	UPROPERTY(BlueprintAssignable, Category = "Shoot|Level|Goal")
 	FLevelGoalCompleted OnLevelGoalCompleted;
 
 	/** 从数据表解析本关目标（按 LevelID 查找行） */
-	UFUNCTION(BlueprintCallable, Category = "Level|Goal")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Level|Goal")
 	void ResolveLevelGoal();
 
 	/** 检查是否满足目标，满足则触发达成逻辑（幂等，可反复调用） */
-	UFUNCTION(BlueprintCallable, Category = "Level|Goal")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Level|Goal")
 	void CheckLevelGoal();
 
 	/** 触发目标达成：解锁食材 + 广播 +（可选）结束关卡 */
-	UFUNCTION(BlueprintCallable, Category = "Level|Goal")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Level|Goal")
 	void AchieveLevelGoal();
 
 	/** 经济系统金钱变化回调：仅订单完成来源才累计本关收入并检查目标 */
@@ -193,49 +193,49 @@ public:
 	void OnEconomyReputationChanged(int32 NewValue, int32 Delta);
 
 	/** 生成目标进度文本（如"金钱 60/100 · 客人 4/10"），仅显示配置了目标(>0)的项。供 HUD 显示进度 */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Level|Goal")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Level|Goal")
 	FString GetGoalProgressText();
 
 	/** 整体目标完成度（0~1）：取所有已配置目标(>0)的最小完成比例。无配置目标时返回 1.0（视为已完成）。供 HUD 进度条 */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Level|Goal")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Level|Goal")
 	float GetGoalProgressRatio();
 
 	/** 返回 DataTable 中配置的关卡目标描述文本（如"赚取 100 金币并服务 10 位客人"）。供 HUD 顶部说明任务 */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Level|Goal")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Level|Goal")
 	FText GetGoalDescriptionText() const;
 
 	// ========== 同一张大地图内“进入下一关”（不切换地图，仅切换 LevelID / 目标 / 订单） ==========
 	/** 触发进入下一关流程：先停单 / 清空上一关订单与在场客人（打烊），
 	 *  广播打烊提示并倒计时 LevelTransitionDuration 秒后，再正式切换 LevelID / 目标 / 订单。
 	 *  供升级 NPC 调用。过渡期间重复调用会被忽略。 */
-	UFUNCTION(BlueprintCallable, Category = "Level")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Level")
 	void AdvanceToLevel(int32 NewLevelID);
 
 	/** 进入下一关（LevelID + 1） */
-	UFUNCTION(BlueprintCallable, Category = "Level")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Level")
 	void AdvanceToNextLevel();
 
 	// ========== 调试：快速触发打烊过渡（无需完成目标） ==========
 	/** 调试用：强制从当前关卡进入下一关的打烊过渡（跳过目标判定）。可在蓝图 / 控制台直接调用测试 */
-	UFUNCTION(BlueprintCallable, Category = "Debug|Level")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Debug|Level")
 	void DebugAdvanceToNextLevel();
 
 	/** 关卡切换广播（NewLevelID），供 UI / NPC 重置自身状态（如奖励已领取标记） */
-	UPROPERTY(BlueprintAssignable, Category = "Level")
+	UPROPERTY(BlueprintAssignable, Category = "Shoot|Level")
 	FOnLevelChanged OnLevelChanged;
 
 	/** 打烊广播（进入下一关过渡开始时触发）：携带倒计时秒数，供 HUD 显示“打烊”提示 */
-	UPROPERTY(BlueprintAssignable, Category = "Level")
+	UPROPERTY(BlueprintAssignable, Category = "Shoot|Level")
 	FOnLevelClosing OnLevelClosing;
 
 	/** 打烊过渡时长（秒）：清场、显示打烊提示后，倒计时结束才正式进入下一关 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Level")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Level")
 	float LevelTransitionDuration = 3.0f;
 
 	/** 打烊收尾完成（已点菜客人全部处理完）时，是否自动结束这一天、进入下一关。
 	 *  默认 false：保持原有流程（由升级 NPC 对话触发进入下一关）；
 	 *  置 true 则客人接待完就自动收工进入下一天。 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Level")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Level")
 	bool bAutoEndDayOnClosingFinished = false;
 
 	// —— 进入下一关的内部两阶段实现 ——
@@ -256,39 +256,39 @@ public:
 
 	/** 时钟刷新定时器句柄 */
 	FTimerHandle ClockTimerHandle;
-	UPROPERTY(BlueprintReadOnly, Category = "Gameplay")
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Gameplay")
 	int Score = 0;
-	UPROPERTY(EditAnywhere,BlueprintReadWrite, Category = "Gameplay")
+	UPROPERTY(EditAnywhere,BlueprintReadWrite, Category = "Shoot|Gameplay")
 	int LevelID = 0;
 
 	/** InitOrderSystem 时是否自动启动订单系统（IsStarted=true）。关闭后需在蓝图里手动调用 StartSystem */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Gameplay")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Gameplay")
 	bool bAutoStartOrderSystem = true;
 
 	/** 订单 UI widget class（继承自 UOrderWidget）。BeginPlay 自动创建并绑定本关卡的订单系统 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Order")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Order")
 	TSubclassOf<UOrderWidget> OrderWidgetClass;
 
 	/** 订单 UI 实例（由 BeginPlay 创建，关卡结束时 RemoveFromParent） */
-	UPROPERTY(BlueprintReadOnly, Category = "Order")
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Order")
 	TObjectPtr<UOrderWidget> OrderWidget;
 
 	/** 常驻 HUD widget class（继承自 UHUDWidget，显示声誉/金钱）。BeginPlay 自动创建并绑定经济系统 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "UI|HUD")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|UI|HUD")
 	TSubclassOf<UHUDWidget> HUDWidgetClass;
 
 	/** 常驻 HUD 实例（由 BeginPlay 创建，关卡结束时 RemoveFromParent） */
-	UPROPERTY(BlueprintReadOnly, Category = "UI|HUD")
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|UI|HUD")
 	TObjectPtr<UHUDWidget> HUDWidget;
 
-	UPROPERTY(BlueprintAssignable, Category = "Events")
+	UPROPERTY(BlueprintAssignable, Category = "Shoot|Events")
 	FSocceEvent LevelUpdateScore;
-	UPROPERTY(BlueprintAssignable, Category = "Events")
+	UPROPERTY(BlueprintAssignable, Category = "Shoot|Events")
 	FSocceEvent LevelGetScore;
 	//保存分数
 	void SaveGame();
 	//获取历史最高分
-	UFUNCTION(BlueprintCallable)
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Level")
 	int GetHistoryMaxScore();
 
 	/** 订单完成回调：驱动经济系统（加声誉 + 加金钱） */

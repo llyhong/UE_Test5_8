@@ -50,27 +50,27 @@ public:
 	// ==================== 组件 ====================
 
 	/** 凳子网格体 */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chair|Components")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Chair|Components")
 	TObjectPtr<UStaticMeshComponent> SeatMesh;
 
 	/** 碟子挂点：上菜后的成品、客人留下的空碟都吸附到这里。
 	 *  在蓝图视口（或关卡实例）里选中 PlateSocket 直接拖动，即可自由调整碟子的摆放位置与朝向。 */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chair|Components")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Chair|Components")
 	TObjectPtr<USceneComponent> PlateSocket;
 
 	/** 入座挂点：客人坐下时的位置与朝向（默认在凳子上方 50cm）。
 	 *  在蓝图视口（或关卡实例）里选中 SitSocket 直接拖动，即可自由调整客人落在哪里、朝哪边坐；
 	 *  客人寻路的终点与到达判定也取该挂点的位置。 */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chair|Components")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Chair|Components")
 	TObjectPtr<USceneComponent> SitSocket;
 
 	/** 交互球：玩家进入范围后按 E 点单 / 上菜 / 收空碟 */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chair|Components")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Chair|Components")
 	TObjectPtr<USphereComponent> InteractionSphere;
 
 	/** 交互球半径（玩家需在此范围内才能按 E 与餐桌交互）。
 	 *  OnConstruction（编辑器视口）与 BeginPlay（运行时）都会强制应用到组件上 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Chair", meta = (ClampMin = "10.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Chair", meta = (ClampMin = "10.0"))
 	float InteractionRadius = InteractionDistance::Guest;
 
 	/** 编辑器里改 InteractionRadius 时立即写进组件，关卡视口中即可看到真实判定球 */
@@ -84,143 +84,143 @@ public:
 	// ==================== 座位 ====================
 
 	/** 该座位是否被占用（客人坐着，或被未回收的碟子占着） */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chair")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Chair")
 	bool bIsOccupied = false;
 
 	/** 当前占用该座位的客人 */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chair")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Chair")
 	TObjectPtr<AGuestCharacter> Occupant;
 
 	/** 座位是否可以入座：既没有客人，也没有未回收的碟子 */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Chair")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Chair")
 	bool CanOccupy() const;
 
 	/** 占用座位（成功返回 true；已被占用 / 桌上还有碟子返回 false） */
-	UFUNCTION(BlueprintCallable, Category = "Chair")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Chair")
 	bool Occupy(AGuestCharacter* Guest);
 
 	/** 释放座位（客人超时离场等场景调用）；若桌上仍有碟子则保持占用，由 ClearDirtyPlate 释放 */
-	UFUNCTION(BlueprintCallable, Category = "Chair")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Chair")
 	void Release();
 
 	/** 强制释放座位：连同桌上残留的碟子一起清掉（关卡收尾 / 清场时用，不广播 OnSeatFreedDelegate） */
-	UFUNCTION(BlueprintCallable, Category = "Chair")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Chair")
 	void ForceRelease();
 
 	/** 返回坐下时的世界变换（位置与朝向完全取自 SitSocket 挂点） */
-	UFUNCTION(BlueprintCallable, Category = "Chair")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Chair")
 	FTransform GetSitTransform() const;
 
 	// ==================== 订单（菜单绑定） ====================
 
 	/** 本座位当前绑定的订单：客人点单成功时写入，上菜校验 / UI 显示都用它 */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chair|Order")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Chair|Order")
 	TObjectPtr<UOrderHandle> BoundOrder = nullptr;
 
 	/** 绑定订单的菜品 ID 列表（副本，蓝图不解析订单也能直接显示菜单） */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chair|Order")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Chair|Order")
 	TArray<int32> BoundFoodIDs;
 
 	/** 绑定订单的显示名（由菜品表 FoodName 拼接而来；仅用于提示 / UI） */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chair|Order")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Chair|Order")
 	FString BoundSetName;
 
 	/** 把订单（菜单）绑定到本座位；传 nullptr 等同 ClearOrder */
-	UFUNCTION(BlueprintCallable, Category = "Chair|Order")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Chair|Order")
 	void BindOrder(UOrderHandle* Order);
 
 	/** 清空本座位绑定的订单 */
-	UFUNCTION(BlueprintCallable, Category = "Chair|Order")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Chair|Order")
 	void ClearOrder();
 
 	/** 本座位是否已绑定订单（客人已点单且尚未上菜） */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Chair|Order")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Chair|Order")
 	bool HasOrder() const { return BoundOrder != nullptr; }
 
 	/** 当前菜单的菜品 ID 列表（不合并重复项，顺序与订单一致）；未点单时为空数组。
 	 *  UI 拿它去查菜品图标（如 DT_FoodID 的 OriFoodIcon / MachineIcon）即可铺出菜单 ICON */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Chair|Order")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Chair|Order")
 	TArray<int32> GetMenuFoodIDs() const;
 
 	/** 当前菜单的显示名（由菜品表 FoodName 拼接而来）；未点单时为空 */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Chair|Order")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Chair|Order")
 	FString GetMenuSetName() const;
 
 	/** 当前绑定到本座位的订单句柄（未点单时为 null，可用于取图标 / 剩余时间等） */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Chair|Order")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Chair|Order")
 	UOrderHandle* GetMenuOrder() const { return BoundOrder; }
 
 	/** 菜单变化广播：下单成功 / 上菜后清空（空数组）时触发，UI 绑定后无需轮询 */
-	UPROPERTY(BlueprintAssignable, Category = "Chair|Order")
+	UPROPERTY(BlueprintAssignable, Category = "Shoot|Chair|Order")
 	FOnChairMenuChangedSignature OnMenuChanged;
 
 	/** 比较两组菜品 ID 是否完全一致（顺序无关、数量必须一致，与订单系统的匹配规则相同） */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Chair|Order")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Chair|Order")
 	static bool AreFoodIDsMatching(const TArray<int32>& A, const TArray<int32>& B);
 
 	/** 取碟子上的菜品 ID 列表：优先 FoodIdArray，为空则退回单个 MenuFoodID */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Chair|Order")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Chair|Order")
 	static TArray<int32> GetDishFoodIDs(AItemActor* Dish);
 
 	// ==================== 碟子 / 空碟 ====================
 
 	/** 当前摆在挂点上的碟子（上菜后的成品，或客人留下的空碟） */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chair|Plate")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Chair|Plate")
 	TObjectPtr<AItemActor> PlateOnSeat = nullptr;
 
 	/** 当前占据本座位的空碟（无则为 nullptr）。仅空碟模式下有效 */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chair|Plate")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Chair|Plate")
 	TObjectPtr<AItemActor> DirtyPlate = nullptr;
 
 	/** 是否被空碟占用（客人已离座，但空碟尚未被回收） */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chair|Plate")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Chair|Plate")
 	bool bHasDirtyPlate = false;
 
 	/** 挂点上是否有碟子（成品或空碟）。为真时不允许新客人入座 */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Chair|Plate")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Chair|Plate")
 	bool HasPlateOnSeat() const;
 
 	/** 碟子挂点的世界变换（蓝图摆放物体 / 调试用） */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Chair|Plate")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Chair|Plate")
 	FTransform GetPlateSocketTransform() const;
 
 	/** 把碟子吸附到挂点上（位置完全由蓝图里的 PlateSocket 决定），并停用拾取/腐烂/碰撞 */
-	UFUNCTION(BlueprintCallable, Category = "Chair|Plate")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Chair|Plate")
 	bool PlacePlateOnSocket(AItemActor* Plate);
 
 	/** 客人吃完离座：空碟留在挂点上并继续占据本座位，直到玩家按 E 收走 */
-	UFUNCTION(BlueprintCallable, Category = "Chair|Plate")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Chair|Plate")
 	void SetDirtyPlate(AItemActor* Plate);
 
 	/** 回收空碟时调用：真正释放座位并广播 OnSeatFreedSignature */
-	UFUNCTION(BlueprintCallable, Category = "Chair|Plate")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Chair|Plate")
 	void ClearDirtyPlate();
 
 	// ==================== 菜单提示控件（TipsWidget） ====================
 
 	/** 菜单提示控件：默认挂在餐桌上方，用来显示当前客人点的菜单 */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Chair|Tips")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Chair|Tips")
 	TObjectPtr<UWidgetComponent> TipsWidgetComp;
 
 	/** 提示控件的显示时机：默认只在绑定了菜单（等待上菜）时显示 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Chair|Tips")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Chair|Tips")
 	EChairSeatTipsMode TipsMode = EChairSeatTipsMode::OrderOnly;
 
 	/** 提示控件（TipsWidget）隐藏距离：玩家（ShootCharacter）离本餐桌超过该距离时隐藏；<=0 表示不限制距离。蓝图可配置 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Chair|Tips", meta = (ClampMin = "0.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Chair|Tips", meta = (ClampMin = "0.0"))
 	float TipsWidgetHideDistance = 800.f;
 
 	/** 当前桌况（空 / 入座中 / 等待点单 / 等待上菜 / 用餐中 / 待收空碟），提示控件按它决定显示什么 */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Chair|Tips")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Chair|Tips")
 	EChairTipsState GetSeatState() const;
 
 	/** 取提示控件实例（未配置控件类 / 控件尚未创建时返回 nullptr） */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Chair|Tips")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Chair|Tips")
 	UChairTipsWidget* GetTipsWidget() const;
 
 	/** 刷新提示控件：先把 OwnerSeat 交给控件、再按当前桌况决定显隐、最后通知蓝图重画菜单。
 	 *  座位 / 订单 / 碟子状态变化时本类会自动调用，蓝图也可手动调用 */
-	UFUNCTION(BlueprintCallable, Category = "Chair|Tips")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Chair|Tips")
 	void RefreshTipsWidget();
 
 	// ==================== 玩家交互（E 键） ====================
@@ -229,56 +229,56 @@ public:
 	 * 玩家按 E 时由 AShootCharacter::Pick 调用，按当前状态自动决定做点单 / 上菜 / 收空碟。
 	 * @return true 表示本次交互已被本餐桌消费（调用方可直接 return）；false 表示未拦截，可继续后续逻辑
 	 */
-	UFUNCTION(BlueprintCallable, Category = "Chair|Interact")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Chair|Interact")
 	bool TryInteractByPlayer(AShootCharacter* Player);
 
 	/** 是否允许玩家给本座位的客人下单：客人已坐下等待点单且本座位还没有订单 */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Chair|Interact")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Chair|Interact")
 	bool CanPlayerTakeOrder(AShootCharacter* Player) const;
 
 	/** 玩家按 E 给客人下单：生成订单并绑定到本座位（菜单绑定）。返回是否成功 */
-	UFUNCTION(BlueprintCallable, Category = "Chair|Interact")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Chair|Interact")
 	bool TryTakeOrderByPlayer(AShootCharacter* Player);
 
 	/** 是否允许玩家上菜：座位已绑定订单 + 客人正在等餐 + 桌上还没有碟子 */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Chair|Interact")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Chair|Interact")
 	bool CanPlayerServeDish(AShootCharacter* Player) const;
 
 	/**
 	 * 玩家按 E 上菜：校验手上菜品与座位绑定的菜单是否完全一致，一致才完成订单并把菜摆到挂点上。
 	 * @return 是否上菜成功（失败时菜品仍由玩家持有）
 	 */
-	UFUNCTION(BlueprintCallable, Category = "Chair|Interact")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Chair|Interact")
 	bool TryServeDishByPlayer(AShootCharacter* Player, AItemActor* Dish);
 
 	/** 是否允许玩家收走桌上的空碟：手上有空碟且玩家空手 */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Chair|Interact")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Chair|Interact")
 	bool CanPlayerCollectPlate(AShootCharacter* Player) const;
 
 	/** 玩家按 E 收走空碟：碟子变脏碟拿在手上，座位立即释放（下一位客人才能入座） */
-	UFUNCTION(BlueprintCallable, Category = "Chair|Interact")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Chair|Interact")
 	bool TryCollectPlateByPlayer(AShootCharacter* Player);
 
 	// ==================== 事件 / 调试 ====================
 
 	/** 座位被“空碟回收”释放时广播（客人管理器监听以安排下一位客人入座） */
-	UPROPERTY(BlueprintAssignable, Category = "Chair")
+	UPROPERTY(BlueprintAssignable, Category = "Shoot|Chair")
 	FOnSeatFreedSignature OnSeatFreedDelegate;
 
 	/** 玩家下单成功、菜单绑定到本座位时通知蓝图（做点单 UI / 特效 / 音效） */
-	UFUNCTION(BlueprintImplementableEvent, Category = "Chair|Events")
+	UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|Chair|Events")
 	void OnOrderBound(int32 OrderId, const TArray<int32>& FoodIDs);
 
 	/** 上菜成功时通知蓝图（做上菜特效 / 飘字） */
-	UFUNCTION(BlueprintImplementableEvent, Category = "Chair|Events")
+	UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|Chair|Events")
 	void OnDishServed(AItemActor* Dish, int32 FoodID);
 
 	/** 空碟被收走、座位释放时通知蓝图 */
-	UFUNCTION(BlueprintImplementableEvent, Category = "Chair|Events")
+	UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|Chair|Events")
 	void OnPlateCollected(AItemActor* Plate);
 
 	/** 是否绘制调试信息：座位/挂点/到当前占用客人的连线，方便排查占座与碟子摆放 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Chair|Debug")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Chair|Debug")
 	bool bDrawDebugSeatLink = false;
 
 protected:
@@ -299,6 +299,6 @@ protected:
 		UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
 
 	/** 交互范围内的玩家数量（TipsMode = PlayerNear 时用来决定显隐） */
-	UPROPERTY(VisibleInstanceOnly, Category = "Chair|Tips")
+	UPROPERTY(VisibleInstanceOnly, Category = "Shoot|Chair|Tips")
 	int32 TipsNearbyPlayerCount = 0;
 };

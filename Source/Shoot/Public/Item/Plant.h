@@ -41,53 +41,53 @@ public:
 	void ApplyInteractionScale();
 
 	/** 植物配置数据表行引用（DataTable: PlantInfo） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Plant", meta = (RowType = "PlantInfo"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Plant", meta = (RowType = "PlantInfo"))
 	FDataTableRowHandle PlantInfoRow;
 
 	// ========== 对外功能（可在蓝图 / 角色交互中调用） ==========
 
 	/** 浇水：增加水分 */
-	UFUNCTION(BlueprintCallable, Category = "Plant")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Plant")
 	void Water(float Amount = 20.f);
 
 	/** 驱虫：清除当前害虫状态 */
-	UFUNCTION(BlueprintCallable, Category = "Plant")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Plant")
 	void RemovePest();
 
 	/** 收获：在挂点生成果实，返回是否成功（需处于结果阶段且尚未收获过） */
-	UFUNCTION(BlueprintCallable, Category = "Plant")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Plant")
 	bool Harvest();
 
 	// ========== 按 E 采摘：直接入背包并让植被消失 ==========
 	/** 按 E 采摘后是否直接把果实放入玩家背包（true=直接入背包并销毁植被；
 	 *  false=旧逻辑，果实挂到玩家手上并支持自动重新结果）。默认开启新行为。 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Plant|Harvest")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Plant|Harvest")
 	bool bHarvestToInventory = true;
 
 	/** 采摘后直接入背包的果实数量；<=0 表示使用 DataTable 的 FruitCount。 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Plant|Harvest")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Plant|Harvest")
 	int32 HarvestYield = -1;
 
 	// ========== 解锁（食材未解锁时禁止采摘） ==========
 	/** 食材解锁 ID：>=0 表示需要对应 ID 解锁后才能采摘果实（如玉米田里的玉米）；<0 表示无需解锁，默认可摘。
 	 *  解锁由 UBaseGameInstance 统一管理（关卡达成目标后 UnlockIngredients）。 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Plant|Unlock")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Plant|Unlock")
 	int32 IngredientUnlockID = -1;
 
 	/** 运行时是否已解锁（<0 的 ID 永远为 true） */
-	UPROPERTY(BlueprintReadOnly, Category = "Plant|Unlock")
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Plant|Unlock")
 	bool bIngredientUnlocked = true;
 
 	/** 解锁状态变化通知（true=已解锁可采摘；false=已锁定）。蓝图可做锁定/解锁视觉与提示 */
-	UFUNCTION(BlueprintImplementableEvent, Category = "Plant|Unlock")
+	UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|Plant|Unlock")
 	void OnPlantUnlockStateChanged(bool bUnlocked);
 
 	/** 尝试采摘却被锁定（未解锁）时通知，供 UI 飘字“需达成目标才能采摘” */
-	UFUNCTION(BlueprintImplementableEvent, Category = "Plant|Unlock")
+	UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|Plant|Unlock")
 	void OnHarvestLocked();
 
 	/** 设置解锁状态并广播 OnPlantUnlockStateChanged */
-	UFUNCTION(BlueprintCallable, Category = "Plant|Unlock")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Plant|Unlock")
 	void SetIngredientUnlocked(bool bUnlocked);
 
 	/** 监听 GameInstance 的食材解锁广播 */
@@ -103,82 +103,82 @@ public:
 
 	// ========== 查询（供 UI / 蓝图） ==========
 
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Plant")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Plant")
 	int32 GetCurrentStageIndex() const { return CurrentStageIndex; }
 
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Plant")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Plant")
 	FName GetCurrentStageName() const;
 
 	/** 当前阶段进度 0..1 */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Plant")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Plant")
 	float GetGrowthProgress() const;
 
 	/** 是否已到结果阶段（可收获） */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Plant")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Plant")
 	bool IsFruiting() const;
 
 	/** 当前采摘品质（依据结果阶段内的熟度计时）：成熟窗口=佳品，熟过头=次品，未成熟/未启用=普通。
 	 *  供采摘时写入果实，并最终影响成品品质与上菜奖励。 */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Plant")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Plant")
 	EIngredientQuality GetCurrentQuality() const;
 
 	/** 熟度进度 0..1（距“熟过头”的进度），供 UI 进度条显示（未启用熟度时返回 0） */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Plant")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Plant")
 	float GetRipenessProgress() const;
 
 	/** 当前熟度子阶段名（未成熟 / 成熟 / 熟过头），用于 UI 提示当前素材阶段 */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Plant")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Plant")
 	FName GetRipenessStageName() const;
 
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Plant")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Plant")
 	float GetWater() const { return WaterLevel; }
 
 	/** 是否需要浇水：配置了需要浇水（bRequiresWater）且当前水位已干涸（<=0）。浇满后须等水分消耗回 0 才可再次浇水 */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Plant")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Plant")
 	bool NeedsWater() const;
 
 	/** 设置浇水提示抑制：浇水动作完成后调用以取消高亮；植株重新变干或玩家离开范围后自动恢复 */
-	UFUNCTION(BlueprintCallable, Category = "Plant")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Plant")
 	void SetWaterHintSuppressed(bool bSuppress);
 
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Plant")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Plant")
 	bool HasPest() const { return bPest; }
 
 	/** 阶段变化通知（蓝图可重载） */
-	UFUNCTION(BlueprintImplementableEvent, Category = "Plant")
+	UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|Plant")
 	void OnStageChanged(int32 NewStageIndex, FName StageName);
 
 	/** 生虫通知（蓝图可重载，例如播放虫特效） */
-	UFUNCTION(BlueprintImplementableEvent, Category = "Plant")
+	UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|Plant")
 	void OnPestAppeared();
 
 	/** 可收获通知（蓝图可重载） */
-	UFUNCTION(BlueprintImplementableEvent, Category = "Plant")
+	UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|Plant")
 	void OnReadyToHarvest();
 
 	/** 阶段变化广播（供 Widget 绑定） */
-	UPROPERTY(BlueprintAssignable, Category = "Plant")
+	UPROPERTY(BlueprintAssignable, Category = "Shoot|Plant")
 	FOnPlantStageChanged OnPlantStageChanged;
 
 protected:
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Components")
 	UStaticMeshComponent* PlantMesh;
 
 	/** 交互范围：角色进入后注册为可交互植物 */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Components")
 	USphereComponent* InteractionSphere;
 
 	// ============ 交互判定尺度（统一标准，见 InteractionConfig.h） ============
 	/** 交互球半径。C++ 在 BeginPlay 强制应用，覆盖蓝图残留旧值 */
-	UPROPERTY(EditDefaultsOnly, Category="Interaction")
+	UPROPERTY(EditDefaultsOnly, Category = "Shoot|Interaction")
 	float InteractionRadius = InteractionDistance::Plant;
 
 	/** 球心抬高量：抬到植株中部，与角色胶囊的覆盖高度对齐 */
-	UPROPERTY(EditDefaultsOnly, Category="Interaction")
+	UPROPERTY(EditDefaultsOnly, Category = "Shoot|Interaction")
 	float InteractionCenterHeight = InteractionDistance::CenterHeight;
 
 	/** 调试开关：在屏幕上打印植物状态（可在蓝图/实例上设置） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Debug")
 	bool bDebug = false;
 
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;

@@ -20,6 +20,6 @@ class SHOOT_API IHitInterface
 {
 	GENERATED_BODY()
 public:
-	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "My Interface")
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Shoot|My Interface")
 	void GetHit(const FVector& ImpactPoint, AActor* Hitter);
 };

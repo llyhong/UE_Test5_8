@@ -19,31 +19,31 @@ struct FChairMenuEntry
 	GENERATED_BODY()
 
 	/** 菜品 ID（对应 DT_Foods / MenuDataTable 的 FoodID） */
-	UPROPERTY(BlueprintReadOnly, Category = "Chair|Tips")
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Chair|Tips")
 	int32 FoodID = -1;
 
 	/** 该菜品在订单里出现的次数 */
-	UPROPERTY(BlueprintReadOnly, Category = "Chair|Tips")
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Chair|Tips")
 	int32 Count = 0;
 
 	/** 菜品名（取自 MenuDataTable 的 FoodName，取不到时退化成"菜品<ID>"） */
-	UPROPERTY(BlueprintReadOnly, Category = "Chair|Tips")
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Chair|Tips")
 	FString FoodName;
 
 	/** 本菜品用到的食材 ItemID 列表（与 ItemIcons 一一对应，即 MenuDataTable 里 MenuItems 的键） */
-	UPROPERTY(BlueprintReadOnly, Category = "Chair|Tips")
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Chair|Tips")
 	TArray<int32> ItemIDs;
 
 	/** 各食材的图标（与 ItemIDs 一一对应，取自物品表的 Icon；某食材没配图标则为 null，蓝图先 IsValid 再设 Image） */
-	UPROPERTY(BlueprintReadOnly, Category = "Chair|Tips")
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Chair|Tips")
 	TArray<TObjectPtr<UTexture2D>> ItemIcons;
 
 	/** 主图标（= 第一个食材的图标）；UI 只显示一个图标时用，未配置时为空 */
-	UPROPERTY(BlueprintReadOnly, Category = "Chair|Tips")
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Chair|Tips")
 	TObjectPtr<UTexture2D> Icon = nullptr;
 
 	/** 拼好的显示文本：「番茄炒蛋 x2」 */
-	UPROPERTY(BlueprintReadOnly, Category = "Chair|Tips")
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Chair|Tips")
 	FText DisplayText;
 };
 
@@ -78,120 +78,120 @@ class SHOOT_API UChairTipsWidget : public UUserWidget
 
 public:
 	/** 拥有本控件的餐桌（由 AChairSeat 在刷新时主动赋值）；蓝图可直接取用，也可自行 Cast */
-	UPROPERTY(BlueprintReadOnly, Category = "Chair|Tips")
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Chair|Tips")
 	TObjectPtr<AChairSeat> OwnerSeat;
 
 	/** C++ 把 OwnerSeat 赋值完成后调用一次：蓝图可在此安全地初始化（Construct 时 OwnerSeat 还是 null） */
-	UFUNCTION(BlueprintImplementableEvent, Category = "Chair|Tips")
+	UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|Chair|Tips")
 	void OnOwnerSeatSet();
 
 	/** 【低频】只在菜单内容（菜品集合 / 数量 / 顺序）或桌况真的变了时触发一次：
 	 *  蓝图在这里调 GetMenuEntries() 重建列表与图标。周期刷新（倒计时）不会触发它。 */
-	UFUNCTION(BlueprintImplementableEvent, Category = "Chair|Tips")
+	UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|Chair|Tips")
 	void OnMenuContentChanged();
 
 	/** 【高频】每 AutoRefreshInterval 秒触发一次：蓝图只在这里更新进度条 / 倒计时 /
 	 *  桌况文案等连续变化的东西。不要在这里重建菜单列表（内容真变了会走 OnMenuContentChanged）。 */
-	UFUNCTION(BlueprintImplementableEvent, Category = "Chair|Tips")
+	UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|Chair|Tips")
 	void OnTipsTick();
 
 	/** 数据有变化时通知蓝图（事件驱动 / 手动刷新时触发，全量）：建议只放状态与进度，
 	 *  重建列表放到 OnMenuContentChanged，避免每次事件都重铺图标 */
-	UFUNCTION(BlueprintImplementableEvent, Category = "Chair|Tips")
+	UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|Chair|Tips")
 	void OnTipsRefreshed();
 
 	/** 立即刷新一次：内容有变则触发 OnMenuContentChanged，并触发 OnTipsRefreshed；
 	 *  由餐桌调用，也可在蓝图里手动调用 */
-	UFUNCTION(BlueprintCallable, Category = "Chair|Tips")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Chair|Tips")
 	void RefreshTips();
 
 	/** 菜单内容签名（桌况 + 菜品 ID 序列）：仅用于判断"内容是否变了"，蓝图一般不用 */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Chair|Tips")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Chair|Tips")
 	int32 GetMenuSignature() const;
 
 	/** 丢弃菜单缓存（菜品表 / 物品表在运行时换过图标时调用，下次取值会重建） */
-	UFUNCTION(BlueprintCallable, Category = "Chair|Tips")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Chair|Tips")
 	void InvalidateMenuCache();
 
 	/** 自动刷新间隔（秒）：>0 时按此间隔周期性刷新，用于订单倒计时；<=0 关闭（只由餐桌事件驱动） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Chair|Tips")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Chair|Tips")
 	float AutoRefreshInterval = 0.25f;
 
 	// ==================== 显示数据（蓝图只读） ====================
 
 	/** 当前桌况（空 / 入座中 / 等待点单 / 等待上菜 / 用餐中 / 待收空碟） */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Chair|Tips")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Chair|Tips")
 	EChairTipsState GetSeatState() const;
 
 	/** 桌况对应的默认中文文案（蓝图可直接用，也可按状态显示自己的美术字） */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Chair|Tips")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Chair|Tips")
 	FText GetSeatStateText() const;
 
 	/** 本座位是否绑定了菜单（客人已点单、还没上菜） */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Chair|Tips")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Chair|Tips")
 	bool HasOrder() const;
 
 	/** 本座位绑定的订单（可能为 null） */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Chair|Tips")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Chair|Tips")
 	UOrderHandle* GetOrderHandle() const;
 
 	/** 订单数据副本：只有 FoodIDs（= 菜品表的 FoodID）。
 	 *  Price / MaxWaitTime / 显示名 / 机器请用 Handle 上的查询函数实时取自菜品表 */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Chair|Tips")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Chair|Tips")
 	FOrderData GetOrderData() const;
 
 	/** 菜单菜品 ID 列表（未合并，与客人点的顺序一致） */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Chair|Tips")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Chair|Tips")
 	TArray<int32> GetFoodIDs() const;
 
 	/** 菜单列表：按菜品合并数量，含菜品名与图标，蓝图可直接铺 Item 列表。
 	 *  结果带缓存（签名不变时复用同一份，不会重复查表 / 取图标），内容变化由 OnMenuContentChanged 通知 */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Chair|Tips")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Chair|Tips")
 	TArray<FChairMenuEntry> GetMenuEntries() const;
 
 	/** 本单显示名（由菜品表 FoodName 拼接，多菜用 "+" 连接；可能为空） */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Chair|Tips")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Chair|Tips")
 	FString GetSetName() const;
 
 	/** 订单基础价格 */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Chair|Tips")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Chair|Tips")
 	int32 GetOrderPrice() const;
 
 	/** 订单剩余时间比例：1 = 刚下单，0 = 即将超时（未绑单时为 0） */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Chair|Tips")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Chair|Tips")
 	float GetRemainPercent() const;
 
 	/** 订单剩余秒数（未绑单时为 0） */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Chair|Tips")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Chair|Tips")
 	float GetRemainSeconds() const;
 
 	/** 订单图标（取本单第一道菜的成品图标，来自菜品表 MenuIcon；原来用的 IamgeID 已废弃）。
 	 *  本单多道菜时，用 GetMenuEntries() 逐条取图标。取不到时返回 null */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Chair|Tips")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Chair|Tips")
 	UTexture2D* GetOrderIcon() const;
 
 	/** 订单的机器图片 ID 列表（取各菜品的 FMenuData::MachineID，与顶部订单 UI 同一套取图规则） */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Chair|Tips")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Chair|Tips")
 	TArray<int32> GetMachineImageIDs() const;
 
 	/** 按菜品 ID 取菜品名（取自 MenuDataTable；取不到时返回"菜品<ID>"） */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Chair|Tips")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Chair|Tips")
 	FString GetFoodName(int32 FoodID) const;
 
 	/** 按菜品 ID 取成品图标（取自 MenuDataTable 的 MenuIcon；没配时退回第一个食材的图标） */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Chair|Tips")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Chair|Tips")
 	UTexture2D* GetFoodIcon(int32 FoodID) const;
 
 	/** 按菜品 ID + 食材 ItemID 取该食材的图标（取自物品表 DT_ItemInfo 的 Icon）；取不到时返回 null */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Chair|Tips")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Chair|Tips")
 	UTexture2D* GetFoodItemIcon(int32 FoodID, int32 ItemID) const;
 
 	/** 该菜品用到的食材 ItemID 列表（MenuItems 的键，与 GetFoodItemIcon 的 ItemID 对应） */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Chair|Tips")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Chair|Tips")
 	TArray<int32> GetFoodItemIDs(int32 FoodID) const;
 
 	/** 当前摆在挂点上的碟子（成品或空碟，可能为 null） */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Chair|Tips")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Chair|Tips")
 	AItemActor* GetPlateOnSeat() const;
 
 protected:

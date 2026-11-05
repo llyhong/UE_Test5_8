@@ -22,46 +22,46 @@ class SHOOT_API UHUDWidget : public UUserWidget
 
 public:
 	// 绑定经济系统并立即刷新一次；由 PlayerController 创建后调用
-	UFUNCTION(BlueprintCallable, Category = "HUD")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|HUD")
 	void BindEconomy(UEconomySystem* Eco);
 
 	// 绑定关卡对象（ABaseLevelBP），用于自动刷新关卡目标 UI；由 Level 创建 HUD 后调用
-	UFUNCTION(BlueprintCallable, Category = "HUD")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|HUD")
 	void BindLevel(ABaseLevelBP* Level);
 
 	// 强制刷新 HUD 全部内容（声誉 / 金钱 / 关卡目标：描述、进度比例、明细、是否达成）。
 	// 由经济、分数、声誉变化或关卡绑定/达成时自动调用。
-	UFUNCTION(BlueprintCallable, Category = "HUD")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|HUD")
 	void RefreshGoal();
 
-	UFUNCTION(BlueprintCallable, Category = "HUD")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|HUD")
 	int32 GetReputation() const;
 
-	UFUNCTION(BlueprintCallable, Category = "HUD")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|HUD")
 	int32 GetMoney() const;
 
 	/** 显示/更新当前对准食物箱的剩余数量（Remaining<0 表示无限，会自动隐藏） */
-	UFUNCTION(BlueprintCallable, Category = "HUD")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|HUD")
 	void SetSpawnerRemaining(int32 Remaining);
 
 	/** 隐藏食物箱剩余数量提示（对准物不是食物箱时调用） */
-	UFUNCTION(BlueprintCallable, Category = "HUD")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|HUD")
 	void HideSpawnerRemaining();
 
 	/** 蓝图实现：刷新食物箱剩余数量显示。bVisible=false 时隐藏（如无限模式或对准物非食物箱）。 */
-	UFUNCTION(BlueprintImplementableEvent, Category = "HUD")
+	UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|HUD")
 	void OnSpawnerRemainingChanged(int32 Remaining, bool bVisible);
 
 	/** 刷新时钟显示：CurrentHour 为 0~24（由 DayProgress 映射），bIsOpen 为是否营业中 */
-	UFUNCTION(BlueprintCallable, Category = "HUD")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|HUD")
 	void SetClock(float CurrentHour, bool bIsOpen);
 
 	/** 蓝图实现：显示当前时间（如 17:30）与营业状态（营业中 / 备货中 / 已打烊） */
-	UFUNCTION(BlueprintImplementableEvent, Category = "HUD")
+	UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|HUD")
 	void OnClockChanged(float CurrentHour, bool bIsOpen);
 
 	/** 把 0~24 的浮点小时格式化为 "HH:MM"（如 17.5 -> "17:30"）；蓝图在 OnClockChanged 里调用以显示时间文本 */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "HUD")
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|HUD")
 	static FString FormatClock(float CurrentHour);
 
 	// 蓝图实现：刷新 HUD 全部内容。
@@ -74,22 +74,22 @@ public:
 	//  - GoalDetail：关卡目标明细文本（如"分数 30/50 · 金钱 60/100"）
 	//  - bGoalAchieved：关卡目标是否已达成
 	// 原 RefreshHUD 与 RefreshGoalHUD 已合并为此单一事件。
-	UFUNCTION(BlueprintImplementableEvent, Category = "HUD")
+	UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|HUD")
 	void RefreshHUD(int32 Reputation, int32 MoneyEarned, int32 Score, int32 GuestsServed, const FLevelGoalRow& ResolvedGoal, float GoalRatio, const FString& GoalDetail, bool bGoalAchieved);
 
 	// 蓝图实现：声誉变化时播放飘字提示（Delta>0 飘 "+N 声誉"，Delta<0 飘 "-N 声誉"）。
 	// 由 HandleReputationChanged 在声誉变化时自动调用，招揽/完成订单/超时扣分都会触发。
-	UFUNCTION(BlueprintImplementableEvent, Category = "HUD")
+	UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|HUD")
 	void PlayReputationFloating(int32 Delta);
 
 	// 蓝图实现：关卡目标达成时显示通关结算面板（携带本关最终统计）。
 	// 由 HandleLevelGoalCompleted 在 OnLevelGoalCompleted 广播时自动调用。
-	UFUNCTION(BlueprintImplementableEvent, Category = "HUD")
+	UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|HUD")
 	void ShowLevelComplete(int32 GuestsServed, int32 MoneyEarned, int32 Score, int32 Reputation);
 
 	// 蓝图实现：进入下一关“打烊”过渡时显示打烊横幅与倒计时（CountdownSeconds 为总倒计时秒数）。
 	// 由 HandleLevelClosing 在 OnLevelClosing 广播时自动调用。
-	UFUNCTION(BlueprintImplementableEvent, Category = "HUD")
+	UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|HUD")
 	void ShowClosingBanner(float CountdownSeconds);
 
 protected:

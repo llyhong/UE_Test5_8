@@ -15,25 +15,25 @@ struct FBusinessReport
 {
 	GENERATED_BODY()
 
-	UPROPERTY(BlueprintReadOnly, Category = "Business")
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Business")
 	int32 Year = 1;
-	UPROPERTY(BlueprintReadOnly, Category = "Business")
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Business")
 	int32 Month = 1;
-	UPROPERTY(BlueprintReadOnly, Category = "Business")
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Business")
 	int32 Day = 1;
 
-	UPROPERTY(BlueprintReadOnly, Category = "Business")
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Business")
 	int32 Income = 0;
-	UPROPERTY(BlueprintReadOnly, Category = "Business")
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Business")
 	int32 Expense = 0;
-	UPROPERTY(BlueprintReadOnly, Category = "Business")
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Business")
 	int32 Net = 0;
 
-	UPROPERTY(BlueprintReadOnly, Category = "Business")
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Business")
 	int32 Money = 0;
-	UPROPERTY(BlueprintReadOnly, Category = "Business")
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Business")
 	int32 Reputation = 0;
-	UPROPERTY(BlueprintReadOnly, Category = "Business")
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Business")
 	int32 Stars = 0;
 };
 
@@ -61,68 +61,68 @@ public:
 	 * 替换为 UTimeSystem 的蓝图子类，从而在不改 C++ 的情况下调参（一天时长、营业时段、太阳颜色/强度等）。
 	 * 留空则回退到 UTimeSystem。
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Business|Time")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Business|Time")
 	TSubclassOf<UTimeSystem> TimeSystemClass;
 
 	/** 时钟（Init 时按 TimeSystemClass 自动创建） */
-	UPROPERTY(BlueprintReadOnly, Category = "Business")
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Business")
 	TObjectPtr<UTimeSystem> TimeSystem;
 
 	/** 员工系统（Init 时自动创建） */
-	UPROPERTY(BlueprintReadOnly, Category = "Business")
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Business")
 	TObjectPtr<UStaffSystem> StaffSystem;
 
 	/** 经济系统（由 GameInstance 注入） */
-	UPROPERTY(BlueprintReadOnly, Category = "Business")
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Business")
 	TObjectPtr<UEconomySystem> Economy;
 
 	// ---- 经营参数（也可后续迁移到数据表） ----
 	/** 每日租金 / 设施被动收入 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Business", meta = (ClampMin = "0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Business", meta = (ClampMin = "0"))
 	int32 DailyRentIncome = 50;
 	/** 每日设施维护支出（受管理加成减免） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Business", meta = (ClampMin = "0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Business", meta = (ClampMin = "0"))
 	int32 DailyMaintenance = 20;
 	/** 每年赛事奖金池上限（年末随机抽取 0~该值 作为奖金） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Business", meta = (ClampMin = "0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Business", meta = (ClampMin = "0"))
 	int32 YearlyPrizePool = 2000;
 
 	// ---- 账本（滚动累计，结算时重置对应周期） ----
-	UPROPERTY(BlueprintReadOnly, Category = "Business") int32 TodayIncome = 0;
-	UPROPERTY(BlueprintReadOnly, Category = "Business") int32 TodayExpense = 0;
-	UPROPERTY(BlueprintReadOnly, Category = "Business") int32 MonthIncome = 0;
-	UPROPERTY(BlueprintReadOnly, Category = "Business") int32 MonthExpense = 0;
-	UPROPERTY(BlueprintReadOnly, Category = "Business") int32 YearIncome = 0;
-	UPROPERTY(BlueprintReadOnly, Category = "Business") int32 YearExpense = 0;
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Business") int32 TodayIncome = 0;
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Business") int32 TodayExpense = 0;
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Business") int32 MonthIncome = 0;
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Business") int32 MonthExpense = 0;
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Business") int32 YearIncome = 0;
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Business") int32 YearExpense = 0;
 
 	/** 经营星级（0~5），取代关卡 star */
-	UPROPERTY(BlueprintReadOnly, Category = "Business")
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Business")
 	int32 RestaurantStars = 0;
 
 	// ---- 事件 ----
-	UPROPERTY(BlueprintAssignable, Category = "Business")
+	UPROPERTY(BlueprintAssignable, Category = "Shoot|Business")
 	FOnBusinessReport OnDailyReport;
-	UPROPERTY(BlueprintAssignable, Category = "Business")
+	UPROPERTY(BlueprintAssignable, Category = "Shoot|Business")
 	FOnBusinessReport OnMonthlyReport;
-	UPROPERTY(BlueprintAssignable, Category = "Business")
+	UPROPERTY(BlueprintAssignable, Category = "Shoot|Business")
 	FOnBusinessReport OnYearlyReport;
-	UPROPERTY(BlueprintAssignable, Category = "Business")
+	UPROPERTY(BlueprintAssignable, Category = "Shoot|Business")
 	FOnStarsChanged OnStarsChanged;
 
 	/** 初始化：创建时钟/员工、绑定日期事件与经济变化监听 */
-	UFUNCTION(BlueprintCallable, Category = "Business")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Business")
 	void Init(UEconomySystem* InEconomy);
 
 	/** 当前星级 */
-	UFUNCTION(BlueprintCallable, Category = "Business")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Business")
 	int32 GetStars() const { return RestaurantStars; }
 
 	/** 写入存档（日期 + 员工名册）。会在每次日结算时自动调用，也可手动调用。 */
-	UFUNCTION(BlueprintCallable, Category = "Business")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Business")
 	void Save();
 
 	/** 从存档读取并恢复（需在 TimeSystem / StaffSystem 已创建后调用，如 LoadGameData / NewGameData） */
-	UFUNCTION(BlueprintCallable, Category = "Business")
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Business")
 	void Load();
 
 private:
