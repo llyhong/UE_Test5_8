@@ -8,3 +8,9 @@
 !/Plugins
 Plugins/*/Binaries/
 Plugins/*/Intermediate/
+
+# Python cache
+Content/Python/__pycache__/
+
+# Lighting built data (>100MB, GitHub rejects)
+*_BuiltData.uasset
