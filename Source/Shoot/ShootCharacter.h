@@ -31,6 +31,7 @@ class AAttractCounter;
 class AGuestCharacter;
 class ADishwasher;
 class AChairSeat;
+class APestActor;
 class UInteractionDialogueComponent;
 struct FInputActionValue;
 
@@ -204,6 +205,10 @@ private:
 
 	UPROPERTY(VisibleInstanceOnly)
 	TObjectPtr<class UInteractionDialogueComponent> OverlappingDialogue;
+
+	// 当前可抓捕的害虫（老鼠等突发事件生成；靠近时由害虫的交互球注册）
+	UPROPERTY(VisibleInstanceOnly)
+	TObjectPtr<class APestActor> OverlappingPest;
 
 	// ============ 背包系统 ============
 	// 背包槽位：只记录物体的类型/信息，入包后世界中的物体会被销毁，取出时按类型重新生成
@@ -600,6 +605,13 @@ public:
 	FORCEINLINE AStorageWarehouse* GetOverlappingWarehouse() const { return OverlappingWarehouse; }
 
 
+	// 害虫交互：靠近时由 APestActor 的交互球注册/反注册（用于 E 键抓捕）
+	UFUNCTION(BlueprintCallable, Category="Pest")
+	void SetOverlappingPest(APestActor* Pest);
+
+	UFUNCTION(BlueprintCallable, Category="ShootCharacter")
+	FORCEINLINE APestActor* GetOverlappingPest() const { return OverlappingPest; }
+
 	// 通用对话交互：靠近时由 UInteractionDialogueComponent 注册/反注册（用于 E 键对话）
 	UFUNCTION(BlueprintCallable, Category="Dialogue")
 	void SetOverlappingDialogue(UInteractionDialogueComponent* Comp);
@@ -855,6 +867,33 @@ public:
 
 	/** Returns FollowCamera subobject **/
 	FORCEINLINE class UCameraComponent* GetFollowCamera() const { return FollowCamera; }
+
+	/** 按 bUseTopDownCamera 同步相机臂参数与朝向，每帧调用以支持运行时切换 */
+	void UpdateCameraView();
+
+	/** 是否使用俯视（Topdown）相机；关闭即恢复原来的第三人称跟随视角 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera")
+	bool bUseTopDownCamera = true;
+
+	/** 俯视相机臂长，越大视野越广 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera", meta = (EditCondition = "bUseTopDownCamera", ClampMin = "100.0"))
+	float TopDownArmLength = 1400.0f;
+
+	/** 俯视相机俯仰角（负值向下看，-62 约为斜俯视） */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera", meta = (EditCondition = "bUseTopDownCamera", ClampMin = "-89.0", ClampMax = "-15.0"))
+	float TopDownPitch = -62.0f;
+
+	/** 俯视时相机是否跟随鼠标左右旋转；关闭则固定朝向世界 +X */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera", meta = (EditCondition = "bUseTopDownCamera"))
+	bool bTopDownYawFollowsControl = true;
+
+	/** 非俯视（第三人称跟随）模式下的相机臂长；默认 650，比原 400 更宽松，不贴脸 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera", meta = (EditCondition = "!bUseTopDownCamera", ClampMin = "100.0"))
+	float ThirdPersonArmLength = 650.0f;
+
+	/** 臂长切换/调整时的插值速度（0 =  instantly） */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera", meta = (ClampMin = "0.1"))
+	float ArmLengthInterpSpeed = 6.0f;
 	
 	UPROPERTY(BlueprintReadWrite, Category="Character State")
      ECharacterState CharacterState = ECharacterState::ECS_Idle;

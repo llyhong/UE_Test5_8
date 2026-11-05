@@ -35,6 +35,7 @@
 #include "Game/BaseGameInstance.h"
 #include "Game/BaseLevelBP.h"
 #include "Machine/StorageWarehouse.h"
+#include "Event/PestActor.h"
 #include "UI/HUDWidget.h"
 #include "Machine/GateCounter.h"
 #include "Kismet/GameplayStatics.h"
@@ -260,8 +261,10 @@ bool AShootCharacter::IsSpawner()
 	// Create a camera boom (pulls in towards the player if there is a collision)
 	CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
 	CameraBoom->SetupAttachment(RootComponent);
-	CameraBoom->TargetArmLength = 400.0f;
-	CameraBoom->bUsePawnControlRotation = true;
+	CameraBoom->TargetArmLength = bUseTopDownCamera ? TopDownArmLength : ThirdPersonArmLength;
+	// 俯视模式下相机朝向由 Tick 里的世界旋转驱动，不跟随 Pawn 旋转
+	CameraBoom->bUsePawnControlRotation = !bUseTopDownCamera;
+	CameraBoom->SetUsingAbsoluteRotation(bUseTopDownCamera);
 	CameraBoom->bDoCollisionTest = false; // 镜头不与被遮挡的场景物件发生碰撞拉近距离
 	// 相机延迟跟随：保留一点缓冲吸收台阶/落地的上下颠簸，
 	// 但 LagSpeed 固定不变、并限制最大滞后距离，避免加速/急停时镜头前后抽动
@@ -1045,6 +1048,11 @@ void AShootCharacter::SetOverlappingDialogue(UInteractionDialogueComponent* Comp
 	OverlappingDialogue = Comp;
 }
 
+void AShootCharacter::SetOverlappingPest(APestActor* Pest)
+{
+	OverlappingPest = Pest;
+}
+
 void AShootCharacter::InteractWithPlant()
 {
 	if (!OverlappingPlant)
@@ -1325,6 +1333,16 @@ void AShootCharacter::Pick(const FInputActionValue& Value)
 	{
 		BufferPickInput();
 		return;
+	}
+
+	// 突发事件：靠近老鼠等害虫时按 E 抓取（优先级高，避免被植物/拾取分支截走）
+	if (OverlappingPest && IsValid(OverlappingPest))
+	{
+		if (OverlappingPest->TryCatch(this))
+		{
+			OverlappingPest = nullptr;
+			return;
+		}
 	}
 
 	TArray<FInteractOption, TInlineAllocator<12>> Options;
@@ -2016,13 +2034,74 @@ void AShootCharacter::DoLook(float Yaw, float Pitch)
 {
 	if (GetController() != nullptr)
 	{
-		// 仅保留左右旋转，禁止上下俯仰
+		// 仅保留左右旋转，禁止上下俯仰；俯视模式固定俯仰角，鼠标纵向不再改变视角
 		AddControllerYawInput(Yaw);
-		if (bRotationPicth)
+		if (bRotationPicth && !bUseTopDownCamera)
 		{
 			AddControllerPitchInput(Pitch);
 		}
 		
+	}
+}
+
+void AShootCharacter::UpdateCameraView()
+{
+	if (CameraBoom == nullptr)
+	{
+		return;
+	}
+
+	const float DeltaTime = GetWorld() ? GetWorld()->GetDeltaSeconds() : 0.016f;
+
+	if (!bUseTopDownCamera)
+	{
+		// 回到原第三人称：相机臂跟随控制旋转，臂长使用 ThirdPersonArmLength
+		if (CameraBoom->IsUsingAbsoluteRotation())
+		{
+			CameraBoom->SetUsingAbsoluteRotation(false);
+		}
+		CameraBoom->bUsePawnControlRotation = true;
+
+		const float TargetArm = ThirdPersonArmLength;
+		if (!FMath::IsNearlyEqual(CameraBoom->TargetArmLength, TargetArm, 0.1f))
+		{
+			CameraBoom->TargetArmLength = ArmLengthInterpSpeed > 0.f
+				? FMath::FInterpTo(CameraBoom->TargetArmLength, TargetArm, DeltaTime, ArmLengthInterpSpeed)
+				: TargetArm;
+		}
+		return;
+	}
+
+	if (!CameraBoom->IsUsingAbsoluteRotation())
+	{
+		CameraBoom->SetUsingAbsoluteRotation(true);
+	}
+	CameraBoom->bUsePawnControlRotation = false;
+
+	// 臂长平滑过渡：避免切模式时画面距离跳变
+	const float TargetArm = TopDownArmLength;
+	if (!FMath::IsNearlyEqual(CameraBoom->TargetArmLength, TargetArm, 0.1f))
+	{
+		CameraBoom->TargetArmLength = ArmLengthInterpSpeed > 0.f
+			? FMath::FInterpTo(CameraBoom->TargetArmLength, TargetArm, DeltaTime, ArmLengthInterpSpeed)
+			: TargetArm;
+	}
+
+	float Yaw = 0.0f;
+	if (bTopDownYawFollowsControl)
+	{
+		if (const AController* OwningController = GetController())
+		{
+			Yaw = OwningController->GetControlRotation().Yaw;
+		}
+	}
+
+	// 俯视朝向也做平滑插值，避免 0/360 跳变和模式切换时瞬间甩镜头
+	const FRotator DesiredRotation(TopDownPitch, Yaw, 0.0f);
+	const FRotator CurrentRotation = CameraBoom->GetComponentRotation();
+	if (!CurrentRotation.Equals(DesiredRotation, 0.01f))
+	{
+		CameraBoom->SetWorldRotation(FMath::RInterpTo(CurrentRotation, DesiredRotation, DeltaTime, 8.0f));
 	}
 }
 
@@ -2799,6 +2878,8 @@ void AShootCharacter::DoRepairEnd()
  void AShootCharacter::Tick(float DeltaTime)
  {
 	Super::Tick(DeltaTime);
+
+	UpdateCameraView();
 
 	if (CharacterState == ECharacterState::ECS_Dead)
 	{
