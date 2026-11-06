@@ -906,9 +906,13 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Camera|Area", meta = (ClampMin = "0.0"))
 	float CameraAreaHysteresis = 80.0f;
 
-	/** 俯视 / 第三人称相互切换的平滑速度；越小过渡越慢越柔 */
+	/** 进入区域切俯视的平滑速度；越小过渡越慢越柔 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Camera|Area", meta = (ClampMin = "0.1"))
 	float CameraModeBlendSpeed = 2.5f;
+
+	/** 离开区域回第三人称的平滑速度；比进入快，避免纵向视角迟迟回不到鼠标方向 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Camera|Area", meta = (ClampMin = "0.1"))
+	float CameraModeExitBlendSpeed = 6.0f;
 
 	/** 当前是否处在任一相机区域体积内（运行时） */
 	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Camera|Area")

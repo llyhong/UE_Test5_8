@@ -2038,8 +2038,9 @@ void AShootCharacter::DoLook(float Yaw, float Pitch)
 	{
 		// 仅保留左右旋转，禁止上下俯仰；俯视模式固定俯仰角，鼠标纵向不再改变视角
 		AddControllerYawInput(Yaw);
-		// 俯视 / 过渡过程中禁用俯仰，完全回到第三人称后才放开，避免鼠标把俯仰带进切换过程
-		if (bRotationPicth && CameraViewAlpha < 0.01f)
+		// 俯视 / 进入过渡期间禁用俯仰；已不在区域内（含退出过渡）立刻响应，
+		// 否则退出时俯仰会被丢掉两三秒，手感发木
+		if (bRotationPicth && !bUseTopDownCamera)
 		{
 			AddControllerPitchInput(Pitch);
 		}
@@ -2092,7 +2093,11 @@ void AShootCharacter::UpdateCameraView()
 	}
 	else if (CameraModeBlendSpeed > 0.0f)
 	{
-		CameraViewAlpha = FMath::FInterpTo(CameraViewAlpha, TargetAlpha, DeltaTime, CameraModeBlendSpeed);
+		// 退出比进入快：第三人称的纵向视角要尽快回到鼠标方向
+		const float BlendSpeed = TargetAlpha < CameraViewAlpha
+			? FMath::Max(CameraModeExitBlendSpeed, 0.1f)
+			: CameraModeBlendSpeed;
+		CameraViewAlpha = FMath::FInterpTo(CameraViewAlpha, TargetAlpha, DeltaTime, BlendSpeed);
 		if (FMath::IsNearlyEqual(CameraViewAlpha, TargetAlpha, 0.001f))
 		{
 			CameraViewAlpha = TargetAlpha;
