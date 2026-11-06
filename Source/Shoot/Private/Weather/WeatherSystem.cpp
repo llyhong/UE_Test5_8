@@ -2,6 +2,7 @@
 
 #include "Weather/WeatherSystem.h"
 
+#include "Environment/StylizedSkyBridge.h"
 #include "Components/AudioComponent.h"
 #include "Components/ExponentialHeightFogComponent.h"
 #include "NiagaraComponent.h"
@@ -62,6 +63,8 @@ FWeatherBlendState FWeatherBlendState::FromPreset(const FWeatherPreset& Preset)
 	State.WindStrength = Preset.WindStrength;
 	State.WindSpeed = Preset.WindSpeed;
 	State.PrecipitationRate = Preset.PrecipitationRate;
+	State.RainStrength = Preset.PrecipitationType == EPrecipitationType::Rain
+		? FMath::Clamp(Preset.PrecipitationRate, 0.f, 1.f) : 0.f;
 	State.AmbientVolume = Preset.AmbientVolume;
 	return State;
 }
@@ -82,6 +85,7 @@ FWeatherBlendState FWeatherBlendState::LerpTo(const FWeatherBlendState& To, floa
 	Result.WindStrength = FMath::Lerp(WindStrength, To.WindStrength, Alpha);
 	Result.WindSpeed = FMath::Lerp(WindSpeed, To.WindSpeed, Alpha);
 	Result.PrecipitationRate = FMath::Lerp(PrecipitationRate, To.PrecipitationRate, Alpha);
+	Result.RainStrength = FMath::Lerp(RainStrength, To.RainStrength, Alpha);
 	Result.AmbientVolume = FMath::Lerp(AmbientVolume, To.AmbientVolume, Alpha);
 	return Result;
 }
@@ -153,6 +157,10 @@ void AWeatherSystem::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	if (BoundTimeSystem)
 	{
 		BoundTimeSystem->OnDayChanged.RemoveDynamic(this, &AWeatherSystem::HandleDayChanged);
+		if (BoundTimeSystem->StylizedSkyActor == StylizedSkyActor)
+		{
+			BoundTimeSystem->StylizedSkyActor = nullptr;
+		}
 		BoundTimeSystem = nullptr;
 	}
 
@@ -181,6 +189,14 @@ void AWeatherSystem::Tick(float DeltaSeconds)
 	if (bTransitioning)
 	{
 		TickTransition(DeltaSeconds);
+	}
+
+	if (StylizedSkyActor)
+	{
+		if (UStylizedSkyBridge* Bridge = StylizedSkyActor->FindComponentByClass<UStylizedSkyBridge>())
+		{
+			Bridge->SetWeatherBlend(BlendCurrent);
+		}
 	}
 
 	// 太阳修正每帧写入时间系统：UpdateSun 不依赖天气系统的 Tick 顺序，且时间系统晚于天气系统创建时也能补齐
@@ -215,11 +231,16 @@ void AWeatherSystem::RefreshTimeSystem()
 	if (BoundTimeSystem)
 	{
 		BoundTimeSystem->OnDayChanged.RemoveDynamic(this, &AWeatherSystem::HandleDayChanged);
+		if (BoundTimeSystem->StylizedSkyActor == StylizedSkyActor)
+		{
+			BoundTimeSystem->StylizedSkyActor = nullptr;
+		}
 	}
 
 	BoundTimeSystem = Current;
 	if (BoundTimeSystem)
 	{
+		BoundTimeSystem->StylizedSkyActor = StylizedSkyActor;
 		BoundTimeSystem->OnDayChanged.AddDynamic(this, &AWeatherSystem::HandleDayChanged);
 	}
 }
@@ -307,6 +328,17 @@ void AWeatherSystem::InitSceneBindings()
 	if (WindSourceActor)
 	{
 		WindComp = WindSourceActor->GetComponent();
+	}
+
+	if (StylizedSkyActor)
+	{
+		SkyLightComp = nullptr;
+		FogComp = nullptr;
+		CloudComp = nullptr;
+		if (!StylizedSkyActor->FindComponentByClass<UStylizedSkyBridge>())
+		{
+			UE_LOG(LogTemp, Error, TEXT("[Weather] StylizedSkyActor 必须包含 StylizedSkyBridge 组件"));
+		}
 	}
 
 	if (bShowDebugInfo)

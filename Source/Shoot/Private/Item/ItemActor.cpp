@@ -79,6 +79,7 @@ void AItemActor::BeginPlay()
 {
 	Super::BeginPlay();
 
+	SetActorsOutline(this, false);
 	ApplyInteractionScale();
 
 	// 盘子/食材蓝图（BP_Plate、BP_Beef、BP_fried_egg 等）在组件模板里勾了 Simulate Physics，

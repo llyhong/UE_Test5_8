@@ -25,7 +25,7 @@ public class Shoot : ModuleRules
 			"Landscape",
 		});
 
-		PrivateDependencyModuleNames.AddRange(new string[] { });
+		PrivateDependencyModuleNames.AddRange(new string[] { "SlateCore" });
 
 		PublicIncludePaths.AddRange(new string[] {
 			"Shoot",

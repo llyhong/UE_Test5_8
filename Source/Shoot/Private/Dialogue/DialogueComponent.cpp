@@ -2,7 +2,6 @@
 
 #include "Dialogue/DialogueComponent.h"
 #include "Components/SphereComponent.h"
-#include "Components/WidgetComponent.h"
 #include "UI/DialogueWidget.h"
 #include "Dialogue/DialogueProvider.h"
 #include "ShootCharacter.h"
@@ -76,21 +75,6 @@ void UInteractionDialogueComponent::BeginPlay()
 	}
 
 	EnsureInteractionSphere();
-
-	// —— 交互提示 Widget（“按 E 对话”，默认隐藏） ——
-	if (PromptWidgetClass)
-	{
-		PromptWidget = NewObject<UWidgetComponent>(Owner, TEXT("DialoguePromptWidget"));
-		if (PromptWidget)
-		{
-			PromptWidget->SetWidgetSpace(EWidgetSpace::Screen);
-			PromptWidget->SetRelativeLocation(FVector(0.f, 0.f, 120.f));
-			PromptWidget->SetWidgetClass(PromptWidgetClass);
-			PromptWidget->SetupAttachment(Owner->GetRootComponent());
-			PromptWidget->RegisterComponent();
-			PromptWidget->SetVisibility(false);
-		}
-	}
 
 	// 调试绘制开关由 bDebugDrawRadius 控制（默认关闭）
 	SetComponentTickEnabled(bDebugDrawRadius);
@@ -209,29 +193,12 @@ void UInteractionDialogueComponent::HandleButtonClicked(int32 ButtonID)
 	}
 }
 
-void UInteractionDialogueComponent::ShowPrompt()
-{
-	if (PromptWidget)
-	{
-		PromptWidget->SetVisibility(true);
-	}
-}
-
-void UInteractionDialogueComponent::HidePrompt()
-{
-	if (PromptWidget)
-	{
-		PromptWidget->SetVisibility(false);
-	}
-}
-
 void UInteractionDialogueComponent::OnInteractionOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
 	UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
 {
 	if (AShootCharacter* SC = Cast<AShootCharacter>(OtherActor))
 	{
 		SC->AddOverlappingDialogue(this);
-		ShowPrompt();
 		UE_LOG(LogTemp, Log, TEXT("[Dialogue] 玩家进入范围: %s -> %s (半径%.0f)"),
 			*GetNameSafe(SC), *GetNameSafe(GetOwner()), InteractionRadius);
 	}
@@ -244,7 +211,6 @@ void UInteractionDialogueComponent::OnInteractionEndOverlap(UPrimitiveComponent*
 	{
 		// 只注销自己，多个可对话对象范围交叠时互不影响
 		SC->RemoveOverlappingDialogue(this);
-		HidePrompt();
 
 		// 玩家离开时自动隐藏对话框（满足需求）
 		if (bAutoCloseOnLeave)

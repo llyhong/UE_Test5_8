@@ -45,6 +45,7 @@ struct FWeatherBlendState
 	float WindStrength = 0.2f;
 	float WindSpeed = 0.6f;
 	float PrecipitationRate = 1.f;
+	float RainStrength = 0.f;
 	float AmbientVolume = 0.f;
 
 	static FWeatherBlendState FromPreset(const FWeatherPreset& Preset);
@@ -107,6 +108,9 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Weather")
 	bool bShowDebugInfo = false;
+
+	UPROPERTY(EditInstanceOnly, BlueprintReadWrite, Category = "Shoot|Weather|Scene")
+	TObjectPtr<AActor> StylizedSkyActor;
 
 	// ========== 场景绑定（留空时 BeginPlay 自动按类型查找） ==========
 	UPROPERTY(EditAnywhere, Category = "Shoot|Weather|Scene")

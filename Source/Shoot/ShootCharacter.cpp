@@ -38,13 +38,21 @@
 #include "Game/BaseLevelBP.h"
 #include "Machine/StorageWarehouse.h"
 #include "Event/PestActor.h"
+#include "Environment/FireflyAreaVolume.h"
 #include "UI/HUDWidget.h"
+#include "UI/InteractionPromptWidget.h"
+#include "Components/WidgetComponent.h"
+#include "Components/MeshComponent.h"
+#include "GameFramework/PlayerController.h"
 #include "Machine/GateCounter.h"
 #include "Kismet/GameplayStatics.h"
 #include "Kismet/GameplayStaticsTypes.h"
 #include "Blueprint/AIBlueprintHelperLibrary.h"
 #include "Data/ItemActorInfo.h"
 #include "Interaction/InteractionConfig.h"
+#include "NiagaraComponent.h"
+#include "NiagaraFunctionLibrary.h"
+#include "NiagaraSystem.h"
 #include "DrawDebugHelpers.h"
 #include "EngineUtils.h"
 
@@ -267,7 +275,7 @@ bool AShootCharacter::IsSpawner()
 	// 俯视模式下相机朝向由 Tick 里的世界旋转驱动，不跟随 Pawn 旋转
 	CameraBoom->bUsePawnControlRotation = !bUseTopDownCamera;
 	CameraBoom->SetUsingAbsoluteRotation(bUseTopDownCamera);
-	CameraBoom->bDoCollisionTest = false; // 镜头不与被遮挡的场景物件发生碰撞拉近距离
+	CameraBoom->bDoCollisionTest = !bUseTopDownCamera;
 	// 相机延迟跟随：保留一点缓冲吸收台阶/落地的上下颠簸，
 	// 但 LagSpeed 固定不变、并限制最大滞后距离，避免加速/急停时镜头前后抽动
 	CameraBoom->bEnableCameraLag = true;
@@ -288,6 +296,19 @@ bool AShootCharacter::IsSpawner()
 	{
 		RushAction = RushActionFinder.Object;
 	}
+
+	static ConstructorHelpers::FObjectFinder<UNiagaraSystem> HarvestEffectFinder(TEXT("/Game/VFX/Pick/NS_Harvest"));
+	HarvestEffect = HarvestEffectFinder.Object;
+
+	InteractionPrompt = CreateDefaultSubobject<UWidgetComponent>(TEXT("InteractionPrompt"));
+	InteractionPrompt->SetupAttachment(RootComponent);
+	InteractionPrompt->SetWidgetSpace(EWidgetSpace::Screen);
+	InteractionPrompt->SetWidgetClass(UInteractionPromptWidget::StaticClass());
+	InteractionPrompt->SetDrawAtDesiredSize(true);
+	InteractionPrompt->SetPivot(FVector2D(0.5f, 1.f));
+	InteractionPrompt->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	InteractionPrompt->SetGenerateOverlapEvents(false);
+	InteractionPrompt->SetVisibility(false);
 
  	RetargetMesh = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("RetargetMesh"));
  	RetargetMesh->SetupAttachment(GetMesh());
@@ -553,7 +574,7 @@ void AShootCharacter::RefreshBestPlant()
 namespace
 {
 	/** 交互候选排序：Tier 优先 → 朝向加权距离 → 真实距离。
-	 *  Pick() 与 RefreshInteractionHighlight() 共用同一份规则，
+	 *  Pick() 与 RefreshInteractionPromptTarget() 共用同一份规则，
 	 *  保证"亮着的那个"就是"按 E 会生效的那个"。 */
 	inline bool InteractionOptionLess(const AShootCharacter::FInteractOption& A, const AShootCharacter::FInteractOption& B)
 	{
@@ -939,7 +960,7 @@ void AShootCharacter::RefreshAllInteractionTargets()
 	RefreshBestDialogue();
 
 	// 所有候选都重估完，再统一决定"只亮哪一个"
-	RefreshInteractionHighlight();
+	RefreshInteractionPromptTarget();
 }
 
 bool AShootCharacter::IsDropLockActive(AItemActor* Item) const
@@ -1343,6 +1364,8 @@ void AShootCharacter::Pick(const FInputActionValue& Value)
 		if (OverlappingPest->TryCatch(this))
 		{
 			OverlappingPest = nullptr;
+			RefreshAllInteractionTargets();
+			UpdateInteractionPrompt();
 			return;
 		}
 	}
@@ -1357,6 +1380,8 @@ void AShootCharacter::Pick(const FInputActionValue& Value)
 	{
 		if (Option.Run())
 		{
+			RefreshAllInteractionTargets();
+			UpdateInteractionPrompt();
 			if (InteractionDebug::IsEnabled() && GEngine)
 			{
 				GEngine->AddOnScreenDebugMessage(-1, 1.5f, FColor::Cyan,
@@ -1440,7 +1465,8 @@ void AShootCharacter::BuildInteractionOptions(TArray<FInteractOption, TInlineAll
 	constexpr int32 TierForce = 0;
 	constexpr int32 TierHandover = 1;
 	constexpr int32 TierWorld = 2;
-	constexpr int32 TierFallback = 3;
+	constexpr int32 TierAmbient = 3;
+	constexpr int32 TierFallback = 4;
 
 	// 到目标的交互距离：用包围盒最近点（大件设备不会因为 pivot 远而被算得比小物件远）
 	auto DistTo = [this](const AActor* Target) -> float
@@ -1715,7 +1741,21 @@ void AShootCharacter::BuildInteractionOptions(TArray<FInteractOption, TInlineAll
 		});
 	}
 
-	// ---------------- Tier 3：兜底 —— 放下手上的东西 ----------------
+	for (TActorIterator<AFireflyAreaVolume> It(GetWorld()); It; ++It)
+	{
+		AFireflyAreaVolume* Area = *It;
+		if (Area->CanInteract(this))
+		{
+			const float Distance = Area->GetNearestFireflyDistance(GetActorLocation());
+			AddOption(TierAmbient, Distance, TEXT("惊扰萤火虫"), Area, [this, Area]()
+			{
+				return Area->Interact(this);
+			});
+			OutOptions.Last().Score = Distance;
+		}
+	}
+
+	// ---------------- Tier 4：兜底 —— 放下手上的东西 ----------------
 	// 缓冲消费时不执行：玩家在动画期间按的那一下本意是"继续交互"，
 	// 补执行时若变成"把刚捡的东西放下"，手感会更差。
 	if (NeedDropDown() && !bConsumingBufferedPick)
@@ -1728,67 +1768,84 @@ void AShootCharacter::BuildInteractionOptions(TArray<FInteractOption, TInlineAll
 	}
 }
 
-void AShootCharacter::RefreshInteractionHighlight()
+void AShootCharacter::RefreshInteractionPromptTarget()
 {
-	if (!bEnableInteractionHighlight)
+	InteractionPromptTarget = nullptr;
+	if (!bEnableInteractionPrompt || !IsLocallyControlled() || CharacterState == ECharacterState::ECS_Dead)
 	{
+		return;
+	}
+
+	if (IsValid(OverlappingPest))
+	{
+		InteractionPromptTarget = OverlappingPest;
 		return;
 	}
 
 	TArray<FInteractOption, TInlineAllocator<12>> Options;
 	BuildInteractionOptions(Options);
-
-	// 与 Pick() 完全相同的排序规则：先分层、同层按距离，保证"亮着的"就是"按 E 会生效的"
 	Options.StableSort(InteractionOptionLess);
+	if (!Options.IsEmpty())
+	{
+		InteractionPromptTarget = Options[0].Target;
+	}
+}
 
-	// 只看排在最前面的那一个：它要不是物品/植株（比如灶台、客人、放下），就一个都不亮。
-	// 旧实现里每个球各自在 Overlap 时点亮自己，站在一堆食材中间就会亮成一片。
-	AActor* NewTarget = Options.Num() > 0 ? Options[0].Target : nullptr;
-
-	if (HighlightTarget == NewTarget)
+void AShootCharacter::UpdateInteractionPrompt()
+{
+	AActor* Target = InteractionPromptTarget;
+	const bool bShow = bEnableInteractionPrompt && IsLocallyControlled() && IsValid(Target)
+		&& CharacterState != ECharacterState::ECS_Dead && !IsInteractionAnimPlaying();
+	InteractionPrompt->SetVisibility(bShow);
+	if (!bShow)
 	{
 		return;
 	}
 
-	// 熄灭上一个目标
-	if (AItemActor* OldItem = Cast<AItemActor>(HighlightTarget))
+	if (const APlant* Plant = Cast<APlant>(Target))
 	{
-		if (IsValid(OldItem))
+		if (!Plant->HasPest() && !Plant->IsFruiting() && !Plant->NeedsWater())
 		{
-			OldItem->SetInteractionHighlight(false);
-		}
-	}
-	else if (APlant* OldPlant = Cast<APlant>(HighlightTarget))
-	{
-		if (IsValid(OldPlant))
-		{
-			OldPlant->SetInteractionHighlight(false);
+			InteractionPrompt->SetVisibility(false);
+			return;
 		}
 	}
 
-	HighlightTarget = NewTarget;
-
-	if (InteractionDebug::IsEnabled() && GEngine)
+	if (APlayerController* PC = Cast<APlayerController>(GetController()))
 	{
-		GEngine->AddOnScreenDebugMessage(-1, 1.2f, FColor::Cyan,
-			FString::Printf(TEXT("[高亮] %s"), NewTarget ? *GetNameSafe(NewTarget) : TEXT("无")));
+		InteractionPrompt->SetOwnerPlayer(PC->GetLocalPlayer());
 	}
 
-	// 点亮新目标（只有物品和植株支持描边；灶台/客人等目标胜出时全场无高亮）
-	if (AItemActor* NewItem = Cast<AItemActor>(NewTarget))
+	FVector Location = Target->GetActorLocation();
+	if (const AFireflyAreaVolume* Area = Cast<AFireflyAreaVolume>(Target))
 	{
-		if (IsValid(NewItem))
+		if (!Area->CanInteract(this))
 		{
-			NewItem->SetInteractionHighlight(true);
+			InteractionPrompt->SetVisibility(false);
+			return;
+		}
+		Location = Area->GetNearestFireflyLocation(GetActorLocation());
+		Location.Z = FMath::Max(Location.Z, GetActorLocation().Z + 90.f);
+	}
+	else
+	{
+		FBox Bounds(ForceInit);
+		TInlineComponentArray<UMeshComponent*> Meshes(Target);
+		for (const UMeshComponent* TargetMesh : Meshes)
+		{
+			if (!TargetMesh->IsA<UWidgetComponent>() && TargetMesh->IsVisible() && !TargetMesh->bHiddenInGame)
+			{
+				Bounds += TargetMesh->Bounds.GetBox();
+			}
+		}
+		if (Bounds.IsValid)
+		{
+			Location = Bounds.GetCenter();
+			Location.Z = Bounds.Max.Z;
 		}
 	}
-	else if (APlant* NewPlant = Cast<APlant>(NewTarget))
-	{
-		if (IsValid(NewPlant))
-		{
-			NewPlant->SetInteractionHighlight(true);
-		}
-	}
+	Location.Z += InteractionPromptHeight;
+	InteractionPrompt->SetWorldLocation(Location);
 }
 
 // ============================================================================
@@ -2081,7 +2138,18 @@ void AShootCharacter::UpdateCameraView()
 		return;
 	}
 
+	const bool bWasTopDown = bUseTopDownCamera;
 	UpdateCameraAreaState();
+
+	if (!bUseTopDownCamera && (bWasTopDown || !bCameraViewInitialized))
+	{
+		if (AController* CameraController = GetController())
+		{
+			FRotator EntryRotation = CameraController->GetControlRotation();
+			EntryRotation.Pitch = ThirdPersonEntryPitch;
+			CameraController->SetControlRotation(EntryRotation);
+		}
+	}
 
 	const float DeltaTime = GetWorld() ? GetWorld()->GetDeltaSeconds() : 0.016f;
 	const float TargetAlpha = bUseTopDownCamera ? 1.0f : 0.0f;
@@ -2107,6 +2175,7 @@ void AShootCharacter::UpdateCameraView()
 	{
 		CameraViewAlpha = TargetAlpha;
 	}
+	CameraBoom->bDoCollisionTest = CameraViewAlpha < 1.0f;
 
 	// 两种视角统一由世界旋转驱动：切换 bUsePawnControlRotation / 绝对旋转的瞬间会硬跳
 	CameraBoom->bUsePawnControlRotation = false;
@@ -2383,6 +2452,45 @@ void AShootCharacter::HoldItemInHand(AItemActor* Item, bool bSetAsPickingItem)
 			HandIK_LPoint = Item->HandIK_LPoint;
 			HandIK_RPoint = Item->HandIK_RPoint;
 		}
+	}
+}
+
+void AShootCharacter::PlayHarvestEffect(FVector SourceLocation)
+{
+	if (!HarvestEffect || !RetargetMesh)
+	{
+		return;
+	}
+	if (!RetargetMesh->DoesSocketExist(HarvestEffectSocket))
+	{
+		UE_LOG(LogShoot, Warning, TEXT("Harvest effect socket '%s' does not exist"), *HarvestEffectSocket.ToString());
+		return;
+	}
+
+	UNiagaraComponent* Effect = UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+		this, HarvestEffect, SourceLocation, FRotator::ZeroRotator, FVector::OneVector, true, false);
+	if (Effect)
+	{
+		Effect->SetVariableInt(TEXT("User.ParticleCount"), FMath::RandRange(1, 3));
+		Effect->SetVariablePosition(TEXT("User.TargetPosition"), RetargetMesh->GetSocketLocation(HarvestEffectSocket));
+		Effect->AddTickPrerequisiteComponent(RetargetMesh);
+		Effect->AddTickPrerequisiteActor(this);
+		Effect->Activate(true);
+		ActiveHarvestEffects.Add(Effect);
+	}
+}
+
+void AShootCharacter::UpdateHarvestEffects()
+{
+	for (int32 Index = ActiveHarvestEffects.Num() - 1; Index >= 0; --Index)
+	{
+		UNiagaraComponent* Effect = ActiveHarvestEffects[Index].Get();
+		if (!Effect || Effect->IsComplete())
+		{
+			ActiveHarvestEffects.RemoveAtSwap(Index);
+			continue;
+		}
+		Effect->SetVariablePosition(TEXT("User.TargetPosition"), RetargetMesh->GetSocketLocation(HarvestEffectSocket));
 	}
 }
 
@@ -2913,6 +3021,7 @@ void AShootCharacter::DoRepairEnd()
 	Super::Tick(DeltaTime);
 
 	UpdateCameraView();
+	UpdateHarvestEffects();
 
 	if (CharacterState == ECharacterState::ECS_Dead)
 	{
@@ -3000,6 +3109,7 @@ void AShootCharacter::DoRepairEnd()
 	// 范围拾取：按住 E 超过阈值后，持续把身边散落物收进背包
 	TickBufferedPick(DeltaTime);
 	TickRangePick(DeltaTime);
+	UpdateInteractionPrompt();
 
 	// ============ 交互视线调试（控制台 Shoot.DebugInteract 1） ============
 	if (InteractionDebug::IsEnabled() && GetWorld())

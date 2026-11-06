@@ -7,6 +7,7 @@
 #include "Tickable.h"
 #include "BusinessTime.generated.h"
 
+class AActor;
 class ADirectionalLight;
 class UDirectionalLightComponent;
 
@@ -147,6 +148,9 @@ public:
 	/** 要随日出日落驱动的平行光（太阳）。为空时由关卡在 BeginPlay 自动按标签"Sun"或首个 DirectionalLight 绑定 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Time|Sun")
 	TObjectPtr<ADirectionalLight> SunLight;
+
+	UPROPERTY(Transient, BlueprintReadOnly, Category = "Shoot|Time|Sun")
+	TObjectPtr<AActor> StylizedSkyActor;
 
 	/** 是否自动驱动太阳（角度 / 颜色 / 强度随 DayProgress 变化）；关闭则只走日期 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Time|Sun")

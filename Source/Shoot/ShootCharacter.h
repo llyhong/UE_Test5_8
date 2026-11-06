@@ -33,6 +33,9 @@ class ADishwasher;
 class AChairSeat;
 class APestActor;
 class UInteractionDialogueComponent;
+class UNiagaraSystem;
+class UNiagaraComponent;
+class UWidgetComponent;
 struct FInputActionValue;
 
 
@@ -481,9 +484,7 @@ public:
 	/** 定期重估三个候选集的最优目标：玩家移动、绕到墙后、物体被搬走都能及时反映 */
 	void RefreshAllInteractionTargets();
 
-	// ============ 交互高亮（同一时刻只亮一个） ============
-	/** 一次交互候选。Pick() 与高亮共用同一份候选表，
-	 *  保证"亮着的那个"永远等于"此刻按 E 会生效的那个"。 */
+	// ============ 交互提示 ============
 	struct FInteractOption
 	{
 		int32 Tier = 2;
@@ -511,16 +512,20 @@ public:
 	/** 收集当前所有可执行的交互（分层 + 距离），不执行任何副作用 */
 	void BuildInteractionOptions(TArray<FInteractOption, TInlineAllocator<12>>& OutOptions);
 
-	/** 重算"当前唯一高亮目标"：取候选表里第一个有 Actor 目标的项，
-	 *  是物品/植株就点亮它，并把上一个目标熄灭 */
-	void RefreshInteractionHighlight();
+	void RefreshInteractionPromptTarget();
+	void UpdateInteractionPrompt();
 
-	/** 当前高亮的 Actor（未高亮为 nullptr） */
-	UPROPERTY()
-	TObjectPtr<AActor> HighlightTarget;
+	UPROPERTY(VisibleInstanceOnly, Category = "Shoot|Interaction")
+	TObjectPtr<AActor> InteractionPromptTarget;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Interaction", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UWidgetComponent> InteractionPrompt;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Shoot|Interaction")
-	bool bEnableInteractionHighlight = true;
+	bool bEnableInteractionPrompt = true;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Shoot|Interaction")
+	float InteractionPromptHeight = 22.f;
 
 	/** 目标重估间隔（秒）：不必每帧，0.15s 足够跟手且几乎无开销 */
 	UPROPERTY(EditDefaultsOnly, Category = "Shoot|Interaction")
@@ -637,6 +642,9 @@ public:
 		if (Weapon)
 		{
 			Weapon->SetOwner(this);
+			Weapon->SetItemState(EItemState::EIS_Equipped);
+			Weapon->SetInteractionHighlight(false);
+			RemoveOverlappingItem(Weapon);
 		}
 	}
 
@@ -648,6 +656,19 @@ public:
 	// 注意：这里记录的是"类型"，取出时按 ItemClass 重新生成。
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Inventory")
 	bool AddItemToInventory(AItemActor* Item);
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Shoot|Harvest")
+	TObjectPtr<UNiagaraSystem> HarvestEffect;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Shoot|Harvest")
+	FName HarvestEffectSocket = TEXT("ItemSocket");
+
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Harvest")
+	void PlayHarvestEffect(FVector SourceLocation);
+
+	void UpdateHarvestEffects();
+
+	TArray<TWeakObjectPtr<UNiagaraComponent>> ActiveHarvestEffects;
 
 	// 直接把一条背包槽位记录追加进背包（按 ItemClass 堆叠），并广播 OnInventoryChanged。
 	// 用于仓库取回等场景（不需要一个真实 Actor，仅搬运轻量记录）。
@@ -893,6 +914,9 @@ public:
 	/** 非俯视（第三人称跟随）模式下的相机臂长；默认 650，比原 400 更宽松，不贴脸 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Camera", meta = (EditCondition = "!bUseTopDownCamera", ClampMin = "100.0"))
 	float ThirdPersonArmLength = 650.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Camera", meta = (ClampMin = "-89.0", ClampMax = "0.0"))
+	float ThirdPersonEntryPitch = -45.0f;
 
 	/** 臂长切换/调整时的插值速度（0 =  instantly） */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Camera", meta = (ClampMin = "0.1"))

@@ -203,7 +203,7 @@ else
 			GetWorld()->GetTimerManager().SetTimer(ClockTimerHandle, this, &ABaseLevelBP::RefreshClock, 1.f, true);
 
 			// 自动绑定太阳：若 TimeSystem 未指定 SunLight，则按标签"Sun"优先、否则首个 DirectionalLight 绑定，并立即应用一次
-			if (TS->bDriveSun && TS->SunLight == nullptr)
+			if (TS->bDriveSun && !TS->StylizedSkyActor && TS->SunLight == nullptr)
 			{
 				ADirectionalLight* FoundSun = nullptr;
 				for (TActorIterator<ADirectionalLight> It(GetWorld()); It; ++It)
@@ -253,6 +253,7 @@ void ABaseLevelBP::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		if (GI->businessSimulation && GI->businessSimulation->TimeSystem)
 		{
 			GI->businessSimulation->TimeSystem->SunLight = nullptr;
+			GI->businessSimulation->TimeSystem->StylizedSkyActor = nullptr;
 		}
 	}
 }

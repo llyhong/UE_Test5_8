@@ -167,7 +167,7 @@ void UTimeSystem::SetWeatherSunModifiers(float InIntensityScale, FLinearColor In
 
 void UTimeSystem::UpdateSun()
 {
-	if (!bDriveSun || !SunLight)
+	if (!bDriveSun || IsValid(StylizedSkyActor) || !SunLight)
 	{
 		return;
 	}

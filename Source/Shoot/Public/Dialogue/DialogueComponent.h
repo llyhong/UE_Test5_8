@@ -9,7 +9,6 @@
 #include "DialogueComponent.generated.h"
 
 class USphereComponent;
-class UWidgetComponent;
 class UDialogueWidget;
 class APawn;
 
@@ -56,10 +55,6 @@ public:
 	/** 调试球颜色 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Dialogue|Debug")
 	FColor DebugRadiusColor = FColor::Green;
-
-	/** 交互提示 Widget 类（“按 E 对话”） */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Dialogue")
-	TSubclassOf<UUserWidget> PromptWidgetClass;
 
 	/** 玩家离开交互范围时是否自动关闭对话（满足“离开自动隐藏”需求） */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Dialogue")
@@ -108,14 +103,8 @@ protected:
 	UFUNCTION()
 	void HandleButtonClicked(int32 ButtonID);
 
-	void ShowPrompt();
-	void HidePrompt();
-
 	UPROPERTY()
 	TObjectPtr<USphereComponent> InteractionSphere;
-
-	UPROPERTY()
-	TObjectPtr<UWidgetComponent> PromptWidget;
 
 	UPROPERTY()
 	TObjectPtr<UDialogueWidget> ActiveDialogueWidget;

@@ -57,6 +57,7 @@ void APlant::BeginPlay()
 {
 	Super::BeginPlay();
 
+	AItemActor::SetActorsOutline(this, false);
 	ApplyInteractionScale();
 
 	InteractionSphere->OnComponentBeginOverlap.AddDynamic(this, &APlant::OnInteractionOverlap);
@@ -408,6 +409,7 @@ bool APlant::Harvest()
 		}
 		SpawnedFruits.Empty();
 
+		bool bCollectedFruit = false;
 		// 生成配置数量的果实并逐个入背包（背包按 ItemClass 堆叠为同一槽位，Quantity=Yield）
 		for (int32 i = 0; i < Yield; i++)
 		{
@@ -423,12 +425,21 @@ bool APlant::Harvest()
 			if (Fruit)
 			{
 				Fruit->SetIngredientQuality(Quality); // 按当前整株熟度写入品质
-				if (!InteractingCharacter->AddItemToInventory(Fruit))
+				if (InteractingCharacter->AddItemToInventory(Fruit))
+				{
+					bCollectedFruit = true;
+				}
+				else
 				{
 					// 背包已满等情况：入包失败则直接销毁，避免世界残留
 					Fruit->Destroy();
 				}
 			}
+		}
+
+		if (bCollectedFruit)
+		{
+			InteractingCharacter->PlayHarvestEffect(PlantMesh->Bounds.Origin);
 		}
 
 		// 解除与角色的交互注册，避免悬空引用
@@ -459,6 +470,10 @@ bool APlant::Harvest()
 				InteractingCharacter->HoldItemInHand(Fruit, bFirst); // 第一个作为主手持物，其余也挂到手上
 				bFirst = false;
 			}
+		}
+		if (!bFirst)
+		{
+			InteractingCharacter->PlayHarvestEffect(PlantMesh->Bounds.Origin);
 		}
 	}
 	else
