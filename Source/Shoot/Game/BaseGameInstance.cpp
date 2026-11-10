@@ -102,8 +102,10 @@ void UBaseGameInstance::NewGameData()
 	SaveData->Money = 0;
 	SaveData->Reputation = 0;
 	SaveData->UnlockedIngredients.Empty();
+	SaveData->DiscoveredItemKeys.Empty();
 	curSaveGameData = SaveData;
 	UnlockedIngredientIDs.Reset();
+	DiscoveredItemKeys.Reset();
 	SaveGameData();
 
 	// 新游戏：将经营模拟（日期 / 员工）重置回初始（存档默认 BizYear=1、BizRoster 空）
@@ -143,7 +145,85 @@ bool UBaseGameInstance::LoadGameData() {
 		{
 			UnlockedIngredientIDs.Add(ID);
 		}
+
+		// 同步已发现物品（首次发现只触发一次，跨存档保留）
+		DiscoveredItemKeys.Reset();
+		for (const FName& Key : curSaveGameData->DiscoveredItemKeys)
+		{
+			DiscoveredItemKeys.AddUnique(Key);
+		}
 	}
+	return true;
+}
+
+bool UBaseGameInstance::IsItemDiscovered(FName ItemKey) const
+{
+	return !ItemKey.IsNone() && DiscoveredItemKeys.Contains(ItemKey);
+}
+
+bool UBaseGameInstance::MarkItemDiscovered(FName ItemKey, const FItemActorInfo& FallbackInfo, FDiscoveryInfo& OutInfo)
+{
+	if (ItemKey.IsNone() || DiscoveredItemKeys.Contains(ItemKey))
+	{
+		return false;
+	}
+
+	const FDiscoveryInfo* ConfigRow = DiscoveryTable
+		? DiscoveryTable->FindRow<FDiscoveryInfo>(ItemKey, TEXT("Discovery"), false)
+		: nullptr;
+
+	OutInfo = FDiscoveryInfo();
+	if (ConfigRow)
+	{
+		OutInfo = *ConfigRow;
+		if (OutInfo.DisplayName.IsEmpty())
+		{
+			OutInfo.DisplayName = FallbackInfo.ItemDes;
+		}
+		if (!OutInfo.Icon)
+		{
+			OutInfo.Icon = FallbackInfo.Icon;
+		}
+	}
+	else
+	{
+		OutInfo.DisplayName = FallbackInfo.ItemDes.IsEmpty() ? ItemKey.ToString() : FallbackInfo.ItemDes;
+		OutInfo.Icon = FallbackInfo.Icon;
+		OutInfo.RewardMoney = DefaultDiscoveryMoney;
+		OutInfo.RewardReputation = DefaultDiscoveryReputation;
+	}
+	if (OutInfo.DisplayName.IsEmpty())
+	{
+		OutInfo.DisplayName = ItemKey.ToString();
+	}
+	if (OutInfo.Description.IsEmpty())
+	{
+		OutInfo.Description = FString::Printf(TEXT("在野外发现了新的食材：%s"), *OutInfo.DisplayName);
+	}
+
+	DiscoveredItemKeys.Add(ItemKey);
+	if (curSaveGameData)
+	{
+		curSaveGameData->DiscoveredItemKeys.AddUnique(ItemKey);
+		SaveGameData();
+	}
+
+	if (economySystem)
+	{
+		if (OutInfo.RewardMoney > 0)
+		{
+			economySystem->AddMoney(OutInfo.RewardMoney, EMoneySource::None);
+		}
+		if (OutInfo.RewardReputation > 0)
+		{
+			economySystem->AddReputation(OutInfo.RewardReputation);
+		}
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("[Discovery] 首次发现 %s（%s），奖励 金币+%d 声誉+%d"),
+		*ItemKey.ToString(), *OutInfo.DisplayName, OutInfo.RewardMoney, OutInfo.RewardReputation);
+
+	OnItemDiscovered.Broadcast(OutInfo, ItemKey);
 	return true;
 }
 

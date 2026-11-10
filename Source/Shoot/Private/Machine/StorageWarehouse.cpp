@@ -5,6 +5,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "Components/WidgetComponent.h"
 #include "Engine/Engine.h"
+#include "Interaction/InteractionConfig.h"
 
 AStorageWarehouse::AStorageWarehouse()
 {
@@ -40,6 +41,11 @@ AStorageWarehouse::AStorageWarehouse()
 void AStorageWarehouse::SetTipsVisible(bool bVisible)
 {
 	if (!TipsWidgetComp)
+	{
+		return;
+	}
+	// E 提示默认统一由角色显示（每个本地玩家一份）；设备控件只做位置锚点，不再自己显示
+	if (bVisible && !InteractionPromptTuning::UseDeviceOwnPromptTips())
 	{
 		return;
 	}

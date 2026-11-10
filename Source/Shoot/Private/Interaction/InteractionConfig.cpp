@@ -14,6 +14,26 @@ TAutoConsoleVariable<int32> CVarDebugInteract(
 	ECVF_Cheat);
 
 // ============================================================================
+// E 提示归属：统一提示（每玩家一份） vs 设备自带 TipsWidget
+// ============================================================================
+namespace
+{
+	TAutoConsoleVariable<int32> CVarDeviceOwnPromptTips(
+		TEXT("Shoot.DeviceOwnPromptTips"),
+		0,
+		TEXT("设备自带的 WBP_Prompt TipsWidget 是否显示。0=关闭（E 提示统一由角色显示，设备控件只做位置锚点，适配分屏）；1=恢复设备自己显示的旧行为"),
+		ECVF_Cheat);
+}
+
+namespace InteractionPromptTuning
+{
+	bool UseDeviceOwnPromptTips()
+	{
+		return CVarDeviceOwnPromptTips.GetValueOnGameThread() > 0;
+	}
+}
+
+// ============================================================================
 // 运行时交互半径倍率
 // ============================================================================
 // 这里用 FAutoConsoleVariableRef 而不是带回调的版本：回调时机在控制台执行线程/时机上不好把握，

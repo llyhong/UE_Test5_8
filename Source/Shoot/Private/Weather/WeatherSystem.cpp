@@ -62,7 +62,7 @@ FWeatherBlendState FWeatherBlendState::FromPreset(const FWeatherPreset& Preset)
 	State.CloudDensity = Preset.CloudDensity;
 	State.WindStrength = Preset.WindStrength;
 	State.WindSpeed = Preset.WindSpeed;
-	State.PrecipitationRate = Preset.PrecipitationRate;
+	State.PrecipitationRate = Preset.PrecipitationType == EPrecipitationType::None ? 0.f : Preset.PrecipitationRate;
 	State.RainStrength = Preset.PrecipitationType == EPrecipitationType::Rain
 		? FMath::Clamp(Preset.PrecipitationRate, 0.f, 1.f) : 0.f;
 	State.AmbientVolume = Preset.AmbientVolume;
@@ -641,7 +641,21 @@ void AWeatherSystem::ApplyStaticFeatures(const FWeatherPreset& Preset)
 	ActivePrecipitationRateParameter = Preset.PrecipitationRateParameter;
 	if (PrecipitationComponent)
 	{
-		if (Preset.PrecipitationType == EPrecipitationType::None)
+		bool bSkyHandlesRain = false;
+		if (Preset.PrecipitationType == EPrecipitationType::Rain && StylizedSkyActor
+			&& StylizedSkyActor->FindComponentByClass<UStylizedSkyBridge>())
+		{
+			TInlineComponentArray<UNiagaraComponent*> SkyEffects(StylizedSkyActor);
+			for (const UNiagaraComponent* Effect : SkyEffects)
+			{
+				if (Effect->GetFName() == TEXT("FX_Rain") && Effect->GetAsset())
+				{
+					bSkyHandlesRain = true;
+					break;
+				}
+			}
+		}
+		if (Preset.PrecipitationType == EPrecipitationType::None || bSkyHandlesRain)
 		{
 			ActivePrecipitationEffect = nullptr;
 			PrecipitationComponent->Deactivate();

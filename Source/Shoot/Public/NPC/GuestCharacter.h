@@ -179,9 +179,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Guest|Status", meta = (ClampMin = "0.0"))
 	float StatusWidgetRemainSeconds = 10.f;
 
-	/** 头顶气泡（TipsWidget）隐藏距离：玩家（ShootCharacter）离本客人超过该距离时隐藏气泡；<=0 表示不限制距离。蓝图可配置 */
+	/** 头顶气泡（TipsWidget）隐藏距离：玩家（ShootCharacter）离本客人超过该距离时隐藏气泡；<=0 表示不限制距离。蓝图可配置。
+	 *  默认覆盖整个就餐区：玩家在煮饭区（灶台）也能看到远处椅子的点单提示。 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Guest|Status", meta = (ClampMin = "0.0"))
-	float StatusWidgetHideDistance = 800.f;
+	float StatusWidgetHideDistance = 2500.f;
 
 	/** 是否已用餐：离场时据此区分“吃饱了”与“等不及走了”的台词 */
 	bool bHasEaten = false;

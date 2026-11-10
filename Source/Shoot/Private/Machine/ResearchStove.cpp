@@ -331,8 +331,9 @@ void AResearchStove::OnInteractionOverlap(UPrimitiveComponent* OverlappedCompone
 
 	Character->AddOverlappingResearchStove(this);
 
-	// 当提示控件未被其它玩家占用时，显示"按 E 投入食材研究"提示
-	if (LocalPlayer == nullptr && TipsWidget)
+	// 当提示控件未被其它玩家占用时，显示"按 E 投入食材研究"提示。
+	// 默认关闭：E 提示统一由角色显示（每个本地玩家一份），TipsWidget 只做位置锚点。
+	if (LocalPlayer == nullptr && TipsWidget && InteractionPromptTuning::UseDeviceOwnPromptTips())
 	{
 		TipsWidget->SetVisibility(true);
 		if (APawn* AP = Cast<APawn>(OtherActor))

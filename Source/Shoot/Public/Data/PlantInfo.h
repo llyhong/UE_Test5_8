@@ -66,6 +66,43 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Water")
 	float WaterConsumeRate = 1.f;
 
+	/** 需水窗口模式（默认关闭，保持原有“浇一次水长到结果”的玩法）：
+	 *  true  = 每个生长阶段开始时土壤是干的，阶段进度到达 ThirstWindowProgress 时打开一次“口渴窗口”；
+	 *          窗口内浇水会立即满足并恢复全速生长，错过则本阶段剩余时间按 ThirstGrowthPenalty 减速。
+	 *          窗口期间生长暂停，给玩家明确的“现在该浇水了”节奏。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Water|Thirst")
+	bool bUseThirstWindows = false;
+
+	/** 口渴窗口打开的进度阈值（0..1，占当前阶段时长的比例） */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Water|Thirst",
+		meta = (EditCondition = "bUseThirstWindows", ClampMin = "0.05", ClampMax = "1.0"))
+	float ThirstWindowProgress = 0.65f;
+
+	/** 口渴窗口持续时间（秒）：窗口内未浇水则视为错过，之后本阶段减速生长 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Water|Thirst",
+		meta = (EditCondition = "bUseThirstWindows", ClampMin = "1.0", Units = "s"))
+	float ThirstWindowSeconds = 8.f;
+
+	/** 错过口渴窗口后的生长速度倍率（1=不惩罚，0.5=半速长完本阶段） */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Water|Thirst",
+		meta = (EditCondition = "bUseThirstWindows", ClampMin = "0.05", ClampMax = "1.0"))
+	float ThirstGrowthPenalty = 0.5f;
+
+	// ========== 照料连击 ==========
+	/** 是否启用照料连击：收获前 CareComboWindowSeconds 内浇过水（若本周期生过虫，还需及时驱虫）则产量加成 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Care")
+	bool bEnableCareCombo = true;
+
+	/** 照料连击的有效时间窗（秒）：浇水/驱虫时间距收获不超过该值才算连击 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Care",
+		meta = (EditCondition = "bEnableCareCombo", ClampMin = "1.0", Units = "s"))
+	float CareComboWindowSeconds = 30.f;
+
+	/** 照料连击触发时额外增加的产量（果实数量） */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Care",
+		meta = (EditCondition = "bEnableCareCombo", ClampMin = "0"))
+	int32 CareComboBonusYield = 1;
+
 	// ========== 驱虫 ==========
 	/** 是否会生虫（生虫时停止生长，需要驱虫） */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Pest")

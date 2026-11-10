@@ -13,6 +13,8 @@
 #include "Game/BusinessSimulation.h"
 #include "GameFramework/SaveGame.h"
 #include "MySaveGame.h"
+#include "Data/DiscoveryInfo.h"
+#include "Data/ItemActorInfo.h"
 #include "BaseGameInstance.generated.h"
 
 class AItemActor;
@@ -160,6 +162,37 @@ public:
 	/** 解锁一批菜谱（菜品 FoodID），并广播 OnRecipesUnlocked（全部已解锁时不广播） */
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Recipe")
 	void UnlockRecipes(const TArray<int32>& FoodIDs);
+
+	// ========== 首次发现（食材图鉴雏形） ==========
+	/** 可选的发现配置表（RowStruct = FDiscoveryInfo），行名与物品信息表行名一致（如 "7"）。
+	 *  未配置的品类回退到物品信息表的名称/图标 + 下方默认奖励。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Discovery")
+	TObjectPtr<UDataTable> DiscoveryTable = nullptr;
+
+	/** 未在 DiscoveryTable 配置时，首次发现给的金币奖励 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Discovery", meta = (ClampMin = "0"))
+	int32 DefaultDiscoveryMoney = 5;
+
+	/** 未在 DiscoveryTable 配置时，首次发现给的声誉奖励 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Discovery", meta = (ClampMin = "0"))
+	int32 DefaultDiscoveryReputation = 1;
+
+	/** 已发现的物品键集合（运行时），与存档 MySaveGame::DiscoveredItemKeys 同步 */
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Discovery")
+	TArray<FName> DiscoveredItemKeys;
+
+	/** 首次发现广播（用于图鉴 UI / 成就） */
+	UPROPERTY(BlueprintAssignable, Category = "Shoot|Discovery")
+	FOnItemDiscovered OnItemDiscovered;
+
+	/** 该物品是否已被发现过 */
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Discovery")
+	bool IsItemDiscovered(FName ItemKey) const;
+
+	/** 标记首次发现：已发现返回 false；首次发现时写存档、发奖励并广播。
+	 *  FallbackInfo 用于未配置 DiscoveryTable 时提供名称/图标。 */
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Discovery")
+	bool MarkItemDiscovered(FName ItemKey, const FItemActorInfo& FallbackInfo, FDiscoveryInfo& OutInfo);
 
 	/** 读取某食物箱已存档的剩余数量；无记录返回 -1（表示用 Actor 自身默认值） */
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Spawner")

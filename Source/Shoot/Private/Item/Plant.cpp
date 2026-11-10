@@ -8,8 +8,23 @@
 #include "Game/BaseGameInstance.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/SphereComponent.h"
+#include "Components/DecalComponent.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "UObject/ConstructorHelpers.h"
 #include "Engine/Engine.h"
 #include "DrawDebugHelpers.h"
+#include "Kismet/GameplayStatics.h"
+#include "NiagaraFunctionLibrary.h"
+#include "NiagaraSystem.h"
+#include "Sound/SoundBase.h"
+#include "HAL/IConsoleManager.h"
+
+/** 调试用：1=强制所有需要浇水的植物启用需水窗口（不修改 DataTable，方便 A/B 对比） */
+static TAutoConsoleVariable<int32> CVarForcePlantThirstWindows(
+	TEXT("Game.PlantThirstWindows"),
+	0,
+	TEXT("1=强制所有需要浇水的植物启用需水窗口（忽略 DataTable 的 bUseThirstWindows）"),
+	ECVF_Cheat);
 
 APlant::APlant()
 {
@@ -28,6 +43,19 @@ APlant::APlant()
 	InteractionSphere->ShapeColor = FColor(170, 210, 60);
 	InteractionSphere->bDrawOnlyIfSelected = false;
 
+	// 土壤贴花：朝下投影，绝对缩放（PlantMesh 各阶段缩放变化不影响地块大小）
+	SoilDecal = CreateDefaultSubobject<UDecalComponent>(TEXT("SoilDecal"));
+	SoilDecal->SetupAttachment(RootComponent);
+	SoilDecal->SetUsingAbsoluteScale(true);
+	SoilDecal->SetRelativeRotation(FRotator(-90.f, 0.f, 0.f));
+	SoilDecal->DecalSize = FVector(25.f, 60.f, 60.f);
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> SoilDecalMaterial(
+		TEXT("/Game/_LOCAL/Crops/M_Decal_SoilMoisture.M_Decal_SoilMoisture"));
+	if (SoilDecalMaterial.Succeeded())
+	{
+		SoilDecal->SetDecalMaterial(SoilDecalMaterial.Object);
+	}
+
 	ApplyStageMesh(0);
 }
 
@@ -37,6 +65,9 @@ void APlant::OnConstruction(const FTransform& Transform)
 
 	// 编辑器视口预览：改 InteractionRadius 立刻反映到组件上
 	ApplyInteractionScale();
+
+	DisableReceivingDecals(this);
+	InitSoilDecal();
 }
 
 void APlant::ApplyInteractionScale()
@@ -96,8 +127,14 @@ void APlant::BeginPlay()
 	StageTimer = 0.f;
 	bPest = false;
 	bHarvested = false;
+	ResetThirstWindowState();
+	CareWaterTime = -1000.f;
+	CarePestTime = -1000.f;
+	bPestAppearedThisCycle = false;
 
 	ApplyStageMesh(CurrentStageIndex);
+	DisableReceivingDecals(this);
+	InitSoilDecal();
 
 	// 诊断：打印本株植物的阶段配置（勾选 bDebug 后可在 Output Log 查看每阶段是否配了模型）
 	if (bDebug && Info)
@@ -180,6 +217,8 @@ void APlant::Tick(float DeltaTime)
 	// 每帧以“当前目标植被”为准校正采摘描边：确保只有当前待采摘的植被亮起，
 	// 其它植被（即使曾因事件顺序残留描边）会被强制关闭。
 	UpdateHarvestHintOutline();
+	UpdateSoilWetness(DeltaTime);
+	UpdateWaterFeedback(DeltaTime);
 
 // 调试信息：节流打印到屏幕
 	if (bDebug)
@@ -199,12 +238,6 @@ void APlant::Tick(float DeltaTime)
 		return;
 	}
 
-	// 浇水消耗：仅在尚未浇满（幼苗期）时按消耗率下降；浇满后保持满水，无需补浇，直接长到结果
-	if (Info->bRequiresWater && !bWatered)
-	{
-		WaterLevel = FMath::Max(0.f, WaterLevel - Info->WaterConsumeRate * DeltaTime);
-	}
-
 	// 随机生虫
 	if (Info->bCanGetPest && Info->PestInterval > 0.f && !bPest && !bHarvested)
 	{
@@ -213,6 +246,7 @@ void APlant::Tick(float DeltaTime)
 		{
 			bPest = true;
 			PestTimer = 0.f;
+			bPestAppearedThisCycle = true;
 			OnPestAppeared();
 		}
 	}
@@ -229,9 +263,36 @@ void APlant::Tick(float DeltaTime)
 		return;
 	}
 
-	// 仅在“有水且无虫”时生长
-	const bool bHasWater = !Info->bRequiresWater || WaterLevel > 0.f;
-	if (bHasWater && !bPest)
+	// 生长条件：无虫；水分按“需水窗口”或“持续消耗”两种模式判定
+	bool bCanGrow = !bPest;
+	float GrowthScale = 1.f;
+
+	if (UsesThirstWindows() && Info->bRequiresWater)
+	{
+		// 需水窗口：阶段开始土壤是干的，进度到阈值时打开一次窗口。
+		// 窗口内暂停生长等待浇水；窗口过期则视为错过，本阶段剩余时间减速生长。
+		UpdateThirstWindow(DeltaTime);
+		if (bThirstWindowOpen)
+		{
+			bCanGrow = false;
+		}
+		else if (bThirstWindowMissed)
+		{
+			GrowthScale = FMath::Clamp(Info->ThirstGrowthPenalty, 0.05f, 1.f);
+		}
+	}
+	else
+	{
+		// 旧模式：仅在尚未浇满（幼苗期）时按消耗率下降；浇满后保持满水，无需补浇，直接长到结果
+		if (Info->bRequiresWater && !bWatered)
+		{
+			WaterLevel = FMath::Max(0.f, WaterLevel - Info->WaterConsumeRate * DeltaTime);
+		}
+		const bool bHasWater = !Info->bRequiresWater || WaterLevel > 0.f;
+		bCanGrow = bCanGrow && bHasWater;
+	}
+
+	if (bCanGrow)
 	{
 		// 采摘后的重新生长延迟：先消耗 RegrowDelayRemaining（此期间停留在幼苗阶段、不推进阶段），
 		// 消耗完后才按正常 StageTimer 推进。等效于“幼苗→下一阶段”的时长 = 该阶段 StageDuration + RegrowDelayAfterHarvest。
@@ -241,7 +302,7 @@ void APlant::Tick(float DeltaTime)
 		}
 		else
 		{
-			StageTimer += DeltaTime * FMath::Max(0.0001f, Info->GrowthSpeed);
+			StageTimer += DeltaTime * FMath::Max(0.0001f, Info->GrowthSpeed) * GrowthScale;
 
 			// StageDuration <= 0 视为“该阶段立即完成”：避免 DataTable 里把时长配成 0 时，
 			// 植物永远卡在当前阶段（模型不切换、也无法进入下一阶段）。
@@ -253,7 +314,84 @@ void APlant::Tick(float DeltaTime)
 		}
 	}
 
-	
+
+}
+
+void APlant::ResetThirstWindowState()
+{
+	bThirstWindowOpen = false;
+	bThirstWindowOpenedThisStage = false;
+	bThirstWindowSatisfied = false;
+	bThirstWindowMissed = false;
+	ThirstWindowRemaining = 0.f;
+}
+
+void APlant::OpenThirstWindow()
+{
+	const FPlantInfo* Info = GetPlantInfo();
+	if (!Info || bThirstWindowOpen)
+	{
+		return;
+	}
+	bThirstWindowOpen = true;
+	bThirstWindowOpenedThisStage = true;
+	bThirstWindowSatisfied = false;
+	bThirstWindowMissed = false;
+	ThirstWindowRemaining = FMath::Max(1.f, Info->ThirstWindowSeconds);
+	OnThirstWindowOpened();
+	// 口渴窗口打开：即使不是当前交互目标也点亮描边，方便玩家从远处看到
+	UpdateHarvestHintOutline();
+}
+
+void APlant::CloseThirstWindow(bool bSatisfied)
+{
+	if (!bThirstWindowOpen)
+	{
+		return;
+	}
+	bThirstWindowOpen = false;
+	ThirstWindowRemaining = 0.f;
+	if (bSatisfied)
+	{
+		bThirstWindowSatisfied = true;
+		bThirstWindowMissed = false;
+	}
+	else
+	{
+		bThirstWindowMissed = true;
+		OnThirstWindowMissed();
+	}
+	UpdateHarvestHintOutline();
+}
+
+void APlant::UpdateThirstWindow(float DeltaTime)
+{
+	const FPlantInfo* Info = GetPlantInfo();
+	if (!Info || !Info->GrowthStages.IsValidIndex(CurrentStageIndex))
+	{
+		return;
+	}
+
+	// 本阶段还没开过窗口：进度达到阈值就打开
+	if (!bThirstWindowOpen && !bThirstWindowOpenedThisStage && !bThirstWindowSatisfied && !bThirstWindowMissed)
+	{
+		const float StageDuration = Info->GrowthStages[CurrentStageIndex].StageDuration;
+		const float Progress = StageDuration > 0.f ? StageTimer / StageDuration : 1.f;
+		if (Progress >= FMath::Clamp(Info->ThirstWindowProgress, 0.05f, 1.f))
+		{
+			OpenThirstWindow();
+		}
+	}
+
+	// 窗口倒计时：超时未浇水 → 错过（本阶段减速）
+	if (bThirstWindowOpen)
+	{
+		ThirstWindowRemaining -= DeltaTime;
+		if (ThirstWindowRemaining <= 0.f)
+		{
+			CloseThirstWindow(false);
+		}
+	}
 }
 
 void APlant::PrintDebugInfo()
@@ -299,6 +437,14 @@ void APlant::AdvanceStage()
 		CurrentStageIndex = Info->GrowthStages.Num() - 1;
 	}
 
+	// 新阶段开始：需水窗口植物回到“土壤干、等待下一次口渴窗口”的状态
+	if (UsesThirstWindows() && Info->bRequiresWater)
+	{
+		WaterLevel = 0.f;
+		bWatered = false;
+		ResetThirstWindowState();
+	}
+
 	ApplyStageMesh(CurrentStageIndex);
 
 	OnStageChanged(CurrentStageIndex, GetCurrentStageName());
@@ -330,6 +476,12 @@ void APlant::ResetToSeedStage()
 	PestTimer = 0.f;
 	bHarvested = false;
 	bWatered = false;
+	ResetThirstWindowState();
+
+	// 新的一轮生长：清空照料计时，重新开始判定连击
+	CareWaterTime = -1000.f;
+	CarePestTime = -1000.f;
+	bPestAppearedThisCycle = false;
 
 	// 取消任何残留的逐个重结果定时器
 	GetWorldTimerManager().ClearTimer(RefruitTimerHandle);
@@ -353,18 +505,202 @@ void APlant::Water(float /*Amount*/)
 	{
 		return;
 	}
-	// 一次浇水即把植被浇满：避免对一株植物反复多次浇水，浇一次即可满足其整个生长周期所需水分；
-	// 浇满后置位 bWatered，之后不再消耗水分，长到结果前都无需补浇。
+
+	UWorld* World = GetWorld();
+	const float Now = World ? World->GetTimeSeconds() : 0.f;
+	const bool bWasDry = WaterLevel < Info->WaterMax - KINDA_SMALL_NUMBER;
+	const bool bSatisfiedWindow = UsesThirstWindows() && bThirstWindowOpen;
+
+	// 一次浇水即把植被浇满：避免对一株植物反复多次浇水，浇一次即可满足其整个生长周期所需水分。
+	// 需水窗口模式下，窗口内浇水会立即关闭窗口并恢复全速生长。
 	WaterLevel = Info->WaterMax;
 	bWatered = true;
+
+	if (bSatisfiedWindow)
+	{
+		CloseThirstWindow(true);
+		OnThirstWindowSatisfied();
+		if (InteractingCharacter)
+		{
+			InteractingCharacter->ShowSimpleToast(TEXT("浇水时机正好"),
+				TEXT("这株植物恢复了长势"), FLinearColor(0.45f, 0.9f, 0.55f, 1.f));
+		}
+	}
+	if (bWasDry || bSatisfiedWindow)
+	{
+		CareWaterTime = Now;
+	}
+
+	// 视觉/听觉反馈：叶片抖动（内建）+ 可选音效/粒子（蓝图可配）
+	PlayWaterFeedback();
+	OnWatered(WaterLevel);
+	bWaterHintSuppressed = true;
+	UpdateHarvestHintOutline();
 }
 
 bool APlant::NeedsWater() const
 {
 	const FPlantInfo* Info = GetPlantInfo();
-	// 仅当配置需要浇水且当前水位已干涸（<=0）才视为“需要浇水”：
-	// 这样一次浇水浇满后，在水分被消耗回 0 之前无法再次浇水，避免对一株植物反复多次浇水。
-	return Info && Info->bRequiresWater && WaterLevel <= 0.f;
+	if (!Info || !Info->bRequiresWater)
+	{
+		return false;
+	}
+	// 需水窗口：只有窗口打开时才“需要浇水”，形成有节奏的照料时机；
+	// 旧模式：水位干涸（<=0）即需要浇水，一次浇满后到水耗光前不能重复浇。
+	if (UsesThirstWindows())
+	{
+		return bThirstWindowOpen;
+	}
+	return WaterLevel <= 0.f;
+}
+
+bool APlant::UsesThirstWindows() const
+{
+	const FPlantInfo* Info = GetPlantInfo();
+	if (!Info)
+	{
+		return false;
+	}
+	return Info->bUseThirstWindows || CVarForcePlantThirstWindows.GetValueOnGameThread() != 0;
+}
+
+int32 APlant::EvaluateCareComboBonus() const
+{
+	const FPlantInfo* Info = GetPlantInfo();
+	if (!Info || !Info->bEnableCareCombo || !GetWorld())
+	{
+		return 0;
+	}
+
+	const float Now = GetWorld()->GetTimeSeconds();
+	const float Window = FMath::Max(1.f, Info->CareComboWindowSeconds);
+	const bool bWaterInTime = (Now - CareWaterTime) <= Window;
+	// 本周期生过虫则必须及时驱虫；没生虫则自动满足
+	const bool bPestInTime = !bPestAppearedThisCycle || ((Now - CarePestTime) <= Window);
+
+	if (bWaterInTime && bPestInTime && !bPest)
+	{
+		return FMath::Max(0, Info->CareComboBonusYield);
+	}
+	return 0;
+}
+
+void APlant::PlayWaterFeedback()
+{
+	if (WaterSound)
+	{
+		UGameplayStatics::PlaySoundAtLocation(this, WaterSound, GetActorLocation());
+	}
+
+	if (WaterEffect && GetWorld())
+	{
+		FVector EffectLocation = PlantMesh ? PlantMesh->GetComponentLocation() : GetActorLocation();
+		if (PlantMesh && WaterEffectSocket != NAME_None && PlantMesh->DoesSocketExist(WaterEffectSocket))
+		{
+			EffectLocation = PlantMesh->GetSocketLocation(WaterEffectSocket);
+		}
+		EffectLocation += WaterEffectOffset;
+		UNiagaraFunctionLibrary::SpawnSystemAtLocation(this, WaterEffect, EffectLocation,
+			FRotator::ZeroRotator, FVector::OneVector, true, true);
+	}
+
+	// 叶片抖动：没有特效资产时也保证“浇了水”有可感知的即时反馈
+	if (PlantMesh)
+	{
+		WaterShakeRemaining = 0.45f;
+		WaterShakeElapsed = 0.f;
+		WaterShakeBaseRotation = PlantMesh->GetRelativeRotation();
+	}
+}
+
+void APlant::UpdateWaterFeedback(float DeltaTime)
+{
+	if (WaterShakeRemaining <= 0.f || !PlantMesh)
+	{
+		return;
+	}
+
+	WaterShakeRemaining = FMath::Max(0.f, WaterShakeRemaining - DeltaTime);
+	WaterShakeElapsed += DeltaTime;
+
+	FRotator ShakeRotation = WaterShakeBaseRotation;
+	if (WaterShakeRemaining > 0.f)
+	{
+		const float Alpha = WaterShakeRemaining / 0.45f;
+		ShakeRotation.Yaw += FMath::Sin(WaterShakeElapsed * 38.f) * 6.f * Alpha;
+		ShakeRotation.Pitch += FMath::Sin(WaterShakeElapsed * 31.f) * 2.f * Alpha;
+	}
+	PlantMesh->SetRelativeRotation(ShakeRotation);
+}
+
+void APlant::DisableReceivingDecals(AActor* Actor)
+{
+	if (!Actor)
+	{
+		return;
+	}
+	TInlineComponentArray<UPrimitiveComponent*> Prims(Actor);
+	for (UPrimitiveComponent* Prim : Prims)
+	{
+		if (Prim && Prim->bReceivesDecals)
+		{
+			Prim->SetReceivesDecals(false);
+		}
+	}
+}
+
+void APlant::InitSoilDecal()
+{
+	SoilDecalMID = nullptr;
+	if (!SoilDecal)
+	{
+		return;
+	}
+
+	const FPlantInfo* Info = GetPlantInfo();
+	const bool bShow = Info && Info->bRequiresWater;
+	SoilDecal->SetVisibility(bShow);
+	if (!bShow)
+	{
+		return;
+	}
+
+	SoilDecalMID = SoilDecal->CreateDynamicMaterialInstance();
+	if (!SoilDecalMID)
+	{
+		return;
+	}
+
+	const FVector Loc = GetActorLocation();
+	const uint32 Hash = HashCombine(GetTypeHash(FMath::RoundToInt(Loc.X)), GetTypeHash(FMath::RoundToInt(Loc.Y)));
+	SoilDecalMID->SetScalarParameterValue(SoilCrackSeedParameterName, static_cast<float>(Hash % 10000u) / 1000.f);
+
+	SoilWetness = GetTargetSoilWetness();
+	SoilDecalMID->SetScalarParameterValue(SoilWetnessParameterName, SoilWetness);
+}
+
+float APlant::GetTargetSoilWetness() const
+{
+	const FPlantInfo* Info = GetPlantInfo();
+	return Info && Info->WaterMax > 0.f ? FMath::Clamp(WaterLevel / Info->WaterMax, 0.f, 1.f) : 0.f;
+}
+
+void APlant::UpdateSoilWetness(float DeltaTime)
+{
+	if (!SoilDecalMID)
+	{
+		return;
+	}
+	const float Target = GetTargetSoilWetness();
+	if (SoilWetness == Target)
+	{
+		return;
+	}
+	const float Duration = Target > SoilWetness ? SoilWetTransitionTime : SoilDryTransitionTime;
+	SoilWetness = Duration <= KINDA_SMALL_NUMBER
+		? Target
+		: FMath::FInterpConstantTo(SoilWetness, Target, DeltaTime, 1.f / Duration);
+	SoilDecalMID->SetScalarParameterValue(SoilWetnessParameterName, SoilWetness);
 }
 
 void APlant::RemovePest()
@@ -373,6 +709,8 @@ void APlant::RemovePest()
 	{
 		bPest = false;
 		PestTimer = 0.f;
+		CarePestTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
+		OnPestRemoved();
 	}
 }
 
@@ -395,8 +733,23 @@ bool APlant::Harvest()
 	// 新行为：按 E 直接把果实放入玩家背包；摘取后不销毁植被，而是重置回第一阶段重新生长结果
 	if (bHarvestToInventory && InteractingCharacter)
 	{
-		const int32 Yield = (HarvestYield > 0) ? HarvestYield : FMath::Max(1, Info->FruitCount);
+		const int32 BaseYield = (HarvestYield > 0) ? HarvestYield : FMath::Max(1, Info->FruitCount);
+
+		// 照料连击：收获前时间窗内浇过水（且生虫时及时驱虫），额外增加产量
+		const int32 CareBonus = EvaluateCareComboBonus();
+		const int32 Yield = BaseYield + CareBonus;
 		const EIngredientQuality Quality = GetCurrentQuality();
+
+		if (CareBonus > 0)
+		{
+			OnCareComboCompleted(CareBonus);
+			if (InteractingCharacter)
+			{
+				InteractingCharacter->ShowSimpleToast(TEXT("照料连击"),
+					FString::Printf(TEXT("精心照料获得额外产量 +%d"), CareBonus),
+					FLinearColor(0.95f, 0.8f, 0.35f, 1.f));
+			}
+		}
 
 		// 清理树上已挂的果实，避免与入背包的果实重复
 		for (AItemActor* Fruit : SpawnedFruits)
@@ -542,6 +895,8 @@ void APlant::SpawnSingleFruit(int32 Index)
 	AItemActor* Fruit = GetWorld()->SpawnActor<AItemActor>(Info->FruitClass, GetActorTransform(), SpawnParams);
 	if (Fruit)
 	{
+		DisableReceivingDecals(Fruit);
+
 		if (Info->bShowFruitOnPlant && PlantMesh)
 		{
 			// 果实挂点与数量对齐：多个果实时按 “基础名_索引” 寻找对应插槽（如 Fruit0 / Fruit1）
@@ -739,9 +1094,10 @@ void APlant::UpdateHarvestHintOutline()
 
 	// 浇水提示：植被还需要浇水——作为“可浇水 / 待浇水”的前置指示（先于浇水动作出现）；
 	// 浇水动作完成后会被 bWaterHintSuppressed 抑制，避免“刚浇完”立刻又亮。
-	const bool bWaterHint = bHighlightRequested
-		&& NeedsWater()
-		&& !bWaterHintSuppressed;
+	// 口渴窗口是限时的：即使不是当前交互目标也点亮，方便玩家从远处看到“该浇水了”。
+	const bool bWaterHint = NeedsWater()
+		&& !bWaterHintSuppressed
+		&& (bHighlightRequested || IsThirstWindowOpen());
 
 	const bool bShowHint = bHarvestHint || bWaterHint;
 

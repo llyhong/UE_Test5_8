@@ -243,16 +243,19 @@ void AGuestCharacter::RefreshStatusWidgetVisibility()
 
 	// 是否满足显示条件（状态）且玩家在气泡显示距离内；超出距离则隐藏
 	const bool bShow = ShouldShowStatusWidget() && IsPlayerWithinStatusWidgetDistance();
+	bool bWidgetJustCreated = false;
 	if (bShow)
 	{
 		// 组件隐藏时不会创建控件实例，显示前先确保建出来（InitWidget 内部幂等）
 		if (!StatusWidgetComp->GetUserWidgetObject())
 		{
 			StatusWidgetComp->InitWidget();
+			bWidgetJustCreated = true;
 		}
 
 		// 主动把自身赋给头顶气泡的 OwnerCharacter（WidgetComponent 创建的世界空间控件
 		// 无法从控件内部反向拿到所属 Actor，故由这里补设；每次刷新都设，覆盖控件晚创建的情况）。
+		bool bNeedStatusBroadcast = bWidgetJustCreated;
 		if (UGuestStatusWidget* GSW = Cast<UGuestStatusWidget>(StatusWidgetComp->GetUserWidgetObject()))
 		{
 			const bool bWasNull = (GSW->OwnerCharacter == nullptr);
@@ -261,7 +264,17 @@ void AGuestCharacter::RefreshStatusWidgetVisibility()
 			if (bWasNull)
 			{
 				GSW->OnOwnerCharacterSet();
+				bNeedStatusBroadcast = true;
 			}
+		}
+
+		if (bNeedStatusBroadcast)
+		{
+			// 气泡控件可能在玩家太远时就已创建、但没绑定监听：此前的状态广播没有接收者，
+			// 控件会空着（订单图标缺失），直到下一次随机换台词才被刷新。
+			// 这里补发一次当前状态，让蓝图在首次绑定后立刻抽台词 / 图标 / 颜色。
+			const bool bSatisfied = (GuestState == EGuestState::Leaving && bHasEaten);
+			OnGuestStatusUpdated.Broadcast(GuestState, bSatisfied);
 		}
 	}
 

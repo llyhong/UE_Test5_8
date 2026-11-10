@@ -109,8 +109,10 @@ void AGateCounter::OnInteractionOverlap(UPrimitiveComponent* OverlappedComponent
 
 		Player->AddOverlappingGate(this);
 
-		// 当提示控件未被其它玩家占用时，显示“按 E 开门营业”提示
-		if (LocalPlayer == nullptr && TipsWidget)
+		// 当提示控件未被其它玩家占用时，显示“按 E 开门营业”提示。
+		// 默认关闭：E 提示统一由角色身上的 InteractionPrompt 显示（每个本地玩家一份），
+		// 这里的 TipsWidget 只作为统一提示的位置锚点，不再自己显示。
+		if (LocalPlayer == nullptr && TipsWidget && InteractionPromptTuning::UseDeviceOwnPromptTips())
 		{
 			TipsWidget->SetVisibility(true);
 			if (APawn* AP = Cast<APawn>(OtherActor))

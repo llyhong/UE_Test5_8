@@ -15,12 +15,24 @@
 #include "Game/BusinessTime.h"
 #include "Kismet/GameplayStatics.h"
 #include "NavigationSystem.h"
+#include "Blueprint/UserWidget.h"
+#include "Components/Image.h"
+#include "Components/TextBlock.h"
+#include "GameFramework/PlayerController.h"
+#include "UObject/ConstructorHelpers.h"
 
 AGuestManager::AGuestManager()
 {
 	// 需要每帧绘制队列调试球，所以开启 Tick（默认不自动启用，BeginPlay 里按开关决定）
 	PrimaryActorTick.bCanEverTick = true;
 	PrimaryActorTick.bStartWithTickEnabled = false;
+
+	static ConstructorHelpers::FClassFinder<UUserWidget> BannerClass(TEXT("/Game/_Demo/Blueprints/UI_2D/WBP_EventBanner"));
+	RushBannerClass = BannerClass.Class;
+	static ConstructorHelpers::FObjectFinder<UTexture2D> BannerIcon(TEXT("/Game/_Demo/Textures/ICON/T_Event_Rush"));
+	RushBannerIcon = BannerIcon.Object;
+	RushBannerText = NSLOCTEXT("GuestManager", "CustomerRush", "客流波峰来袭！");
+	RushBannerDescription = NSLOCTEXT("GuestManager", "CustomerRushDescription", "来客速度加快，准备接单！");
 }
 
 void AGuestManager::BeginPlay()
@@ -177,6 +189,7 @@ void AGuestManager::AdvanceRushPhase()
 		PhaseDelay = FMath::Max(RushDuration, 0.1f);
 		const double CycleDuration = FMath::Max(static_cast<double>(RushInterval), static_cast<double>(PhaseDelay) + 0.1);
 		NextRushStartTime = World->GetTimeSeconds() + CycleDuration;
+		ShowRushBanner();
 	}
 	else
 	{
@@ -186,6 +199,76 @@ void AGuestManager::AdvanceRushPhase()
 	ScheduleNextSpawn(bInCustomerRush ? FMath::Max(RushSpawnInterval, 0.1f) : SpawnInterval);
 	World->GetTimerManager().SetTimer(RushPhaseTimerHandle,
 		this, &AGuestManager::AdvanceRushPhase, PhaseDelay, false);
+}
+
+void AGuestManager::ShowRushBanner()
+{
+	HideRushBanner();
+	UWorld* World = GetWorld();
+	if (!World || !RushBannerClass)
+	{
+		return;
+	}
+
+	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+	{
+		APlayerController* PC = It->Get();
+		if (!PC || !PC->IsLocalController())
+		{
+			continue;
+		}
+		UUserWidget* Banner = CreateWidget<UUserWidget>(PC, RushBannerClass);
+		if (!Banner)
+		{
+			continue;
+		}
+		Banner->SetVisibility(ESlateVisibility::HitTestInvisible);
+		if (UTextBlock* Title = Cast<UTextBlock>(Banner->GetWidgetFromName(TEXT("Txt_Title"))))
+		{
+			Title->SetText(RushBannerText);
+		}
+		if (UTextBlock* Description = Cast<UTextBlock>(Banner->GetWidgetFromName(TEXT("Txt_Desc"))))
+		{
+			Description->SetText(RushBannerDescription);
+		}
+		for (FName Name : {FName(TEXT("Txt_Countdown")), FName(TEXT("PB_TimeLeft"))})
+		{
+			if (UWidget* Countdown = Banner->GetWidgetFromName(Name))
+			{
+				Countdown->SetVisibility(ESlateVisibility::Collapsed);
+			}
+		}
+		if (UImage* Icon = Cast<UImage>(Banner->GetWidgetFromName(TEXT("Icon_Event"))))
+		{
+			Icon->SetBrushFromTexture(RushBannerIcon);
+			Icon->SetVisibility(RushBannerIcon ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+		}
+		Banner->AddToPlayerScreen(90);
+		Banner->SetDesiredSizeInViewport(FVector2D(600.f, 160.f));
+		Banner->SetPositionInViewport(FVector2D(0.f, 60.f), false);
+		Banner->SetAlignmentInViewport(FVector2D(0.5f, 0.f));
+		// huanglily：设置尺寸/位置会重置锚点，必须最后设置。
+		Banner->SetAnchorsInViewport(FAnchors(0.5f, 0.f));
+		RushBanners.Add(Banner);
+	}
+	World->GetTimerManager().SetTimer(RushBannerTimerHandle,
+		this, &AGuestManager::HideRushBanner, FMath::Max(RushBannerSeconds, 0.1f), false);
+}
+
+void AGuestManager::HideRushBanner()
+{
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(RushBannerTimerHandle);
+	}
+	for (UUserWidget* Banner : RushBanners)
+	{
+		if (Banner)
+		{
+			Banner->RemoveFromParent();
+		}
+	}
+	RushBanners.Reset();
 }
 
 void AGuestManager::PrintSeatStatus()
@@ -637,6 +720,7 @@ void AGuestManager::ClearAllGuests()
 
 void AGuestManager::PauseSpawning()
 {
+	HideRushBanner();
 	bSpawningPaused = true;
 	bCustomerPacingStarted = false;
 	bInCustomerRush = false;

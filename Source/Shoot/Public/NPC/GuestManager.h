@@ -9,6 +9,8 @@
 
 class AGuestCharacter;
 class UTimeSystem;
+class UUserWidget;
+class UTexture2D;
 
 /** 打烊收尾完成广播：已点菜的客人都处理完（上完菜 / 等待超时离场）后才触发，表示"真正打烊、可以结束这一天" */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnClosingFinishedSignature);
@@ -76,6 +78,21 @@ public:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|GuestManager|Pacing")
 	bool bInCustomerRush = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GuestManager|Pacing|UI")
+	TSubclassOf<UUserWidget> RushBannerClass;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GuestManager|Pacing|UI")
+	FText RushBannerText;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GuestManager|Pacing|UI")
+	FText RushBannerDescription;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GuestManager|Pacing|UI")
+	TObjectPtr<UTexture2D> RushBannerIcon = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GuestManager|Pacing|UI", meta = (ClampMin = "0.1", Units = "s"))
+	float RushBannerSeconds = 3.0f;
 
 	/** 是否自动开始生成 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GuestManager")
@@ -243,6 +260,13 @@ private:
 	void TickSpawn();
 	void ScheduleNextSpawn(float Delay);
 	void AdvanceRushPhase();
+	void ShowRushBanner();
+	void HideRushBanner();
+
+	FTimerHandle RushBannerTimerHandle;
+
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UUserWidget>> RushBanners;
 
 	/** 客人变动后刷新剩余等待客人的排队序号（不再摆放位置，位置由徘徊决定） */
 	void RefreshQueueSlots();

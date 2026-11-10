@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
 #include "Animation/AnimMontage.h"
+#include "Animation/AnimNotifies/AnimNotify.h"
 #include "Interfaces/PickupInterface.h"
 #include "Logging/LogMacros.h"
 #include "Item/Weapon.h"
@@ -259,6 +260,15 @@ private:
 	/** 浇水蒙太奇结束回调：此时才真正补水并取消描边 */
 	UFUNCTION()
 	void WateringMontageEnded(UAnimMontage* Montage, bool bInterrupted);
+
+	/** 浇水/采摘蒙太奇到达生效帧（InteractCommitNotifyName）时真正收获/补水 */
+	UFUNCTION()
+	void OnInteractMontageNotify(FName NotifyName, const FBranchingPointNotifyPayload& Payload);
+
+	bool IsMoveLockedByInteraction();
+	bool IsCancelableInteractionPlaying();
+	void CancelInteractionByMovement();
+	void BeginPlantInteraction();
 
 bool CanAttack(); 
 	bool IsHolding();
@@ -515,11 +525,20 @@ public:
 	void RefreshInteractionPromptTarget();
 	void UpdateInteractionPrompt();
 
+	/** 查找目标身上作为“E 提示位置锚点”的 WBP_Prompt 控件（烹饪设备/大门等蓝图里的 TipsWidget）。
+	 *  统一提示显示在它的世界坐标处，保留美术在蓝图里摆的位置；设备自己的提示不再显示。
+	 *  返回 nullptr 表示目标没有提示锚点（食材、植株等），回退到网格包围盒顶部。 */
+	class UWidgetComponent* FindInteractionPromptAnchor(const AActor* Target) const;
+
 	UPROPERTY(VisibleInstanceOnly, Category = "Shoot|Interaction")
 	TObjectPtr<AActor> InteractionPromptTarget;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Interaction", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UWidgetComponent> InteractionPrompt;
+
+	/** 统一提示所用的控件类（WBP_Prompt），也用于识别目标身上同类的提示控件作为位置锚点 */
+	UPROPERTY()
+	TObjectPtr<UClass> UnifiedPromptWidgetClass;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Shoot|Interaction")
 	bool bEnableInteractionPrompt = true;
@@ -656,6 +675,13 @@ public:
 	// 注意：这里记录的是"类型"，取出时按 ItemClass 重新生成。
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Inventory")
 	bool AddItemToInventory(AItemActor* Item);
+
+	/** 轻量提示卡片（仅本地控制玩家弹出）：浇水时机、照料连击等即时反馈 */
+	UFUNCTION(BlueprintCallable, Category = "Shoot|UI")
+	void ShowSimpleToast(const FString& Title, const FString& Body, FLinearColor Accent);
+
+	/** 首次发现：读取物品键写入 GameInstance 存档；首次发现时弹出发现卡片 */
+	void TryDiscoverItem(AItemActor* Item);
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Shoot|Harvest")
 	TObjectPtr<UNiagaraSystem> HarvestEffect;
@@ -978,6 +1004,23 @@ public:
 	/** 采集时是否让角色转向（朝向）待采摘的植被；关闭则保持原朝向。默认开启。 */
 	UPROPERTY(EditDefaultsOnly, Category = "Shoot|Montages")
 	bool bFacePlantWhenGathering = true;
+
+	/** 浇水/采摘蒙太奇中标记生效帧的 Montage Notify 名：之前移动取消不结算，之后移动只打断后摇 */
+	UPROPERTY(EditDefaultsOnly, Category = "Shoot|Montages")
+	FName InteractCommitNotifyName = TEXT("InteractCommit");
+
+	/** 浇水/采摘被移动打断时的混出时间 */
+	UPROPERTY(EditDefaultsOnly, Category = "Shoot|Montages", meta = (ClampMin = "0.0"))
+	float InteractCancelBlendOutTime = 0.12f;
+
+	/** 移动输入幅度超过该值才打断浇水/采摘，过滤摇杆漂移 */
+	UPROPERTY(EditDefaultsOnly, Category = "Shoot|Montages", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float InteractCancelInputThreshold = 0.3f;
+
+	uint64 LastMoveInputFrame = 0;
+
+	/** 按着方向键触发交互时为 false：须先松开再按才会打断，避免同一次按住立刻取消动作 */
+	bool bInteractCancelArmed = true;
 
 	/** 采集蒙太奇结束委托（用于动画播完后才真正收获并删除植物） */
 	FOnMontageEnded OnGatheringMontageEnded;

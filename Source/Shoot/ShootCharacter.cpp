@@ -41,6 +41,8 @@
 #include "Environment/FireflyAreaVolume.h"
 #include "UI/HUDWidget.h"
 #include "UI/InteractionPromptWidget.h"
+#include "UI/DiscoveryToastWidget.h"
+#include "Blueprint/UserWidget.h"
 #include "Components/WidgetComponent.h"
 #include "Components/MeshComponent.h"
 #include "GameFramework/PlayerController.h"
@@ -69,6 +71,7 @@ void AShootCharacter::PlayPickMontage(FName SelectionName)
 		{
 			AnimInstance->Montage_Play(PickMontage);
 			AnimInstance->Montage_JumpToSection(SelectionName,PickMontage);
+			AnimInstance->Montage_SetNextSection(SelectionName, NAME_None, PickMontage);
 		}
 	}
 }
@@ -83,6 +86,8 @@ bool AShootCharacter::PlayGatheringMontage()
 		if (AnimInstance && GatheringMontage)
 		{
 			AnimInstance->Montage_Play(GatheringMontage);
+			AnimInstance->OnPlayMontageNotifyBegin.AddUniqueDynamic(this, &AShootCharacter::OnInteractMontageNotify);
+			bInteractCancelArmed = true;
 			return true;
 		}
 	}
@@ -99,6 +104,8 @@ bool AShootCharacter::PlayWateringMontage()
 		if (AnimInstance && WateringMontage)
 		{
 			AnimInstance->Montage_Play(WateringMontage);
+			AnimInstance->OnPlayMontageNotifyBegin.AddUniqueDynamic(this, &AShootCharacter::OnInteractMontageNotify);
+			bInteractCancelArmed = true;
 			return true;
 		}
 	}
@@ -107,11 +114,16 @@ bool AShootCharacter::PlayWateringMontage()
 
 void AShootCharacter::GatheringMontageEnded(UAnimMontage* Montage, bool bInterrupted)
 {
-	// 兜底定时器到此作废（正常路径由蒙太奇结束触发本函数）
+	UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
+	// 旧实例混出结束时新一轮采集可能已开始，不能清掉新一轮的待结算目标
+	if (Montage && AnimInstance && AnimInstance->Montage_IsPlaying(GatheringMontage))
+	{
+		return;
+	}
 	GetWorldTimerManager().ClearTimer(GatheringDoneTimerHandle);
 
-	// 采集动画播完（无论是否被中断）才真正收获并删除植物
-	if (PendingGatherPlant && IsValid(PendingGatherPlant))
+	// 正常路径已在 InteractCommit 结算；这里只兜底没配 Notify 的蒙太奇，被打断则作废
+	if (!bInterrupted && PendingGatherPlant && IsValid(PendingGatherPlant))
 	{
 		PendingGatherPlant->Harvest();
 	}
@@ -119,7 +131,7 @@ void AShootCharacter::GatheringMontageEnded(UAnimMontage* Montage, bool bInterru
 	bHasInteractFaceRotation = false;
 
 	// 蒙太奇若被误配为“循环”，此处强制停止，避免角色一直停留在采集动画
-	if (UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance())
+	if (AnimInstance)
 	{
 		AnimInstance->Montage_Stop(0.25f, GatheringMontage);
 	}
@@ -127,12 +139,14 @@ void AShootCharacter::GatheringMontageEnded(UAnimMontage* Montage, bool bInterru
 
 void AShootCharacter::WateringMontageEnded(UAnimMontage* Montage, bool bInterrupted)
 {
-	// 兜底定时器到此作废（正常路径由蒙太奇结束触发本函数，避免双触发重复执行）
+	UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
+	if (Montage && AnimInstance && AnimInstance->Montage_IsPlaying(WateringMontage))
+	{
+		return;
+	}
 	GetWorldTimerManager().ClearTimer(WateringDoneTimerHandle);
 
-	// 浇水动画播完（无论是否被中断，或由定时器兜底触发）才真正补水；
-	// 描边由 APlant::UpdateHarvestHintOutline 在补水后（不再需要浇水时）自动清除，此处不再手动处理
-	if (PendingWaterPlant && IsValid(PendingWaterPlant))
+	if (!bInterrupted && PendingWaterPlant && IsValid(PendingWaterPlant))
 	{
 		PendingWaterPlant->Water();
 		PendingWaterPlant->SetWaterHintSuppressed(true); // 浇完后取消高亮（植株变干或离开范围后恢复）
@@ -140,11 +154,82 @@ void AShootCharacter::WateringMontageEnded(UAnimMontage* Montage, bool bInterrup
 	PendingWaterPlant = nullptr;
 	bHasInteractFaceRotation = false;
 
-	// 蒙太奇若被误配为“循环”，此处强制停止，避免角色一直停留在浇水动画
-	if (UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance())
+	if (AnimInstance)
 	{
 		AnimInstance->Montage_Stop(0.25f, WateringMontage);
 	}
+}
+
+void AShootCharacter::OnInteractMontageNotify(FName NotifyName, const FBranchingPointNotifyPayload& Payload)
+{
+	if (NotifyName != InteractCommitNotifyName)
+	{
+		return;
+	}
+
+	if (Payload.SequenceAsset == GatheringMontage && PendingGatherPlant)
+	{
+		APlant* Plant = PendingGatherPlant;
+		PendingGatherPlant = nullptr;
+		if (IsValid(Plant))
+		{
+			Plant->Harvest();
+		}
+	}
+	else if (Payload.SequenceAsset == WateringMontage && PendingWaterPlant)
+	{
+		APlant* Plant = PendingWaterPlant;
+		PendingWaterPlant = nullptr;
+		if (IsValid(Plant))
+		{
+			Plant->Water();
+			Plant->SetWaterHintSuppressed(true);
+		}
+	}
+}
+
+bool AShootCharacter::IsMoveLockedByInteraction()
+{
+	UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+	return AnimInstance
+		&& ((PickMontage && AnimInstance->Montage_IsPlaying(PickMontage))
+			|| (PutDownMontage && AnimInstance->Montage_IsPlaying(PutDownMontage)));
+}
+
+bool AShootCharacter::IsCancelableInteractionPlaying()
+{
+	UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+	return AnimInstance
+		&& ((GatheringMontage && AnimInstance->Montage_IsPlaying(GatheringMontage))
+			|| (WateringMontage && AnimInstance->Montage_IsPlaying(WateringMontage)));
+}
+
+void AShootCharacter::CancelInteractionByMovement()
+{
+	// 生效帧之前打断：先清掉待结算目标，结束回调就不会收获/补水；生效帧之后这里只是砍掉后摇
+	PendingGatherPlant = nullptr;
+	PendingWaterPlant = nullptr;
+	GetWorldTimerManager().ClearTimer(GatheringDoneTimerHandle);
+	GetWorldTimerManager().ClearTimer(WateringDoneTimerHandle);
+	bHasInteractFaceRotation = false;
+
+	if (UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance())
+	{
+		if (GatheringMontage && AnimInstance->Montage_IsPlaying(GatheringMontage))
+		{
+			AnimInstance->Montage_Stop(InteractCancelBlendOutTime, GatheringMontage);
+		}
+		if (WateringMontage && AnimInstance->Montage_IsPlaying(WateringMontage))
+		{
+			AnimInstance->Montage_Stop(InteractCancelBlendOutTime, WateringMontage);
+		}
+	}
+}
+
+void AShootCharacter::BeginPlantInteraction()
+{
+	bInteractCancelArmed = GFrameCounter > LastMoveInputFrame + 1;
+	GetCharacterMovement()->StopMovementImmediately();
 }
 
  bool AShootCharacter::CanAttack()
@@ -165,7 +250,7 @@ bool AShootCharacter::IsHolding()
  	{
  		return false;
  	}
-	if (Cast<ADesk>(OverlappingItem))//Desk（上菜台）不可被拾取
+	if (Cast<ADesk>(OverlappingItem) || Cast<AFoodSpawner>(OverlappingItem))
 	{
 		return false;
 	}
@@ -275,7 +360,8 @@ bool AShootCharacter::IsSpawner()
 	// 俯视模式下相机朝向由 Tick 里的世界旋转驱动，不跟随 Pawn 旋转
 	CameraBoom->bUsePawnControlRotation = !bUseTopDownCamera;
 	CameraBoom->SetUsingAbsoluteRotation(bUseTopDownCamera);
-	CameraBoom->bDoCollisionTest = !bUseTopDownCamera;
+	CameraBoom->ProbeChannel = ECC_GameTraceChannel4;
+	CameraBoom->bDoCollisionTest = true;
 	// 相机延迟跟随：保留一点缓冲吸收台阶/落地的上下颠簸，
 	// 但 LagSpeed 固定不变、并限制最大滞后距离，避免加速/急停时镜头前后抽动
 	CameraBoom->bEnableCameraLag = true;
@@ -303,7 +389,13 @@ bool AShootCharacter::IsSpawner()
 	InteractionPrompt = CreateDefaultSubobject<UWidgetComponent>(TEXT("InteractionPrompt"));
 	InteractionPrompt->SetupAttachment(RootComponent);
 	InteractionPrompt->SetWidgetSpace(EWidgetSpace::Screen);
-	InteractionPrompt->SetWidgetClass(UInteractionPromptWidget::StaticClass());
+	// E 提示统一使用工程里已有的 WBP_Prompt（烹饪设备/NPC 等蓝图已经在用），不再单独维护一套提示外观
+	static ConstructorHelpers::FClassFinder<UUserWidget> PromptWidgetFinder(TEXT("/Game/_Demo/Blueprints/UI_2D/Tips/WBP_Prompt"));
+	UClass* PromptWidgetClass = PromptWidgetFinder.Succeeded()
+		? PromptWidgetFinder.Class.Get()
+		: UInteractionPromptWidget::StaticClass();
+	InteractionPrompt->SetWidgetClass(PromptWidgetClass);
+	UnifiedPromptWidgetClass = PromptWidgetClass;
 	InteractionPrompt->SetDrawAtDesiredSize(true);
 	InteractionPrompt->SetPivot(FVector2D(0.5f, 1.f));
 	InteractionPrompt->SetCollisionEnabled(ECollisionEnabled::NoCollision);
@@ -1090,7 +1182,7 @@ void AShootCharacter::InteractWithPlant()
 	}
 	else if (OverlappingPlant->IsFruiting())
 	{
-		// 触发摘取植被：先播放 A_Gathering，待动画播完（OnGatheringMontageEnded）后再真正收获并删除植物
+		// 触发摘取植被：播放 A_Gathering，到 InteractCommit 帧才收获；生效前移动会取消
 		if (PendingGatherPlant == nullptr)
 		{
 			PendingGatherPlant = OverlappingPlant;
@@ -1109,6 +1201,7 @@ void AShootCharacter::InteractWithPlant()
 
 			if (PlayGatheringMontage())
 			{
+				BeginPlantInteraction();
 				if (UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance())
 				{
 					OnGatheringMontageEnded.BindUObject(this, &AShootCharacter::GatheringMontageEnded);
@@ -1121,11 +1214,9 @@ void AShootCharacter::InteractWithPlant()
 					PendingGatherPlant = nullptr;
 				}
 
-				// 兜底定时器：以蒙太奇一轮时长为准到点强制完成采集。
-				// 作用：即使采集蒙太奇被误配为“循环”或被中断（自然结束事件不触发），
-				// 也能在播放一轮后收获并停止蒙太奇，避免 PendingGatherPlant 永不置空吞掉后续采摘。
+				// 兜底定时器：蒙太奇误配为循环时按一轮时长收尾；没配 InteractCommit 时在此结算
 				const float GatherDuration = (GatheringMontage && GatheringMontage->GetPlayLength() > 0.f)
-					? GatheringMontage->GetPlayLength()
+					? GatheringMontage->GetPlayLength() / FMath::Max(GatheringMontage->RateScale, KINDA_SMALL_NUMBER)
 					: 1.f;
 				FTimerDelegate GatherDoneDel;
 				GatherDoneDel.BindUObject(this, &AShootCharacter::GatheringMontageEnded, (UAnimMontage*)nullptr, false);
@@ -1159,9 +1250,10 @@ void AShootCharacter::InteractWithPlant()
 			// 注：植被高亮改由 APlant::UpdateHarvestHintOutline 在“玩家靠近且需要浇水”时处理（浇水前置指示），
 			// 此处不再手动描边，避免与植物自身描边缓存冲突。
 
-			// 触发浇水：先播放浇水动画，待动画播完（OnWateringMontageEnded）后才真正补水
+			// 触发浇水：到 InteractCommit 帧才补水；生效前移动会取消
 			if (PlayWateringMontage())
 			{
+				BeginPlantInteraction();
 				PendingWaterPlant = OverlappingPlant;
 				if (UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance())
 				{
@@ -1169,11 +1261,9 @@ void AShootCharacter::InteractWithPlant()
 					AnimInstance->Montage_SetEndDelegate(OnWateringMontageEnded, WateringMontage);
 				}
 
-				// 兜底定时器：以蒙太奇一轮时长为准到点强制完成浇水。
-				// 作用：即使浇水蒙太奇被误配为“循环”（自然结束事件永不触发），
-				// 也能在播放一轮后补水并停止蒙太奇，避免角色一直停留在浇水状态。
+				// 兜底定时器：蒙太奇误配为循环时按一轮时长收尾；没配 InteractCommit 时在此结算
 				const float Duration = (WateringMontage && WateringMontage->GetPlayLength() > 0.f)
-					? WateringMontage->GetPlayLength()
+					? WateringMontage->GetPlayLength() / FMath::Max(WateringMontage->RateScale, KINDA_SMALL_NUMBER)
 					: 1.f;
 				FTimerDelegate WateringDoneDel;
 				WateringDoneDel.BindUObject(this, &AShootCharacter::WateringMontageEnded, (UAnimMontage*)nullptr, false);
@@ -1791,6 +1881,34 @@ void AShootCharacter::RefreshInteractionPromptTarget()
 	}
 }
 
+UWidgetComponent* AShootCharacter::FindInteractionPromptAnchor(const AActor* Target) const
+{
+	if (!IsValid(Target) || !UnifiedPromptWidgetClass)
+	{
+		return nullptr;
+	}
+
+	// 烹饪设备、大门这类蓝图里有美术摆好的 WBP_Prompt TipsWidget（控件类与统一提示同源）。
+	// 现在 E 提示统一由角色显示（每个本地玩家一份，适配分屏），设备上的这个控件只作为
+	// 位置锚点：沿用它的世界坐标/轴心，提示位置就和美术在蓝图里看到的一致。
+	// 只认 WBP_Prompt 子类，避免把餐桌菜单等其它 Tips 控件误当成提示锚点。
+	TInlineComponentArray<UWidgetComponent*> Widgets(Target);
+	for (UWidgetComponent* Widget : Widgets)
+	{
+		if (!Widget)
+		{
+			continue;
+		}
+
+		const UClass* WidgetClass = Widget->GetWidgetClass();
+		if (WidgetClass && WidgetClass->IsChildOf(UnifiedPromptWidgetClass))
+		{
+			return Widget;
+		}
+	}
+	return nullptr;
+}
+
 void AShootCharacter::UpdateInteractionPrompt()
 {
 	AActor* Target = InteractionPromptTarget;
@@ -1815,6 +1933,31 @@ void AShootCharacter::UpdateInteractionPrompt()
 	{
 		InteractionPrompt->SetOwnerPlayer(PC->GetLocalPlayer());
 	}
+
+	// 目标自带 WBP_Prompt（大门/灶台等）：统一提示直接落在它的锚点上，保留美术在蓝图里
+	// 摆好的位置与轴心。设备上的提示控件本身不再显示，角色提示是每个本地玩家各一份。
+	if (UWidgetComponent* AnchorWidget = FindInteractionPromptAnchor(Target))
+	{
+		// 调试开关：Shoot.DeviceOwnPromptTips 1 时回到旧行为，由设备自己显示提示，
+		// 角色提示让位，否则两边会互相压制。
+		if (InteractionPromptTuning::UseDeviceOwnPromptTips())
+		{
+			InteractionPrompt->SetVisibility(false);
+			return;
+		}
+
+		InteractionPrompt->SetPivot(AnchorWidget->GetPivot());
+		InteractionPrompt->SetWorldLocation(AnchorWidget->GetComponentLocation());
+		// 兜底：若有蓝图逻辑仍把设备自带提示打开了，统一提示出现时强制隐藏，避免叠两层
+		if (AnchorWidget->IsVisible())
+		{
+			AnchorWidget->SetVisibility(false);
+		}
+		return;
+	}
+
+	// 没有提示锚点（食材/植株等）：恢复“底部贴包围盒顶部”的默认摆放
+	InteractionPrompt->SetPivot(FVector2D(0.5f, 1.f));
 
 	FVector Location = Target->GetActorLocation();
 	if (const AFireflyAreaVolume* Area = Cast<AFireflyAreaVolume>(Target))
@@ -1866,6 +2009,7 @@ bool AShootCharacter::IsInteractionAnimPlaying()
 	// 采集/浇水不改 CharacterActionState（角色一直处于 EAS_Unoccupied 或 EAS_Picking），
 	// 所以"动画是否在播"只能看蒙太奇本身
 	return (PickMontage && AnimInstance->Montage_IsPlaying(PickMontage))
+		|| (PutDownMontage && AnimInstance->Montage_IsPlaying(PutDownMontage))
 		|| (GatheringMontage && AnimInstance->Montage_IsPlaying(GatheringMontage))
 		|| (WateringMontage && AnimInstance->Montage_IsPlaying(WateringMontage));
 }
@@ -1977,7 +2121,7 @@ AItemActor* AShootCharacter::FindNearestRangePickItem() const
 			continue;
 		}
 		// 空碟/脏碟走各自的交互流程，不能当散落物吸走
-		if (!Item->bPickable || Item->bIsEmptyPlate || Item->bIsDirtyPlate)
+		if (!Item->bPickable || Item->bIsEmptyPlate || Item->bIsDirtyPlate || Cast<AFoodSpawner>(Item))
 		{
 			continue;
 		}
@@ -2077,6 +2221,27 @@ void AShootCharacter::DoMove(float Right, float Forward)
 {
 	if (GetController() != nullptr)
 	{
+		// 移动输入断开过至少一帧才允许取消，避免按住方向键时按 E 被立即打断
+		const uint64 Frame = GFrameCounter;
+		if (Frame > LastMoveInputFrame + 1)
+		{
+			bInteractCancelArmed = true;
+		}
+		LastMoveInputFrame = Frame;
+
+		if (IsMoveLockedByInteraction())
+		{
+			return;
+		}
+		if (IsCancelableInteractionPlaying())
+		{
+			if (!bInteractCancelArmed || FVector2D(Right, Forward).Size() < InteractCancelInputThreshold)
+			{
+				return;
+			}
+			CancelInteractionByMovement();
+		}
+
 		const FRotator Rotation = GetController()->GetControlRotation();
 		const FRotator YawRotation(0, Rotation.Yaw, 0);
 
@@ -2175,7 +2340,8 @@ void AShootCharacter::UpdateCameraView()
 	{
 		CameraViewAlpha = TargetAlpha;
 	}
-	CameraBoom->bDoCollisionTest = CameraViewAlpha < 1.0f;
+	CameraBoom->ProbeChannel = ECC_GameTraceChannel4;
+	CameraBoom->bDoCollisionTest = true;
 
 	// 两种视角统一由世界旋转驱动：切换 bUsePawnControlRotation / 绝对旋转的瞬间会硬跳
 	CameraBoom->bUsePawnControlRotation = false;
@@ -2242,6 +2408,12 @@ void AShootCharacter::DoPick()
  	{
  		return;
  	}
+
+	if (Cast<AFoodSpawner>(OverlappingItem))
+	{
+		DoSpwan();
+		return;
+	}
 
 	// 打烊（未营业）期间：按全局开关把“拾取”重定向为“直接收进背包”，玩家手上不残留物品；
 	// 营业时仍走原逻辑（拿在手上）。取不到时钟时按“营业中”处理，不特判。
@@ -2495,9 +2667,54 @@ void AShootCharacter::UpdateHarvestEffects()
 }
 
 // ============ 背包系统 ============
-bool AShootCharacter::AddItemToInventory(AItemActor* Item)
+void AShootCharacter::ShowSimpleToast(const FString& Title, const FString& Body, FLinearColor Accent)
+{
+	if (!IsLocallyControlled())
+	{
+		return;
+	}
+	if (APlayerController* PC = Cast<APlayerController>(GetController()))
+	{
+		UDiscoveryToastWidget::ShowMessage(PC, Title, Body, Accent);
+	}
+}
+
+void AShootCharacter::TryDiscoverItem(AItemActor* Item)
 {
 	if (!Item)
+	{
+		return;
+	}
+	UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetGameInstance());
+	if (!GI)
+	{
+		return;
+	}
+
+	// 物品键优先用数据表行名（与 DT_ItemInfo 一致，如 "7"），没有配置时退回蓝图类名
+	FName ItemKey = Item->ItemInfoRow.RowName;
+	if (ItemKey.IsNone())
+	{
+		ItemKey = Item->GetClass()->GetFName();
+	}
+
+	const FItemActorInfo* InfoRow = Item->ItemInfoRow.GetRow<FItemActorInfo>(TEXT("Discovery"));
+	FDiscoveryInfo OutInfo;
+	if (GI->MarkItemDiscovered(ItemKey, InfoRow ? *InfoRow : FItemActorInfo(), OutInfo))
+	{
+		if (IsLocallyControlled())
+		{
+			if (APlayerController* PC = Cast<APlayerController>(GetController()))
+			{
+				UDiscoveryToastWidget::ShowForPlayer(PC, OutInfo);
+			}
+		}
+	}
+}
+
+bool AShootCharacter::AddItemToInventory(AItemActor* Item)
+{
+	if (!Item || Cast<AFoodSpawner>(Item))
 	{
 		return false;
 	}
@@ -2507,6 +2724,9 @@ bool AShootCharacter::AddItemToInventory(AItemActor* Item)
 			*GetName(), *Item->GetName());
 		return false;
 	}
+
+	// 入包前做首次发现判定（成功后物体随即被销毁，之后无法再读 ItemInfoRow）
+	TryDiscoverItem(Item);
 
 	// 同类物品堆叠：已存在相同 ItemClass 的槽位则数量+1，不再新增槽位
 	UClass* InClass = Item->GetClass();

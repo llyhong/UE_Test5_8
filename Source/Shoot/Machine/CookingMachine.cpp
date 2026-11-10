@@ -14,6 +14,7 @@
 #include "Game/PlateSystem.h"
 #include "Item/ItemActor.h"
 #include "Kismet/GameplayStatics.h"
+#include "Interaction/InteractionConfig.h"
 #include "DrawDebugHelpers.h"
 
 // Sets default values
@@ -585,8 +586,9 @@ void ACookingMachine::OnBoxOverlap(UPrimitiveComponent* OverlappedComponent, AAc
 		// 注册进角色的灶台候选集：由角色按距离选最近的一台，取代“后进入者胜”
 		PickupInterface->AddOverlappingCookMachine(this);
 		
-		//当tips没有被其他玩家占用的时候
-		if(LocalPlayer == nullptr)
+		//当tips没有被其他玩家占用的时候。
+		//E 提示默认统一由角色显示（每个本地玩家一份），这里的 TipsWidget 只做位置锚点，不再自己显示。
+		if(LocalPlayer == nullptr && TipsWidget && InteractionPromptTuning::UseDeviceOwnPromptTips())
 		{
 			TipsWidget->SetVisibility(true);
 			if (APawn* AP = Cast<APawn>(OtherActor))

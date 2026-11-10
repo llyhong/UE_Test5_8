@@ -69,6 +69,21 @@ namespace InteractionDistance
 extern TAutoConsoleVariable<int32> CVarDebugInteract;
 
 /**
+ * E 交互提示的显示归属。
+ *
+ * 默认关闭设备自带的 WBP_Prompt TipsWidget：所有 E 提示统一由角色身上的
+ * InteractionPrompt 显示（每个本地玩家各一份，适配多人同屏）；设备上的
+ * TipsWidget 只作为统一提示的位置锚点，保留美术在蓝图里摆好的位置。
+ *
+ * 控制台 Shoot.DeviceOwnPromptTips 1 可临时恢复“设备自己显示提示”的旧行为。
+ */
+namespace InteractionPromptTuning
+{
+	/** 是否允许设备蓝图自带的 WBP_Prompt TipsWidget 自己显示 */
+	bool UseDeviceOwnPromptTips();
+}
+
+/**
  * 运行时半径倍率：控制台 Shoot.InteractScale 0.5 / 1.2 ...
  *
  * 只影响"交互判定球/盒"的尺寸，不影响物体本体。

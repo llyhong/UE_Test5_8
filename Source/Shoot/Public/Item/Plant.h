@@ -14,6 +14,10 @@ class UStaticMeshComponent;
 class USphereComponent;
 class AShootCharacter;
 class UBaseGameInstance;
+class UMaterialInstanceDynamic;
+class UDecalComponent;
+class USoundBase;
+class UNiagaraSystem;
 
 /** 阶段变化时广播（供 UI / 蓝图刷新），参数为新阶段索引与阶段名 */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnPlantStageChanged, int32, StageIndex, FName, StageName);
@@ -137,6 +141,14 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Plant")
 	bool NeedsWater() const;
 
+	/** 口渴窗口是否正打开（仅 bUseThirstWindows 植物有效）：窗口内浇水可获得“时机正好”反馈并恢复全速生长 */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Plant|Thirst")
+	bool IsThirstWindowOpen() const { return bThirstWindowOpen; }
+
+	/** 口渴窗口剩余时间（秒），未打开时为 0 */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Plant|Thirst")
+	float GetThirstWindowRemaining() const { return bThirstWindowOpen ? ThirstWindowRemaining : 0.f; }
+
 	/** 设置浇水提示抑制：浇水动作完成后调用以取消高亮；植株重新变干或玩家离开范围后自动恢复 */
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Plant")
 	void SetWaterHintSuppressed(bool bSuppress);
@@ -156,9 +168,70 @@ public:
 	UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|Plant")
 	void OnReadyToHarvest();
 
+	/** 浇水反馈（蓝图可重载：水花、音效、叶片抖动等） */
+	UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|Plant|Feedback")
+	void OnWatered(float NewWaterLevel);
+
+	/** 驱虫反馈（蓝图可重载） */
+	UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|Plant|Feedback")
+	void OnPestRemoved();
+
+	/** 口渴窗口打开（蓝图可重载：冒“口渴”气泡等） */
+	UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|Plant|Thirst")
+	void OnThirstWindowOpened();
+
+	/** 窗口内及时浇水（蓝图可重载） */
+	UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|Plant|Thirst")
+	void OnThirstWindowSatisfied();
+
+	/** 错过口渴窗口（本阶段将减速生长，蓝图可重载） */
+	UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|Plant|Thirst")
+	void OnThirstWindowMissed();
+
+	/** 照料连击达成（参数为额外产量），蓝图可重载 */
+	UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|Plant|Care")
+	void OnCareComboCompleted(int32 BonusYield);
+
+	// ========== 浇水表现（可留空；留空时仍有叶片抖动反馈） ==========
+	/** 浇水音效（为空则不播） */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Plant|Feedback")
+	TObjectPtr<USoundBase> WaterSound = nullptr;
+
+	/** 浇水粒子特效（为空则不播；可挂 Niagara 水花） */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Plant|Feedback")
+	TObjectPtr<UNiagaraSystem> WaterEffect = nullptr;
+
+	/** 浇水特效挂点（留空则用植株模型中心） */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Plant|Feedback")
+	FName WaterEffectSocket = NAME_None;
+
+	/** 浇水特效相对挂点的偏移（世界空间） */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Plant|Feedback")
+	FVector WaterEffectOffset = FVector(0.f, 0.f, 30.f);
+
 	/** 阶段变化广播（供 Widget 绑定） */
 	UPROPERTY(BlueprintAssignable, Category = "Shoot|Plant")
 	FOnPlantStageChanged OnPlantStageChanged;
+
+	/** 湿度参数：0 为干裂，1 为湿润。 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Shoot|Plant|Soil")
+	FName SoilWetnessParameterName = TEXT("SoilWetness");
+
+	/** 材质裂纹随机种子参数名：按植株位置写入，避免相邻田块裂纹一模一样 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Shoot|Plant|Soil")
+	FName SoilCrackSeedParameterName = TEXT("CrackSeed");
+
+	/** 浇水后从干到湿的渗开时长（秒） */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Plant|Soil", meta = (ClampMin = "0.0", Units = "s"))
+	float SoilWetTransitionTime = 0.8f;
+
+	/** 水分耗尽 / 采摘重置后从湿回干的时长（秒） */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Plant|Soil", meta = (ClampMin = "0.0", Units = "s"))
+	float SoilDryTransitionTime = 3.0f;
+
+	/** 当前显示的土壤湿度 0..1（已含过渡） */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Plant|Soil")
+	float GetSoilWetness() const { return SoilWetness; }
 
 protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Components")
@@ -167,6 +240,10 @@ protected:
 	/** 交互范围：角色进入后注册为可交互植物 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Components")
 	USphereComponent* InteractionSphere;
+
+	/** 植株脚下的土壤干湿贴花（只投到地面；植株与果实不接收贴花）。尺寸/材质可在蓝图里改 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Components")
+	UDecalComponent* SoilDecal;
 
 	// ============ 交互判定尺度（统一标准，见 InteractionConfig.h） ============
 	/** 交互球半径。C++ 在 BeginPlay 强制应用，覆盖蓝图残留旧值 */
@@ -225,6 +302,37 @@ protected:
 	/** 是否已浇满：浇满后置位，之后不再消耗水分（保持满水长到结果），摘果重置回幼苗时清除 */
 	bool bWatered = false;
 
+	// ========== 需水窗口（bUseThirstWindows） ==========
+	bool bThirstWindowOpen = false;
+	bool bThirstWindowOpenedThisStage = false;
+	bool bThirstWindowSatisfied = false;
+	bool bThirstWindowMissed = false;
+	float ThirstWindowRemaining = 0.f;
+
+	void ResetThirstWindowState();
+	void OpenThirstWindow();
+	void CloseThirstWindow(bool bSatisfied);
+	void UpdateThirstWindow(float DeltaTime);
+
+	/** 是否启用需水窗口：以 DataTable 配置为准；控制台 Game.PlantThirstWindows 1 可全局强制开启用于 A/B 验证 */
+	bool UsesThirstWindows() const;
+
+	// ========== 照料连击 ==========
+	/** 最近一次浇水 / 驱虫的世界时间（初始为很小的值，保证未操作时判定为超时） */
+	float CareWaterTime = -1000.f;
+	float CarePestTime = -1000.f;
+	bool bPestAppearedThisCycle = false;
+
+	int32 EvaluateCareComboBonus() const;
+
+	// ========== 浇水表现 ==========
+	void PlayWaterFeedback();
+	void UpdateWaterFeedback(float DeltaTime);
+
+	float WaterShakeRemaining = 0.f;
+	float WaterShakeElapsed = 0.f;
+	FRotator WaterShakeBaseRotation = FRotator::ZeroRotator;
+
 	/** 当前长在树上的果实（进入结果阶段时生成，收获时收集）。熟度状态已下沉到每个果实自身，
 	 *  由植物在生成果实时写入配置并启动计时，果实独立推进与广播。 */
 	UPROPERTY()
@@ -249,4 +357,15 @@ protected:
 
 	/** 采摘后重新生长前的等待时长（秒）：并入“幼苗→下一阶段”的时长，等效于该阶段 StageDuration + 此值。由 Harvest 重置植被时写入，Tick 中逐渐消耗。 */
 	float RegrowDelayRemaining = 0.f;
+
+	void InitSoilDecal();
+	void UpdateSoilWetness(float DeltaTime);
+	float GetTargetSoilWetness() const;
+	/** 让本 Actor 上除贴花外的所有图元都不接收贴花，避免植株/果实被土壤贴花染色 */
+	static void DisableReceivingDecals(AActor* Actor);
+
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> SoilDecalMID;
+
+	float SoilWetness = 0.f;
 };
