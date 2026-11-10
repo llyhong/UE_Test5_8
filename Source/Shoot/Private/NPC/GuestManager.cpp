@@ -9,6 +9,8 @@
 #include "TimerManager.h"
 #include "DrawDebugHelpers.h"
 #include "Game/BaseGameInstance.h"
+#include "Game/BaseLevelBP.h"
+#include "Game/OrderSystem.h"
 #include "Game/EconomySystem.h"
 #include "Game/BusinessTime.h"
 #include "Kismet/GameplayStatics.h"
@@ -70,11 +72,7 @@ void AGuestManager::BeginPlay()
 		}
 	}
 
-	if (bAutoSpawn && SpawnInterval > 0.0f)
-	{
-		GetWorld()->GetTimerManager().SetTimer(AutoSpawnTimerHandle,
-			this, &AGuestManager::TickSpawn, SpawnInterval, true, SpawnInterval);
-	}
+	ResumeSpawning();
 
 	// 座位占用情况自动打印（SeatStatusLogInterval>0 时按间隔循环打印）
 	if (SeatStatusLogInterval > 0.0f)
@@ -84,9 +82,110 @@ void AGuestManager::BeginPlay()
 	}
 }
 
+void AGuestManager::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	PauseSpawning();
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(SeatStatusLogHandle);
+		World->GetTimerManager().ClearTimer(ClosingTimeoutHandle);
+	}
+	if (UTimeSystem* TS = BoundTimeSystem.Get())
+	{
+		TS->OnBusinessOpenChanged.RemoveDynamic(this, &AGuestManager::OnBusinessOpenChanged);
+	}
+	BoundTimeSystem.Reset();
+	Super::EndPlay(EndPlayReason);
+}
+
+UTimeSystem* AGuestManager::BindBusiness()
+{
+	UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetGameInstance());
+	UTimeSystem* TS = GI && GI->businessSimulation ? GI->businessSimulation->TimeSystem.Get() : nullptr;
+	if (TS != BoundTimeSystem.Get())
+	{
+		if (UTimeSystem* Previous = BoundTimeSystem.Get())
+		{
+			Previous->OnBusinessOpenChanged.RemoveDynamic(this, &AGuestManager::OnBusinessOpenChanged);
+		}
+		BoundTimeSystem = TS;
+		if (TS)
+		{
+			TS->OnBusinessOpenChanged.AddUniqueDynamic(this, &AGuestManager::OnBusinessOpenChanged);
+		}
+	}
+	return TS;
+}
+
+void AGuestManager::ScheduleNextSpawn(float Delay)
+{
+	if (!bSpawningPaused && bAutoSpawn && SpawnInterval > 0.0f)
+	{
+		if (UWorld* World = GetWorld())
+		{
+			World->GetTimerManager().SetTimer(AutoSpawnTimerHandle,
+				this, &AGuestManager::TickSpawn, Delay, false);
+		}
+	}
+}
+
 void AGuestManager::TickSpawn()
 {
-	SpawnGuest();
+	if (bSpawningPaused || !bAutoSpawn || SpawnInterval <= 0.0f)
+	{
+		PauseSpawning();
+		return;
+	}
+
+	UTimeSystem* Previous = BoundTimeSystem.Get();
+	UTimeSystem* TS = BindBusiness();
+	if (!TS || !TS->IsBusinessOpen() || !bCustomerPacingStarted || TS != Previous)
+	{
+		// 补上错过的开门状态；首次发现营业只启动节奏，不立即补客。
+		ResumeSpawning();
+		return;
+	}
+
+	AGuestCharacter* Guest = SpawnGuest();
+	if (bCustomerPacingStarted)
+	{
+		const float Interval = bInCustomerRush ? FMath::Max(RushSpawnInterval, 0.1f) : SpawnInterval;
+		ScheduleNextSpawn(Guest ? Interval : FMath::Max(SpawnRetryDelay, 0.1f));
+	}
+}
+
+void AGuestManager::AdvanceRushPhase()
+{
+	UWorld* World = GetWorld();
+	UTimeSystem* Previous = BoundTimeSystem.Get();
+	UTimeSystem* TS = BindBusiness();
+	if (!World || bSpawningPaused || !bCustomerPacingStarted || !bAutoSpawn || SpawnInterval <= 0.0f)
+	{
+		PauseSpawning();
+		return;
+	}
+	if (!TS || !TS->IsBusinessOpen() || TS != Previous)
+	{
+		ResumeSpawning();
+		return;
+	}
+
+	bInCustomerRush = !bInCustomerRush;
+	float PhaseDelay;
+	if (bInCustomerRush)
+	{
+		PhaseDelay = FMath::Max(RushDuration, 0.1f);
+		const double CycleDuration = FMath::Max(static_cast<double>(RushInterval), static_cast<double>(PhaseDelay) + 0.1);
+		NextRushStartTime = World->GetTimeSeconds() + CycleDuration;
+	}
+	else
+	{
+		PhaseDelay = static_cast<float>(FMath::Max(NextRushStartTime - World->GetTimeSeconds(), 0.1));
+	}
+
+	ScheduleNextSpawn(bInCustomerRush ? FMath::Max(RushSpawnInterval, 0.1f) : SpawnInterval);
+	World->GetTimerManager().SetTimer(RushPhaseTimerHandle,
+		this, &AGuestManager::AdvanceRushPhase, PhaseDelay, false);
 }
 
 void AGuestManager::PrintSeatStatus()
@@ -222,22 +321,15 @@ AGuestCharacter* AGuestManager::SpawnGuest()
 		return nullptr;
 	}
 
-	// 仅在营业时生成客人（白天备货 / 打烊后不再来客）；同时懒绑定营业委托
-	if (UBaseGameInstance* GI = Cast<UBaseGameInstance>(World->GetGameInstance()))
+	UTimeSystem* Previous = BoundTimeSystem.Get();
+	UTimeSystem* TS = BindBusiness();
+	if (!TS || !TS->IsBusinessOpen())
 	{
-		if (GI->businessSimulation && GI->businessSimulation->TimeSystem)
-		{
-			UTimeSystem* TS = GI->businessSimulation->TimeSystem;
-			if (!bBoundBusiness)
-			{
-				TS->OnBusinessOpenChanged.AddDynamic(this, &AGuestManager::OnBusinessOpenChanged);
-				bBoundBusiness = true;
-			}
-			if (!TS->IsBusinessOpen())
-			{
-				return nullptr; // 未营业：静默跳过，不刷屏
-			}
-		}
+		return nullptr;
+	}
+	if (!bSpawningPaused && (!bCustomerPacingStarted || TS != Previous))
+	{
+		ResumeSpawning();
 	}
 
 	// 每个失败分支都给出明确原因，避免"静默不生成"
@@ -259,6 +351,18 @@ AGuestCharacter* AGuestManager::SpawnGuest()
 			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("[Manager] SpawnGuest 失败：GuestClass 是抽象类"));
 		}
 		return nullptr;
+	}
+
+	if (UBaseGameInstance* GI = Cast<UBaseGameInstance>(World->GetGameInstance()))
+	{
+		if (GI->curLevelBP)
+		{
+			AOrderSystem* OS = GI->curLevelBP->orderSystem;
+			if (IsValid(OS) && OS->IsStarted && !OS->CanAcceptNewOrder())
+			{
+				return nullptr;
+			}
+		}
 	}
 
 	// 受到最大在场数量限制（实际容量随声誉/新餐桌道具动态变化）
@@ -533,23 +637,38 @@ void AGuestManager::ClearAllGuests()
 
 void AGuestManager::PauseSpawning()
 {
+	bSpawningPaused = true;
+	bCustomerPacingStarted = false;
+	bInCustomerRush = false;
+	NextRushStartTime = 0.0;
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(AutoSpawnTimerHandle);
+		World->GetTimerManager().ClearTimer(RushPhaseTimerHandle);
 	}
 }
 
 void AGuestManager::ResumeSpawning()
 {
-	if (!bAutoSpawn || SpawnInterval <= 0.0f)
+	PauseSpawning();
+	UTimeSystem* TS = BindBusiness();
+	UWorld* World = GetWorld();
+	if (!World || !bAutoSpawn || SpawnInterval <= 0.0f)
 	{
 		return;
 	}
-	if (UWorld* World = GetWorld())
+
+	bSpawningPaused = false;
+	if (!TS || !TS->IsBusinessOpen())
 	{
-		World->GetTimerManager().SetTimer(AutoSpawnTimerHandle,
-			this, &AGuestManager::TickSpawn, SpawnInterval, true, SpawnInterval);
+		ScheduleNextSpawn(SpawnInterval);
+		return;
 	}
+
+	bCustomerPacingStarted = true;
+	ScheduleNextSpawn(SpawnInterval);
+	World->GetTimerManager().SetTimer(RushPhaseTimerHandle,
+		this, &AGuestManager::AdvanceRushPhase, FMath::Max(FirstRushDelay, 0.1f), false);
 }
 
 FVector AGuestManager::GetQueueWanderCenter() const

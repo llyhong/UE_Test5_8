@@ -666,6 +666,11 @@ bool AGuestCharacter::PlaceOrder()
 		return false;
 	}
 
+	if (!OS->CanAcceptNewOrder())
+	{
+		return false;
+	}
+
 	CurrentOrder = OS->RequestOrderForGuest(this);
 	if (!CurrentOrder)
 	{
@@ -713,9 +718,15 @@ bool AGuestCharacter::PlaceOrder()
 
 bool AGuestCharacter::CanAcceptOrderByPlayer() const
 {
-	return OrderAcceptMode == EGuestOrderAcceptMode::NeedPlayerAccept
-		&& GuestState == EGuestState::WaitingOrder
-		&& CurrentOrder == nullptr;
+	if (OrderAcceptMode != EGuestOrderAcceptMode::NeedPlayerAccept
+		|| GuestState != EGuestState::WaitingOrder || CurrentOrder)
+	{
+		return false;
+	}
+
+	const UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetGameInstance());
+	const AOrderSystem* OS = GI && GI->curLevelBP ? GI->curLevelBP->orderSystem.Get() : nullptr;
+	return OS && OS->CanAcceptNewOrder();
 }
 
 bool AGuestCharacter::AcceptOrderByPlayer()

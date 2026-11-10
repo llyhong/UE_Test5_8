@@ -33,14 +33,25 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Shoot|Order")
 	FOrderData GetOrderData() const;
 
-	/** 订单价格：实时按菜品表（FMenuData::Price）求和，单一数据源，不存在副本不同步问题 */
 	UFUNCTION(BlueprintPure, Category = "Shoot|Order")
 	int32 GetOrderPrice() const;
 
-	/** 单道菜的最长等待时间（秒）：传入菜单 ID（MenuDataTable 的 FoodID）取该菜的 FMenuData::MaxWaitTime。
-	 *  不传（MenuID < 0）时返回整单最长等待时间（各菜取最大），供订单超时判定 / 倒计时沿用 */
+	UFUNCTION(BlueprintPure, Category = "Shoot|Order")
+	int32 GetOrderSettlementPrice() const;
+
 	UFUNCTION(BlueprintPure, Category = "Shoot|Order")
 	float GetOrderMaxWaitTime(int32 MenuID = -1) const;
+
+	UFUNCTION(BlueprintPure, Category = "Shoot|Order")
+	float GetOrderTimeout() const;
+
+	UFUNCTION(BlueprintPure, Category = "Shoot|Order")
+	bool IsLate() const;
+
+	UFUNCTION(BlueprintPure, Category = "Shoot|Order")
+	bool IsExpired() const;
+
+	void InitializePatience(const ULevelOrderCfg* Config);
 
 	/** 单道菜的菜名：传入菜单 ID（MenuDataTable 的 FoodID）取该菜的 FMenuData::FoodName。
 	 *  不传（MenuID < 0）时返回整单显示名（多道菜用 "+" 连接，如“番茄炒蛋+米饭”） */
@@ -61,6 +72,11 @@ public:
 	void RefreshOrderStats();
 
 private:
+	float NormalWaitTime = 0.f;
+	float LateServeGraceSeconds = 0.f;
+	float LateServePriceMultiplier = 1.f;
+	TMap<int32, float> MenuWaitTimes;
+
 	/** 汇总结果缓存：Tick 里每帧都要读等待时间，避免每次都遍历菜品表 */
 	mutable int32 CachedPrice = 0;
 	mutable float CachedMaxWaitTime = 0.f;
@@ -124,6 +140,9 @@ public:
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Order")
 	UOrderHandle* RequestOrderForGuest(AGuestCharacter* Guest);
+
+	UFUNCTION(BlueprintPure, Category = "Shoot|Order")
+	bool CanAcceptNewOrder() const;
 
 	/** 取消某客人尚未完成的订单（客人提前离场时调用），返回是否取消了订单 */
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Order")

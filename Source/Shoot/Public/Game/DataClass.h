@@ -35,7 +35,7 @@ struct FPlayerInfo
  *
  * 以下信息一律实时按菜品表派生，不再另存字段：
  *   UOrderHandle::GetOrderPrice()        = 各菜品 FMenuData::Price 之和
- *   UOrderHandle::GetOrderMaxWaitTime()  = 各菜品 FMenuData::MaxWaitTime 的最大值
+ *   UOrderHandle::GetOrderMaxWaitTime()  = 接单时的最长菜品等待时间 × 关卡等待倍率
  *   UOrderHandle::GetOrderDisplayName()  = 各菜品 FMenuData::FoodName 拼接（多菜用 "+" 连接）
  *   UOrderHandle::GetMachineImageIDs()   = 各菜品 FMenuData::MachineID 去重列表
  */
@@ -86,13 +86,23 @@ class ULevelOrderCfg : public UDataAsset
 public:
 	/** 可选的"自定义套餐"：需要一单多道菜时才配（只填 FoodIDs，每项 = 菜品表的 FoodID）。
 	 *  留空则订单池完全由菜品表（MenuDataTable）里 Probabilitys>0 的菜品各成一单。
-	 *  价格 / 等待时间 / 套餐名 / 机器图片 / 权重一律由菜品表派生，不再在这里配置。 */
+	 *  菜品基础数值从菜单表派生，等待容忍和迟到规则由关卡配置。 */
 	UPROPERTY(EditAnywhere,BlueprintReadWrite, Category = "Shoot|Data")
 	TArray<FOrderData> Orders;
 	UPROPERTY(EditAnywhere,BlueprintReadWrite, Category = "Shoot|Data")
 	TArray<FAppearOrder> AppearTimes;
-	UPROPERTY(EditAnywhere,BlueprintReadWrite, Category = "Shoot|Data")
-	int MaxWaitOrderNum;
+	UPROPERTY(EditAnywhere,BlueprintReadWrite, Category = "Shoot|Data", meta = (ClampMin = "1"))
+	int MaxWaitOrderNum = 4;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Data|Patience", meta = (ClampMin = "0.1"))
+	float OrderWaitTimeMultiplier = 0.8f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Data|Patience", meta = (ClampMin = "0.0", Units = "s"))
+	float LateServeGraceSeconds = 8.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Data|Patience", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float LateServePriceMultiplier = 0.8f;
+
 	UPROPERTY(EditAnywhere,BlueprintReadWrite, Category = "Shoot|Data")
 	float TargetScore;
 };

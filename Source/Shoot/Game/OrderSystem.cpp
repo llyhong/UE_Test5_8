@@ -51,8 +51,7 @@ void AOrderSystem::Tick(float DeltaTime)
 			}
 
 			orderHandle->waitTime += DeltaTime;
-			const float MaxWait = orderHandle->GetOrderMaxWaitTime();
-			if (MaxWait > 0.f && orderHandle->waitTime >= MaxWait)
+			if (orderHandle->IsExpired())
 			{
 				ABaseLevelBP::AddScore(this, -orderHandle->GetOrderPrice());
 				OnFailOrder.Broadcast(orderHandle, orderHandle->OrderData);
@@ -84,7 +83,7 @@ void AOrderSystem::Tick(float DeltaTime)
 			else
 			{
 				auto nextOrder = orderCfg->AppearTimes[CurOrderIndex];
-				if (CurTime >= nextOrder.AppearTime && waitList.Num() < orderCfg->MaxWaitOrderNum)
+				if (CurTime >= nextOrder.AppearTime && CanAcceptNewOrder())
 				{
 					// 定时生成的订单同样从"按菜品表构建的订单池"里随机取（不再按 AppearOrderID 索引 Orders）
 					if (FOrderData* data = GetRandomOrder())
@@ -95,6 +94,7 @@ void AOrderSystem::Tick(float DeltaTime)
 						orderHandle->OrderData = *data;
 						orderHandle->waitTime = 0;
 						orderHandle->RefreshOrderStats();
+						orderHandle->InitializePatience(orderCfg);
 						waitList.Add(orderHandle);
 						OnStartOrder.Broadcast(orderHandle, orderHandle->OrderData);
 						CurOrderIndex++;
@@ -218,7 +218,7 @@ void AOrderSystem::RebuildOrderPool()
 		OrderWeights.Add(FMath::Max(Menu.Probabilitys, 0.f));
 	}
 
-	// 菜单表可能刚变过：让在制订单按新表重算价格 / 等待时间
+	// 刷新展示数据，但不改变已接订单的等待期限。
 	for (UOrderHandle* Handle : waitList)
 	{
 		if (Handle)
@@ -345,9 +345,28 @@ bool AOrderSystem::GetNextConfigOrder(FOrderData& OutOrder)
 	return false;
 }
 
+bool AOrderSystem::CanAcceptNewOrder() const
+{
+	const int32 MaxOrders = orderCfg ? FMath::Max(1, orderCfg->MaxWaitOrderNum) : 4;
+	return IsStarted && waitList.Num() < MaxOrders;
+}
+
 UOrderHandle* AOrderSystem::RequestOrderForGuest(AGuestCharacter* Guest)
 {
 	if (!IsStarted || !Guest)
+	{
+		return nullptr;
+	}
+
+	for (UOrderHandle* Handle : waitList)
+	{
+		if (Handle && Handle->Guest == Guest)
+		{
+			return Handle;
+		}
+	}
+
+	if (!CanAcceptNewOrder())
 	{
 		return nullptr;
 	}
@@ -382,6 +401,7 @@ UOrderHandle* AOrderSystem::RequestOrderForGuest(AGuestCharacter* Guest)
 	orderHandle->waitTime = 0.f;
 	orderHandle->Guest = Guest;
 	orderHandle->RefreshOrderStats();
+	orderHandle->InitializePatience(orderCfg);
 
 	waitList.Add(orderHandle);
 	OnStartOrder.Broadcast(orderHandle, orderHandle->OrderData);
@@ -425,6 +445,10 @@ bool AOrderSystem::PushFoods(const TArray<int>& FoodIDs)
 	TArray<UOrderHandle*> Candidates;
 	for (UOrderHandle* handle : waitList)
 	{
+		if (!handle || handle->IsExpired())
+		{
+			continue;
+		}
 		const FOrderData& order = handle->OrderData;
 		if (order.FoodIDs.Num() != Num)
 		{
@@ -463,7 +487,8 @@ bool AOrderSystem::PushFoods(const TArray<int>& FoodIDs)
 	for (UOrderHandle* handle : Candidates)
 	{
 		const float Percent = handle->GetPercent();
-		if (Percent < BestPercent)
+		if (Percent < BestPercent || (Percent == BestPercent
+			&& handle->GetOrderTimeout() - handle->waitTime < BestHandle->GetOrderTimeout() - BestHandle->waitTime))
 		{
 			BestPercent = Percent;
 			BestHandle = handle;
@@ -474,7 +499,7 @@ bool AOrderSystem::PushFoods(const TArray<int>& FoodIDs)
 	// 先取出绑定客人，避免移除句柄后访问
 	AGuestCharacter* OrderedGuest = BestHandle->Guest;
 
-	ABaseLevelBP::AddScore(this, BestHandle->GetOrderPrice());
+	ABaseLevelBP::AddScore(this, BestHandle->GetOrderSettlementPrice());
 	OnFinishOrder.Broadcast(BestHandle, BestHandle->OrderData);
 	waitList.Remove(BestHandle);
 	GEngine->AddOnScreenDebugMessage(-1, 2, FColor::Red, TEXT("完成订单(优先最短剩余时间)"));
@@ -506,7 +531,7 @@ bool AOrderSystem::PushFoodsForGuest(const TArray<int>& FoodIDs, AGuestCharacter
 	TArray<UOrderHandle*> Candidates;
 	for (UOrderHandle* handle : waitList)
 	{
-		if (!handle || handle->Guest != TargetGuest)
+		if (!handle || handle->Guest != TargetGuest || handle->IsExpired())
 		{
 			continue;
 		}
@@ -548,7 +573,8 @@ bool AOrderSystem::PushFoodsForGuest(const TArray<int>& FoodIDs, AGuestCharacter
 	for (UOrderHandle* handle : Candidates)
 	{
 		const float Percent = handle->GetPercent();
-		if (Percent < BestPercent)
+		if (Percent < BestPercent || (Percent == BestPercent
+			&& handle->GetOrderTimeout() - handle->waitTime < BestHandle->GetOrderTimeout() - BestHandle->waitTime))
 		{
 			BestPercent = Percent;
 			BestHandle = handle;
@@ -558,7 +584,7 @@ bool AOrderSystem::PushFoodsForGuest(const TArray<int>& FoodIDs, AGuestCharacter
 	// 3. 完成该订单
 	AGuestCharacter* OrderedGuest = BestHandle->Guest;
 
-	ABaseLevelBP::AddScore(this, BestHandle->GetOrderPrice());
+	ABaseLevelBP::AddScore(this, BestHandle->GetOrderSettlementPrice());
 	OnFinishOrder.Broadcast(BestHandle, BestHandle->OrderData);
 	waitList.Remove(BestHandle);
 	GEngine->AddOnScreenDebugMessage(-1, 2, FColor::Red, TEXT("完成订单(针对性上菜)"));
@@ -578,7 +604,7 @@ float UOrderHandle::GetPercent()
 	const float MaxWait = GetOrderMaxWaitTime();
 	if (MaxWait > 0.f)
 	{
-		return 1.f - waitTime / MaxWait;
+		return FMath::Clamp(1.f - waitTime / MaxWait, 0.f, 1.f);
 	}
 	return 1.f;
 }
@@ -649,25 +675,53 @@ int32 UOrderHandle::GetOrderPrice() const
 	return CachedPrice;
 }
 
+void UOrderHandle::InitializePatience(const ULevelOrderCfg* Config)
+{
+	const float Multiplier = Config ? FMath::Max(0.1f, Config->OrderWaitTimeMultiplier) : 1.f;
+	LateServeGraceSeconds = Config ? FMath::Max(0.f, Config->LateServeGraceSeconds) : 0.f;
+	LateServePriceMultiplier = Config ? FMath::Clamp(Config->LateServePriceMultiplier, 0.f, 1.f) : 1.f;
+	EnsureStatsCached();
+	NormalWaitTime = CachedMaxWaitTime * Multiplier;
+	MenuWaitTimes.Reset();
+	if (UFoodSystem* FS = GetFoodSystemForHandle(this))
+	{
+		for (const int32 FoodID : OrderData.FoodIDs)
+		{
+			MenuWaitTimes.Add(FoodID, FS->GetMenuData(FoodID).MaxWaitTime * Multiplier);
+		}
+	}
+}
+
+int32 UOrderHandle::GetOrderSettlementPrice() const
+{
+	const int32 Price = GetOrderPrice();
+	return IsLate() ? FMath::RoundToInt(Price * LateServePriceMultiplier) : Price;
+}
+
 float UOrderHandle::GetOrderMaxWaitTime(int32 MenuID) const
 {
-	// 传了菜单 ID：只查这一道菜（单菜直查菜品表，不参与整单缓存）
 	if (MenuID >= 0)
 	{
-		if (UFoodSystem* FS = GetFoodSystemForHandle(this))
-		{
-			const FMenuData Menu = FS->GetMenuData(MenuID);
-			if (Menu.FoodID >= 0)
-			{
-				return Menu.MaxWaitTime;
-			}
-		}
-		return 0.f;
+		const float* Wait = MenuWaitTimes.Find(MenuID);
+		return Wait ? *Wait : 0.f;
 	}
+	return NormalWaitTime;
+}
 
-	// 未传：整单最长等待时间（各菜取最大）
-	EnsureStatsCached();
-	return CachedMaxWaitTime;
+float UOrderHandle::GetOrderTimeout() const
+{
+	return NormalWaitTime > 0.f ? NormalWaitTime + LateServeGraceSeconds : 0.f;
+}
+
+bool UOrderHandle::IsLate() const
+{
+	return NormalWaitTime > 0.f && waitTime >= NormalWaitTime;
+}
+
+bool UOrderHandle::IsExpired() const
+{
+	const float Timeout = GetOrderTimeout();
+	return Timeout > 0.f && waitTime >= Timeout;
 }
 
 FString UOrderHandle::GetOrderDisplayName(int32 MenuID) const

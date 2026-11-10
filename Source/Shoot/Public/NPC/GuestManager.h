@@ -8,6 +8,7 @@
 #include "GuestManager.generated.h"
 
 class AGuestCharacter;
+class UTimeSystem;
 
 /** 打烊收尾完成广播：已点菜的客人都处理完（上完菜 / 等待超时离场）后才触发，表示"真正打烊、可以结束这一天" */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnClosingFinishedSignature);
@@ -55,7 +56,26 @@ public:
 
 	/** 自动生成间隔（秒），<=0 表示不自动生成 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GuestManager")
-	float SpawnInterval = 4.0f;
+	float SpawnInterval = 16.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GuestManager|Pacing", meta = (ClampMin = "0.1"))
+	float FirstRushDelay = 12.0f;
+
+	/** 两次波峰开始的间隔（秒），运行时至少比波峰持续时间多 0.1 秒 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GuestManager|Pacing", meta = (ClampMin = "0.2"))
+	float RushInterval = 70.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GuestManager|Pacing", meta = (ClampMin = "0.1"))
+	float RushDuration = 22.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GuestManager|Pacing", meta = (ClampMin = "0.1"))
+	float RushSpawnInterval = 3.5f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GuestManager|Pacing", meta = (ClampMin = "0.1"))
+	float SpawnRetryDelay = 3.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|GuestManager|Pacing")
+	bool bInCustomerRush = false;
 
 	/** 是否自动开始生成 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GuestManager")
@@ -125,6 +145,7 @@ public:
 	float QueueDebugSphereRadius = 30.0f;
 
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 	virtual void Tick(float DeltaSeconds) override;
 
@@ -205,17 +226,23 @@ private:
 	UFUNCTION()
 	void OnBusinessOpenChanged(bool bOpen);
 
-	/** 是否已绑定 TimeSystem 营业委托（懒绑定，避免 BeginPlay 顺序问题） */
-	bool bBoundBusiness = false;
+	TWeakObjectPtr<UTimeSystem> BoundTimeSystem;
+	UTimeSystem* BindBusiness();
 
-	/** 自动生成用的定时器 */
+	bool bSpawningPaused = true;
+	bool bCustomerPacingStarted = false;
+	double NextRushStartTime = 0.0;
+
+	/** 单次来客定时器；尚未找到 TimeSystem 时也用于重试绑定 */
 	FTimerHandle AutoSpawnTimerHandle;
+	FTimerHandle RushPhaseTimerHandle;
 
 	/** 座位占用情况自动打印用的定时器 */
 	FTimerHandle SeatStatusLogHandle;
 
-	/** 定时器回调（SetTimer 要求返回 void），内部调用 SpawnGuest */
 	void TickSpawn();
+	void ScheduleNextSpawn(float Delay);
+	void AdvanceRushPhase();
 
 	/** 客人变动后刷新剩余等待客人的排队序号（不再摆放位置，位置由徘徊决定） */
 	void RefreshQueueSlots();

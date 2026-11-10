@@ -870,7 +870,7 @@ void ABaseLevelBP::HandleOrderFinished(const UOrderHandle* Handle, const FOrderD
 	{
 		if (GI->economySystem)
 		{
-			GI->economySystem->OnOrderCompleted(Handle ? Handle->GetOrderPrice() : 0);
+			GI->economySystem->OnOrderCompleted(Handle ? Handle->GetOrderSettlementPrice() : 0);
 		}
 	}
 }
