@@ -11,6 +11,8 @@ class AGuestCharacter;
 class UTimeSystem;
 class UUserWidget;
 class UTexture2D;
+class USoundBase;
+class UBusinessSignWidget;
 
 /** 打烊收尾完成广播：已点菜的客人都处理完（上完菜 / 等待超时离场）后才触发，表示"真正打烊、可以结束这一天" */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnClosingFinishedSignature);
@@ -93,6 +95,30 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GuestManager|Pacing|UI", meta = (ClampMin = "0.1", Units = "s"))
 	float RushBannerSeconds = 3.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GuestManager|BusinessSign", meta = (ClampMin = "0.1", Units = "s"))
+	float BusinessSignSeconds = 3.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GuestManager|BusinessSign")
+	FText BusinessOpenText;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GuestManager|BusinessSign")
+	FText BusinessClosedText;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GuestManager|BusinessSign")
+	FText BusinessOpenDescription;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GuestManager|BusinessSign")
+	FText BusinessClosedDescription;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GuestManager|BusinessSign")
+	TObjectPtr<USoundBase> BusinessOpenSound;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GuestManager|BusinessSign")
+	TObjectPtr<USoundBase> BusinessClosedSound;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GuestManager|BusinessSign", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float BusinessSignSoundVolume = 0.7f;
 
 	/** 是否自动开始生成 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GuestManager")
@@ -262,6 +288,13 @@ private:
 	void AdvanceRushPhase();
 	void ShowRushBanner();
 	void HideRushBanner();
+	void ShowBusinessSign(bool bOpen);
+	void HideBusinessSign();
+
+	FTimerHandle BusinessSignTimerHandle;
+
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UBusinessSignWidget>> BusinessSigns;
 
 	FTimerHandle RushBannerTimerHandle;
 

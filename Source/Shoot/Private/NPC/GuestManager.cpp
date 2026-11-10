@@ -20,6 +20,8 @@
 #include "Components/TextBlock.h"
 #include "GameFramework/PlayerController.h"
 #include "UObject/ConstructorHelpers.h"
+#include "UI/BusinessSignWidget.h"
+#include "Sound/SoundBase.h"
 
 AGuestManager::AGuestManager()
 {
@@ -33,6 +35,14 @@ AGuestManager::AGuestManager()
 	RushBannerIcon = BannerIcon.Object;
 	RushBannerText = NSLOCTEXT("GuestManager", "CustomerRush", "客流波峰来袭！");
 	RushBannerDescription = NSLOCTEXT("GuestManager", "CustomerRushDescription", "来客速度加快，准备接单！");
+	BusinessOpenText = NSLOCTEXT("GuestManager", "BusinessOpen", "OPEN");
+	BusinessClosedText = NSLOCTEXT("GuestManager", "BusinessClosed", "CLOSED");
+	BusinessOpenDescription = NSLOCTEXT("GuestManager", "BusinessOpenDescription", "开始营业 · 欢迎光临");
+	BusinessClosedDescription = NSLOCTEXT("GuestManager", "BusinessClosedDescription", "已打烊 · 停止接待新客");
+	static ConstructorHelpers::FObjectFinder<USoundBase> OpenSound(TEXT("/Game/Audio/SFX/MS_UI_Select"));
+	BusinessOpenSound = OpenSound.Object;
+	static ConstructorHelpers::FObjectFinder<USoundBase> ClosedSound(TEXT("/Game/Audio/SFX/MS_UI_Hover"));
+	BusinessClosedSound = ClosedSound.Object;
 }
 
 void AGuestManager::BeginPlay()
@@ -96,6 +106,7 @@ void AGuestManager::BeginPlay()
 
 void AGuestManager::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	HideBusinessSign();
 	PauseSpawning();
 	if (UWorld* World = GetWorld())
 	{
@@ -269,6 +280,57 @@ void AGuestManager::HideRushBanner()
 		}
 	}
 	RushBanners.Reset();
+}
+
+void AGuestManager::ShowBusinessSign(bool bOpen)
+{
+	HideBusinessSign();
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+	{
+		APlayerController* PC = It->Get();
+		if (!PC || !PC->IsLocalController())
+		{
+			continue;
+		}
+		UBusinessSignWidget* Sign = CreateWidget<UBusinessSignWidget>(PC, UBusinessSignWidget::StaticClass());
+		if (!Sign)
+		{
+			continue;
+		}
+		Sign->InitializeSign(bOpen, BusinessSignSeconds, BusinessOpenText, BusinessClosedText,
+			BusinessOpenDescription, BusinessClosedDescription,
+			bOpen ? BusinessOpenSound : BusinessClosedSound, BusinessSignSoundVolume, BusinessSigns.IsEmpty());
+		Sign->AddToPlayerScreen(100);
+		Sign->SetDesiredSizeInViewport(FVector2D(560.f, 360.f));
+		Sign->SetPositionInViewport(FVector2D::ZeroVector, false);
+		Sign->SetAlignmentInViewport(FVector2D(0.5f, 0.5f));
+		Sign->SetAnchorsInViewport(FAnchors(0.5f, 0.5f));
+		BusinessSigns.Add(Sign);
+	}
+	World->GetTimerManager().SetTimer(BusinessSignTimerHandle,
+		this, &AGuestManager::HideBusinessSign, FMath::Max(BusinessSignSeconds, 0.1f), false);
+}
+
+void AGuestManager::HideBusinessSign()
+{
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(BusinessSignTimerHandle);
+	}
+	for (UBusinessSignWidget* Sign : BusinessSigns)
+	{
+		if (Sign)
+		{
+			Sign->RemoveFromParent();
+		}
+	}
+	BusinessSigns.Reset();
 }
 
 void AGuestManager::PrintSeatStatus()
@@ -868,6 +930,7 @@ void AGuestManager::HandleQueueTimeout(AGuestCharacter* Guest)
 
 void AGuestManager::OnBusinessOpenChanged(bool bOpen)
 {
+	ShowBusinessSign(bOpen);
 	if (bOpen)
 	{
 		// 开门营业：恢复自动生成客人（前提是 bAutoSpawn 开启）
