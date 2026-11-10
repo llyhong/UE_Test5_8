@@ -123,6 +123,7 @@ bool AItemActor::CanInteract()
 void AItemActor::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
+	RefreshInteractionHighlightRequests();
 
 	// ============ 交互范围调试可视化（控制台 Shoot.DebugInteract 1） ============
 	// 绿=当前拾取目标，灰=可拾取但不在目标位置。手持/烹饪中的物品不画，免得跟着手乱闪。
@@ -452,12 +453,38 @@ bool AItemActor::NeedOutLineEffect()
 
 void AItemActor::SetInteractionHighlight(bool bEnable)
 {
-	if (bInteractionHighlight == bEnable)
-	{
-		return;
-	}
-	bInteractionHighlight = bEnable;
+	bManualHighlightRequested = bEnable;
+	RefreshInteractionHighlightRequests();
+}
 
+void AItemActor::SetInteractionHighlightForPlayer(AActor* Player, bool bEnable)
+{
+	if (Player)
+	{
+		const TWeakObjectPtr<AActor> Requester(Player);
+		if (bEnable && IsValid(Player))
+		{
+			InteractionHighlightRequesters.Add(Requester);
+		}
+		else
+		{
+			InteractionHighlightRequesters.Remove(Requester);
+		}
+	}
+	RefreshInteractionHighlightRequests();
+}
+
+void AItemActor::RefreshInteractionHighlightRequests()
+{
+	for (auto It = InteractionHighlightRequesters.CreateIterator(); It; ++It)
+	{
+		if (!It->IsValid())
+		{
+			It.RemoveCurrent();
+		}
+	}
+	const bool bEnable = bManualHighlightRequested || !InteractionHighlightRequesters.IsEmpty();
+	bInteractionHighlight = bEnable;
 	if (bSetOutline != bEnable)
 	{
 		bSetOutline = bEnable;

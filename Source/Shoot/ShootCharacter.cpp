@@ -125,7 +125,7 @@ void AShootCharacter::GatheringMontageEnded(UAnimMontage* Montage, bool bInterru
 	// 正常路径已在 InteractCommit 结算；这里只兜底没配 Notify 的蒙太奇，被打断则作废
 	if (!bInterrupted && PendingGatherPlant && IsValid(PendingGatherPlant))
 	{
-		PendingGatherPlant->Harvest();
+		PendingGatherPlant->HarvestForCharacter(this);
 	}
 	PendingGatherPlant = nullptr;
 	bHasInteractFaceRotation = false;
@@ -173,7 +173,7 @@ void AShootCharacter::OnInteractMontageNotify(FName NotifyName, const FBranching
 		PendingGatherPlant = nullptr;
 		if (IsValid(Plant))
 		{
-			Plant->Harvest();
+			Plant->HarvestForCharacter(this);
 		}
 	}
 	else if (Payload.SequenceAsset == WateringMontage && PendingWaterPlant)
@@ -1180,7 +1180,7 @@ void AShootCharacter::InteractWithPlant()
 	{
 		OverlappingPlant->RemovePest();
 	}
-	else if (OverlappingPlant->IsFruiting())
+	else if (OverlappingPlant->CanHarvest())
 	{
 		// 触发摘取植被：播放 A_Gathering，到 InteractCommit 帧才收获；生效前移动会取消
 		if (PendingGatherPlant == nullptr)
@@ -1210,7 +1210,7 @@ void AShootCharacter::InteractWithPlant()
 				else
 				{
 					// 没有动画实例：直接收获
-					PendingGatherPlant->Harvest();
+					PendingGatherPlant->HarvestForCharacter(this);
 					PendingGatherPlant = nullptr;
 				}
 
@@ -1225,7 +1225,7 @@ void AShootCharacter::InteractWithPlant()
 			else
 			{
 				// 蒙太奇未播放（未配置）：直接收获
-				PendingGatherPlant->Harvest();
+				PendingGatherPlant->HarvestForCharacter(this);
 				PendingGatherPlant = nullptr;
 			}
 		}
@@ -1657,7 +1657,8 @@ void AShootCharacter::BuildInteractionOptions(TArray<FInteractOption, TInlineAll
 	// ---------------- Tier 2：环境交互（同层按距离决胜） ----------------
 
 	// 植物：浇水 / 驱虫 / 收获
-	if (OverlappingPlant)
+	if (IsValid(OverlappingPlant) && (OverlappingPlant->CanHarvest()
+		|| (!OverlappingPlant->UsesWildHarvest() && (OverlappingPlant->HasPest() || OverlappingPlant->NeedsWater()))))
 	{
 		AddOption(TierWorld, DistTo(OverlappingPlant), TEXT("植物"), OverlappingPlant, [this]()
 		{
@@ -1811,7 +1812,8 @@ void AShootCharacter::BuildInteractionOptions(TArray<FInteractOption, TInlineAll
 	}
 
 	// 生成箱：取料（手上有东西时按 E 应该是"放下"，不参与取料）
-	if (!PickingItem && IsSpawner())
+	AFoodSpawner* FoodSpawner = Cast<AFoodSpawner>(OverlappingItem);
+	if (!PickingItem && IsSpawner() && FoodSpawner && FoodSpawner->SpawnItemActorClass && FoodSpawner->CanSpawn())
 	{
 		AddOption(TierWorld, DistTo(OverlappingItem), TEXT("取料"), OverlappingItem, [this]()
 		{
@@ -1858,27 +1860,60 @@ void AShootCharacter::BuildInteractionOptions(TArray<FInteractOption, TInlineAll
 	}
 }
 
+void AShootCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (AItemActor* Item = HighlightedInteractionItem.Get())
+	{
+		Item->SetInteractionHighlightForPlayer(this, false);
+	}
+	HighlightedInteractionItem.Reset();
+	Super::EndPlay(EndPlayReason);
+}
+
+void AShootCharacter::UpdateItemInteractionHighlight()
+{
+	AItemActor* NewItem = IsLocallyControlled() && CharacterState != ECharacterState::ECS_Dead
+		&& !IsInteractionAnimPlaying() ? Cast<AItemActor>(InteractionPromptTarget) : nullptr;
+	// huanglily：描边只给食物 / 菜盘 / 取料箱；桌台与武器仍只用 E 提示，避免整块台面发亮。
+	if (NewItem && (NewItem->IsA<ADesk>() || NewItem->IsA<AWeapon>()))
+	{
+		NewItem = nullptr;
+	}
+	if (HighlightedInteractionItem.Get() != NewItem)
+	{
+		if (AItemActor* OldItem = HighlightedInteractionItem.Get())
+		{
+			OldItem->SetInteractionHighlightForPlayer(this, false);
+		}
+		HighlightedInteractionItem = NewItem;
+	}
+	if (IsValid(NewItem))
+	{
+		NewItem->SetInteractionHighlightForPlayer(this, true);
+	}
+}
+
 void AShootCharacter::RefreshInteractionPromptTarget()
 {
 	InteractionPromptTarget = nullptr;
-	if (!bEnableInteractionPrompt || !IsLocallyControlled() || CharacterState == ECharacterState::ECS_Dead)
+	if (bEnableInteractionPrompt && IsLocallyControlled() && CharacterState != ECharacterState::ECS_Dead)
 	{
-		return;
+		if (IsValid(OverlappingPest))
+		{
+			InteractionPromptTarget = OverlappingPest;
+		}
+		else
+		{
+			TArray<FInteractOption, TInlineAllocator<12>> Options;
+			BuildInteractionOptions(Options);
+			Options.StableSort(InteractionOptionLess);
+			if (!Options.IsEmpty())
+			{
+				InteractionPromptTarget = Options[0].Target;
+			}
+		}
 	}
-
-	if (IsValid(OverlappingPest))
-	{
-		InteractionPromptTarget = OverlappingPest;
-		return;
-	}
-
-	TArray<FInteractOption, TInlineAllocator<12>> Options;
-	BuildInteractionOptions(Options);
-	Options.StableSort(InteractionOptionLess);
-	if (!Options.IsEmpty())
-	{
-		InteractionPromptTarget = Options[0].Target;
-	}
+	UpdateItemInteractionHighlight();
 }
 
 UWidgetComponent* AShootCharacter::FindInteractionPromptAnchor(const AActor* Target) const
@@ -1922,7 +1957,7 @@ void AShootCharacter::UpdateInteractionPrompt()
 
 	if (const APlant* Plant = Cast<APlant>(Target))
 	{
-		if (!Plant->HasPest() && !Plant->IsFruiting() && !Plant->NeedsWater())
+		if (!Plant->CanHarvest() && !Plant->HasPest() && !Plant->NeedsWater())
 		{
 			InteractionPrompt->SetVisibility(false);
 			return;
@@ -2714,53 +2749,48 @@ void AShootCharacter::TryDiscoverItem(AItemActor* Item)
 
 bool AShootCharacter::AddItemToInventory(AItemActor* Item)
 {
-	if (!Item || Cast<AFoodSpawner>(Item))
+	return AddItemsToInventory(Item, 1);
+}
+
+bool AShootCharacter::AddItemsToInventory(AItemActor* Item, int32 Quantity)
+{
+	if (!IsValid(Item) || Cast<AFoodSpawner>(Item) || Quantity <= 0)
 	{
 		return false;
 	}
-	if (IsInventoryFull())
-	{
-		UE_LOG(LogShoot, Warning, TEXT("[%s] 背包已满，无法放入 %s"),
-			*GetName(), *Item->GetName());
-		return false;
-	}
-
-	// 入包前做首次发现判定（成功后物体随即被销毁，之后无法再读 ItemInfoRow）
-	TryDiscoverItem(Item);
-
-	// 同类物品堆叠：已存在相同 ItemClass 的槽位则数量+1，不再新增槽位
 	UClass* InClass = Item->GetClass();
-	for (FInventorySlot& Existing : InventoryItems)
+	const int32 ExistingIndex = InventoryItems.IndexOfByPredicate([InClass](const FInventorySlot& Slot)
 	{
-		if (Existing.ItemClass == InClass)
+		return Slot.ItemClass == InClass;
+	});
+	if ((ExistingIndex == INDEX_NONE && IsInventoryFull())
+		|| (ExistingIndex != INDEX_NONE && InventoryItems[ExistingIndex].Quantity > MAX_int32 - Quantity))
+	{
+		UE_LOG(LogShoot, Warning, TEXT("[%s] 背包无法容纳 %s x%d"), *GetName(), *Item->GetName(), Quantity);
+		return false;
+	}
+
+	// huanglily：先确认整批可容纳，同类堆叠不占新槽；成功后才触发发现与销毁。
+	if (ExistingIndex != INDEX_NONE)
+	{
+		InventoryItems[ExistingIndex].Quantity += Quantity;
+	}
+	else
+	{
+		FInventorySlot Slot;
+		Slot.ItemClass = InClass;
+		Slot.ItemInfoRow = Item->ItemInfoRow;
+		Slot.FoodIdArray = Item->FoodIdArray;
+		if (const FItemActorInfo* InfoRow = Item->ItemInfoRow.GetRow<FItemActorInfo>(TEXT("ItemInfo")))
 		{
-			Existing.Quantity++;
-			Item->Destroy(); // 入包即删除世界中的物体
-			OnInventoryChanged.Broadcast();
-			UE_LOG(LogShoot, Log, TEXT("[%s] 物品 %s 已堆叠，当前数量 %d(槽位数 %d)"),
-				*GetName(), *Existing.DisplayName, Existing.Quantity, InventoryItems.Num());
-			return true;
+			Slot.DisplayName = InfoRow->ItemDes;
 		}
+		Slot.Quantity = Quantity;
+		InventoryItems.Add(Slot);
 	}
-
-	// 记录物体的"类型/信息"，随后销毁世界中的物体(背包只保留轻量记录)
-	FInventorySlot Slot;
-	Slot.ItemClass = InClass;            // 取出时按此类重新生成(保留蓝图子类)；类型已由 ItemClass 体现，无需单独枚举
-	Slot.ItemInfoRow = Item->ItemInfoRow;
-	Slot.FoodIdArray = Item->FoodIdArray;
-	// 显示名优先取自数据表行的 ItemDes
-	if (const FItemActorInfo* InfoRow = Item->ItemInfoRow.GetRow<FItemActorInfo>(TEXT("ItemInfo")))
-	{
-		Slot.DisplayName = InfoRow->ItemDes;
-	}
-	Slot.Quantity = 1;
-	InventoryItems.Add(Slot);
-
-	Item->Destroy(); // 入包即删除世界中的物体
-
+	TryDiscoverItem(Item);
+	Item->Destroy();
 	OnInventoryChanged.Broadcast();
-	UE_LOG(LogShoot, Log, TEXT("[%s] 物品 %s 已放入背包(已销毁世界实例)，当前数量 %d"),
-		*GetName(), *Slot.DisplayName, InventoryItems.Num());
 	return true;
 }
 

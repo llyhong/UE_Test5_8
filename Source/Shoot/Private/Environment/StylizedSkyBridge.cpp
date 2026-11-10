@@ -121,6 +121,23 @@ void UStylizedSkyBridge::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 	}
 }
 
+void UStylizedSkyBridge::UpdateLightingWeatherBlend(const UTimeSystem& Time, float DeltaTime)
+{
+	if (!bLightingWeatherBlendInitialized || !Time.bStabilizeBusinessLighting)
+	{
+		LightingWeatherBlend = WeatherBlend;
+		bLightingWeatherBlendInitialized = true;
+	}
+	else if (!Time.IsBusinessVisualFocusActive())
+	{
+		const float Alpha = LightingRecoverySeconds > 0.f
+			? 1.f - FMath::Exp(-FMath::Max(0.f, DeltaTime) / LightingRecoverySeconds) : 1.f;
+		LightingWeatherBlend = LightingWeatherBlend.LerpTo(WeatherBlend, Alpha);
+	}
+	// huanglily：focused 保留进入时已经显示的天气光照，恢复途中再次开门也不瞬跳；
+	// RainStrength / 湿度 / 积水与雨声始终走真实天气，不因稳光停止下雨。
+}
+
 void UStylizedSkyBridge::UpdateVisuals(const UTimeSystem& Time, float DeltaTime)
 {
 	AActor* Owner = GetOwner();
@@ -131,7 +148,8 @@ void UStylizedSkyBridge::UpdateVisuals(const UTimeSystem& Time, float DeltaTime)
 	{
 		return;
 	}
-	const double HourSinceSunrise = FMath::Fmod(Time.GetCurrentHour() - Time.SunriseHour + 24.0, 24.0);
+	UpdateLightingWeatherBlend(Time, DeltaTime);
+	const double HourSinceSunrise = FMath::Fmod(Time.GetVisualHour() - Time.SunriseHour + 24.0, 24.0);
 	if (Time.bDriveSun)
 	{
 		VisualSkyTime = HourSinceSunrise < DayHours
@@ -139,7 +157,7 @@ void UStylizedSkyBridge::UpdateVisuals(const UTimeSystem& Time, float DeltaTime)
 			: DayLength + (HourSinceSunrise - DayHours) / (24.0 - DayHours) * NightLength;
 	}
 	const float Rain = WeatherBlend.RainStrength;
-	WriteNumber(Owner, TEXT("Overcast Amount"), WeatherBlend.CloudCoverage);
+	WriteNumber(Owner, TEXT("Overcast Amount"), LightingWeatherBlend.CloudCoverage);
 	WriteNumber(Owner, TEXT("Rain Strength"), Rain);
 	WriteNumber(Owner, TEXT("Rain Wetness"), Rain);
 	WriteNumber(Owner, TEXT("Rain Puddles"), Rain * ReadNumber(Owner, TEXT("Rain Max Puddle Amount")));
@@ -174,22 +192,22 @@ void UStylizedSkyBridge::UpdateVisuals(const UTimeSystem& Time, float DeltaTime)
 	UpdateRainStreaks(DeltaTime, Rain);
 
 	// 始终以初始化时的基础光照为基准：直接乘当前值会逐帧叠加衰减，几十秒后太阳/天光归零、场景全黑。
-	Sun->SetIntensity(SunBaseIntensity * WeatherBlend.SunIntensityScale);
-	Sun->SetLightColor(SunBaseColor * WeatherBlend.SunColorTint);
-	SkyLight->SetIntensity(SkyLightBaseIntensity * WeatherBlend.SkyLightIntensityScale);
-	SkyLight->SetLightColor(SkyLightBaseColor * WeatherBlend.SkyLightColor);
-	Fog->SetFogDensity(WeatherBlend.FogDensity);
-	Fog->SetFogHeightFalloff(WeatherBlend.FogHeightFalloff);
-	Fog->SetFogMaxOpacity(WeatherBlend.FogMaxOpacity);
-	Fog->SetFogInscatteringColor(WeatherBlend.FogColor);
+	Sun->SetIntensity(SunBaseIntensity * LightingWeatherBlend.SunIntensityScale);
+	Sun->SetLightColor(SunBaseColor * LightingWeatherBlend.SunColorTint);
+	SkyLight->SetIntensity(SkyLightBaseIntensity * LightingWeatherBlend.SkyLightIntensityScale);
+	SkyLight->SetLightColor(SkyLightBaseColor * LightingWeatherBlend.SkyLightColor);
+	Fog->SetFogDensity(LightingWeatherBlend.FogDensity);
+	Fog->SetFogHeightFalloff(LightingWeatherBlend.FogHeightFalloff);
+	Fog->SetFogMaxOpacity(LightingWeatherBlend.FogMaxOpacity);
+	Fog->SetFogInscatteringColor(LightingWeatherBlend.FogColor);
 
 	if (EnvironmentParameters)
 	{
-		UKismetMaterialLibrary::SetScalarParameterValue(this, EnvironmentParameters, TEXT("Overcast"), WeatherBlend.CloudCoverage);
+		UKismetMaterialLibrary::SetScalarParameterValue(this, EnvironmentParameters, TEXT("Overcast"), LightingWeatherBlend.CloudCoverage);
 		UKismetMaterialLibrary::SetScalarParameterValue(this, EnvironmentParameters, TEXT("Rain Strength"), Rain);
 		UKismetMaterialLibrary::SetScalarParameterValue(this, EnvironmentParameters, TEXT("Rain Wetness"), Rain);
 		UKismetMaterialLibrary::SetScalarParameterValue(this, EnvironmentParameters, TEXT("Rain Puddles"), ReadNumber(Owner, TEXT("Rain Puddles")));
-		UKismetMaterialLibrary::SetScalarParameterValue(this, EnvironmentParameters, TEXT("Weather Wind Multiplier"), WeatherBlend.WindStrength);
+		UKismetMaterialLibrary::SetScalarParameterValue(this, EnvironmentParameters, TEXT("Weather Wind Multiplier"), LightingWeatherBlend.WindStrength);
 	}
 }
 

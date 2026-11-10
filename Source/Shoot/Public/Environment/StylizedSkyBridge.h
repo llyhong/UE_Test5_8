@@ -30,6 +30,10 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "Shoot|StylizedSky")
 	TObjectPtr<UMaterialParameterCollection> EnvironmentParameters;
 
+	/** 营业 / 收尾结束后天气光照恢复的时间常数（秒）；0 为立即恢复，雨效不使用此混合。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|StylizedSky|Lighting", meta = (ClampMin = "0"))
+	float LightingRecoverySeconds = 12.f;
+
 	// ------------------- 程序化雨幕 -------------------
 	// UDS 的 NS_RainWithSplash 在本工程 5.8 下不产生可见粒子（CPU Sim + 烘焙参数，激活后渲染为空），
 	// 雨天改用 InstancedStaticMesh 雨丝：由天气 RainStrength 驱动，保证任何视角都能看到雨。
@@ -89,6 +93,7 @@ protected:
 private:
 	bool InitializeVisuals();
 	void UpdateVisuals(const UTimeSystem& Time, float DeltaTime);
+	void UpdateLightingWeatherBlend(const UTimeSystem& Time, float DeltaTime);
 	void EnsureRainStreaks();
 	void UpdateRainStreaks(float DeltaTime, float Rain);
 
@@ -130,7 +135,10 @@ private:
 	float SkyLightBaseIntensity = 0.f;
 	FLinearColor SkyLightBaseColor = FLinearColor::White;
 
+	// 真实天气继续驱动雨丝 / 湿度 / 积水；光照只使用独立保存的混合。
 	FWeatherBlendState WeatherBlend;
+	FWeatherBlendState LightingWeatherBlend;
+	bool bLightingWeatherBlendInitialized = false;
 	double VisualSkyTime = 0.0;
 	bool bInitialized = false;
 	bool bVisualsReady = false;

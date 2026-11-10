@@ -91,7 +91,7 @@ public:
 	bool bShowDebugInfo = false;
 
 	// ========== 营业时段（小时制：与 DayProgress 映射的 DayStartHour~DayEndHour 同一坐标系） ==========
-	/** 可开始营业的小时（默认 8 = 早上 8 点；玩家到大门按 E 开门后才真正营业） */
+	/** 可开始营业的小时；自动营业关闭时仍可由玩家到大门按 E 开门 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Time|Business")
 	float OpenHour = 18.f;
 
@@ -99,12 +99,11 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Time|Business")
 	float CloseHour = 22.f;
 
-	/** 是否自动营业：开启后进入营业时段（OpenHour）即自动开门，无需玩家到大门按 E 开门。
-	 *  默认关闭——餐厅默认“打烊/备货、灯灭”，需玩家到大门按 E 开门才真正营业并点亮营业灯饰。 */
+	/** 默认自动营业；当日手动打烊后不再自动重开，旧日客人收尾完成后才允许自动开门。 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Time|Business")
-	bool bAutoOpenBusiness = false;
+	bool bAutoOpenBusiness = true;
 
-	/** 当前营业状态（运行时）：玩家已开门且仍处于营业时段内才为 true */
+	/** 当前营业状态（运行时）：自动或手动开门且尚未打烊 */
 	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Time|Business")
 	bool bIsBusinessOpen = false;
 
@@ -124,19 +123,47 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Time")
 	float DayProgress = 0.f;
 
-	/** 当前一天内的小时（落在 DayStartHour~DayEndHour，默认 8~22），由 DayProgress 映射；营业 / 太阳都以此为准 */
+	/** 经营时钟：由 DayProgress 映射，日期 / 营业 / UI 始终使用真实经营小时。 */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Time")
 	float GetCurrentHour() const { return DayStartHour + DayProgress * (DayEndHour - DayStartHour); }
+
+	// ========== 营业视觉（不改变经营时钟或游戏日长度） ==========
+	/** 营业及打烊收尾期间锁住视觉小时；关闭后恢复原来的实时昼夜 / 天气表现。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Time|Lighting")
+	bool bStabilizeBusinessLighting = true;
+
+	/** 营业 / 收尾期间固定的视觉小时（默认正午，阴影短且静止）；经营时钟照常走。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Time|Lighting", meta = (ClampMin = "0", ClampMax = "24"))
+	float BusinessStartVisualHour = 12.f;
+
+	/** 开门时视觉小时顺时针过渡到 BusinessStartVisualHour 的速度（游戏小时 / 真实秒）；0 为瞬切。
+	 *  过渡只在开门最初几秒（首位客人到店前）完成，之后整段营业光影静止。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Time|Lighting", meta = (ClampMin = "0"))
+	float BusinessFocusTransitionHoursPerSecond = 3.f;
+
+	/** 收尾结束后顺时针追赶经营小时的速度（游戏小时 / 真实秒）。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Time|Lighting", meta = (ClampMin = "0"))
+	float VisualRecoveryHoursPerSecond = 1.f;
+
+	UPROPERTY(Transient, BlueprintReadOnly, Category = "Shoot|Time|Lighting")
+	float VisualHour = 8.f;
+
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Time|Lighting")
+	float GetVisualHour() const { return bStabilizeBusinessLighting ? VisualHour : GetCurrentHour(); }
+
+	/** 稳光开启且正在营业或任意 GuestManager 尚在收尾；不依赖 UObject 默认 GetWorld。 */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Time|Lighting")
+	bool IsBusinessVisualFocusActive() const;
 
 	/** 当前是否处于可营业时段（OpenHour <= 小时 < CloseHour；假设不跨午夜） */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Time|Business")
 	bool IsWithinBusinessHours() const;
 
-	/** 是否已营业（玩家已开门且仍在营业时段内） */
+	/** 是否已营业（自动或手动开门且尚未打烊） */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Time|Business")
 	bool IsBusinessOpen() const { return bIsBusinessOpen; }
 
-	/** 玩家到大门按 E 开门营业：成功返回 true（已营业也返回 true），未到营业时段返回 false */
+	/** 显式开门清除当日自动开门抑制；成功返回 true（已营业也返回 true），时段外返回 false。 */
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Time|Business")
 	bool OpenBusiness();
 
@@ -152,7 +179,7 @@ public:
 	UPROPERTY(Transient, BlueprintReadOnly, Category = "Shoot|Time|Sun")
 	TObjectPtr<AActor> StylizedSkyActor;
 
-	/** 是否自动驱动太阳（角度 / 颜色 / 强度随 DayProgress 变化）；关闭则只走日期 */
+	/** 是否自动驱动太阳（角度 / 颜色 / 强度随 GetVisualHour 变化）；关闭保留原太阳行为 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Time|Sun")
 	bool bDriveSun = true;
 
@@ -191,7 +218,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Time|Sun")
 	float SunsetHour = 18.f;
 
-	/** 根据当前 DayProgress 更新太阳方向 / 颜色 / 强度（SunLight 为空或 bDriveSun=false 时跳过） */
+	/** 根据 GetVisualHour 更新太阳方向 / 颜色 / 强度（SunLight 为空或 bDriveSun=false 时跳过） */
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Time|Sun")
 	void UpdateSun();
 
@@ -227,7 +254,18 @@ public:
 	}
 
 private:
-	void AdvanceOneDay();
-	float Accum = 0.f;
+	void AdvanceOneDay(bool bResetDayProgress = false);
+	void UpdateBusinessState();
+	void UpdateVisualHour(float DeltaTime);
+	bool HasPendingClosingGuests() const;
+
+	double Accum = 0.0;
 	bool bPausedState = false;
+	bool bBusinessClosedForDay = false;
+
+	// 用连续小时追赶，不每帧从两个已回绕的 float 推断方向，避免追平后误判为再转一整圈。
+	double VisualRecoveryHour = 0.0;
+	double VisualRecoveryTargetHour = 0.0;
+	double LastVisualClockHour = 0.0;
+	bool bVisualRecoveryInitialized = false;
 };

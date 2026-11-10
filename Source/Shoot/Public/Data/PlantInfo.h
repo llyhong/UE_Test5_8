@@ -45,6 +45,26 @@ struct FPlantInfo : public FTableRowBase
 	GENERATED_BODY()
 
 public:
+	// ========== 独立野外采摘（不走浇水、虫害、照料或熟度） ==========
+	/** 默认启用，旧数据表行无需补填；关闭后使用原种植逻辑。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|WildHarvest")
+	bool bWildHarvest = true;
+
+	/** 成功采摘后再次可采的秒数；运行时也保证至少 1 秒。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|WildHarvest",
+		meta = (EditCondition = "bWildHarvest", ClampMin = "1.0", Units = "s"))
+	float WildRespawnSeconds = 120.f;
+
+	/** 整株作物采空后的显示阶段；挂果植株保持最后阶段，仅移除果实。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|WildHarvest",
+		meta = (EditCondition = "bWildHarvest && !bShowFruitOnPlant", ClampMin = "0"))
+	int32 WildDepletedStageIndex = 0;
+
+	/** 交互球与角色胶囊外额外允许的距离（厘米），避免边缘判定抖动。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|WildHarvest",
+		meta = (EditCondition = "bWildHarvest", ClampMin = "0.0", Units = "cm"))
+	float WildHarvestRangeTolerance = 20.f;
+
 	// ========== 生长阶段（可配置，按数组顺序推进） ==========
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Growth")
 	TArray<FPlantGrowthStage> GrowthStages;

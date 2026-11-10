@@ -85,6 +85,9 @@ private:
 
 	/** 当前是否是角色的"唯一交互目标"（描边的唯一依据） */
 	bool bInteractionHighlight = false;
+	bool bManualHighlightRequested = false;
+	TSet<TWeakObjectPtr<AActor>> InteractionHighlightRequesters;
+	void RefreshInteractionHighlightRequests();
 
 	/** 是否在树上结果中（由植物生成果实时开启，采摘/离树时关闭），控制熟度计时是否推进 */
 	bool bTrackRipening = false;
@@ -117,10 +120,14 @@ public:
 
 	/** 交互高亮（描边）：由角色按"当前唯一交互目标"统一点亮/熄灭。
 	 *  旧实现是每个物体在 Overlap 时按自己的 Hovering 状态点亮，站在一堆食材中间会亮成一片；
-	 *  现在描边只认这一个开关，同一时刻全场景最多一个物体亮着。
-	 *  APlant 重写了它：还要满足"缺水 / 可采摘"才真的画出描边。 */
+	 *  每位本地玩家只申请当前目标；共享 CustomDepth 呈现各玩家目标的并集。
+	 *  植物另由 APlant 按可采摘等状态管理。 */
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Item")
 	virtual void SetInteractionHighlight(bool bEnable);
+
+	/** 每个本地玩家独立申请描边；一位玩家移开不会清掉另一位的目标。 */
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Item")
+	void SetInteractionHighlightForPlayer(AActor* Player, bool bEnable);
 
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Item")
 	FORCEINLINE bool IsInteractionHighlighted() const { return bInteractionHighlight; }

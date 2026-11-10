@@ -18,6 +18,7 @@ class UMaterialInstanceDynamic;
 class UDecalComponent;
 class USoundBase;
 class UNiagaraSystem;
+class AWeatherSystem;
 
 /** 阶段变化时广播（供 UI / 蓝图刷新），参数为新阶段索引与阶段名 */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnPlantStageChanged, int32, StageIndex, FName, StageName);
@@ -61,6 +62,31 @@ public:
 	/** 收获：在挂点生成果实，返回是否成功（需处于结果阶段且尚未收获过） */
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Plant")
 	bool Harvest();
+
+	/** 野外采摘使用调用者本人，不依赖最后进入范围的角色缓存。普通模式不走此接口。 */
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Plant|WildHarvest")
+	bool HarvestForCharacter(AShootCharacter* Character);
+
+	UFUNCTION(BlueprintPure, Category = "Shoot|Plant|WildHarvest")
+	bool UsesWildHarvest() const;
+
+	/** 仅查询植株配置、解锁和采摘状态；角色/距离由采摘入口校验。 */
+	UFUNCTION(BlueprintPure, Category = "Shoot|Plant")
+	bool CanHarvest() const;
+
+	UFUNCTION(BlueprintPure, Category = "Shoot|Plant|WildHarvest")
+	float GetWildRegrowRemaining() const;
+
+	/** 留空使用去 PIE 前缀的地图名|Actor FName；重命名或运行时生成点可指定完整稳定 Key。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Plant|Save")
+	FName PlantKeyOverride = NAME_None;
+
+	/** 只向 GameInstance 写运行时快照，不自行写盘。 */
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Plant|Save")
+	void SaveWildHarvestState();
+
+	/** BeginPlay、加载存档或新游戏时，从 GameInstance 恢复当前植株。 */
+	void RestoreWildHarvestState();
 
 	// ========== 按 E 采摘：直接入背包并让植被消失 ==========
 	/** 按 E 采摘后是否直接把果实放入玩家背包（true=直接入背包并销毁植被；
@@ -143,18 +169,26 @@ public:
 
 	/** 口渴窗口是否正打开（仅 bUseThirstWindows 植物有效）：窗口内浇水可获得“时机正好”反馈并恢复全速生长 */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Plant|Thirst")
-	bool IsThirstWindowOpen() const { return bThirstWindowOpen; }
+	bool IsThirstWindowOpen() const { return !UsesWildHarvest() && bThirstWindowOpen; }
 
 	/** 口渴窗口剩余时间（秒），未打开时为 0 */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Plant|Thirst")
-	float GetThirstWindowRemaining() const { return bThirstWindowOpen ? ThirstWindowRemaining : 0.f; }
+	float GetThirstWindowRemaining() const { return IsThirstWindowOpen() ? ThirstWindowRemaining : 0.f; }
 
 	/** 设置浇水提示抑制：浇水动作完成后调用以取消高亮；植株重新变干或玩家离开范围后自动恢复 */
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Plant")
 	void SetWaterHintSuppressed(bool bSuppress);
 
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Plant")
-	bool HasPest() const { return bPest; }
+	bool HasPest() const { return !UsesWildHarvest() && bPest; }
+
+	/** 下雨时是否自动获得水分（位于 RainExclusionVolume 内的植株不淋雨） */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Plant|Rain")
+	bool bWateredByRain = true;
+
+	/** 当前是否正在淋雨（淋雨期间保持满水，不需要浇水） */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Plant|Rain")
+	bool IsRainedOn() const { return bRainedOn; }
 
 	/** 阶段变化通知（蓝图可重载） */
 	UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|Plant")
@@ -231,7 +265,7 @@ public:
 
 	/** 当前显示的土壤湿度 0..1（已含过渡） */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Plant|Soil")
-	float GetSoilWetness() const { return SoilWetness; }
+	float GetSoilWetness() const { return UsesWildHarvest() ? 0.f : SoilWetness; }
 
 protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Components")
@@ -293,6 +327,16 @@ protected:
 	UPROPERTY()
 	int32 CurrentStageIndex = 0;
 
+	// 单调时钟截止时间，避免 Tick/重叠门控或区域卸载暂停恢复。
+	double WildRegrowDeadline = 0.0;
+	bool bWildHarvestInProgress = false;
+	bool bWildStateInitialized = false;
+	FString WildSaveKey;
+
+	FString BuildWildSaveKey() const;
+	void ApplyWildHarvestVisualState();
+	void CompleteWildRegrow();
+
 	float StageTimer = 0.f;
 	float WaterLevel = 0.f;
 	bool bPest = false;
@@ -316,6 +360,14 @@ protected:
 
 	/** 是否启用需水窗口：以 DataTable 配置为准；控制台 Game.PlantThirstWindows 1 可全局强制开启用于 A/B 验证 */
 	bool UsesThirstWindows() const;
+
+	// ========== 雨水 ==========
+	bool bRainedOn = false;
+	float RainCheckRemaining = 0.f;
+	TWeakObjectPtr<AWeatherSystem> CachedWeatherSystem;
+
+	void UpdateRainState(float DeltaTime);
+	void ApplyRainWater(const FPlantInfo& Info);
 
 	// ========== 照料连击 ==========
 	/** 最近一次浇水 / 驱虫的世界时间（初始为很小的值，保证未操作时判定为超时） */

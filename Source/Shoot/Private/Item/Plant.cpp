@@ -8,6 +8,11 @@
 #include "Game/BaseGameInstance.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/SphereComponent.h"
+#include "Components/CapsuleComponent.h"
+#include "Engine/World.h"
+#include "HAL/PlatformTime.h"
+#include "Templates/UnrealTemplate.h"
+#include "Misc/ScopeExit.h"
 #include "Components/DecalComponent.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "UObject/ConstructorHelpers.h"
@@ -18,6 +23,9 @@
 #include "NiagaraSystem.h"
 #include "Sound/SoundBase.h"
 #include "HAL/IConsoleManager.h"
+#include "EngineUtils.h"
+#include "Weather/WeatherSystem.h"
+#include "Environment/RainExclusionVolume.h"
 
 /** 调试用：1=强制所有需要浇水的植物启用需水窗口（不修改 DataTable，方便 A/B 对比） */
 static TAutoConsoleVariable<int32> CVarForcePlantThirstWindows(
@@ -132,6 +140,12 @@ void APlant::BeginPlay()
 	CarePestTime = -1000.f;
 	bPestAppearedThisCycle = false;
 
+	if (UsesWildHarvest())
+	{
+		RestoreWildHarvestState();
+		return;
+	}
+
 	ApplyStageMesh(CurrentStageIndex);
 	DisableReceivingDecals(this);
 	InitSoilDecal();
@@ -160,7 +174,20 @@ void APlant::BeginPlay()
 
 void APlant::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	SaveWildHarvestState();
 	GetWorldTimerManager().ClearTimer(RefruitTimerHandle);
+	if (UsesWildHarvest())
+	{
+		for (AItemActor* Fruit : SpawnedFruits)
+		{
+			if (IsValid(Fruit))
+			{
+				Fruit->StopRipening();
+				Fruit->Destroy();
+			}
+		}
+		SpawnedFruits.Empty();
+	}
 	if (UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetGameInstance()))
 	{
 		GI->OnIngredientsUnlocked.RemoveDynamic(this, &APlant::HandleIngredientsUnlocked);
@@ -171,6 +198,261 @@ void APlant::EndPlay(const EEndPlayReason::Type EndPlayReason)
 const FPlantInfo* APlant::GetPlantInfo() const
 {
 	return PlantInfoRow.GetRow<FPlantInfo>(TEXT("PlantInfo"));
+}
+
+bool APlant::UsesWildHarvest() const
+{
+	const FPlantInfo* Info = GetPlantInfo();
+	return Info && Info->bWildHarvest;
+}
+
+bool APlant::CanHarvest() const
+{
+	const FPlantInfo* Info = GetPlantInfo();
+	if (!Info || !Info->FruitClass || !IsFruiting() || bHarvested || IsActorBeingDestroyed()
+		|| (IngredientUnlockID >= 0 && !bIngredientUnlocked))
+	{
+		return false;
+	}
+	if (Info->bWildHarvest)
+	{
+		return bWildStateInitialized && !bWildHarvestInProgress && GetWildRegrowRemaining() <= 0.f;
+	}
+	return SpawnedFruits.Num() > 0;
+}
+
+float APlant::GetWildRegrowRemaining() const
+{
+	return UsesWildHarvest() && bWildStateInitialized
+		? static_cast<float>(FMath::Max(0.0, WildRegrowDeadline - FPlatformTime::Seconds())) : 0.f;
+}
+
+FString APlant::BuildWildSaveKey() const
+{
+	if (!PlantKeyOverride.IsNone())
+	{
+		return PlantKeyOverride.ToString();
+	}
+	const UWorld* World = GetWorld();
+	const FString MapName = World ? UWorld::RemovePIEPrefix(World->GetMapName()) : FString();
+	return FString::Printf(TEXT("%s|%s"), *MapName, *GetFName().ToString());
+}
+
+void APlant::SaveWildHarvestState()
+{
+	if (!UsesWildHarvest() || !bWildStateInitialized)
+	{
+		return;
+	}
+	if (UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetGameInstance()))
+	{
+		GI->SetWildPlantRegrowRemaining(WildSaveKey, GetWildRegrowRemaining());
+	}
+}
+
+void APlant::RestoreWildHarvestState()
+{
+	const FPlantInfo* Info = GetPlantInfo();
+	if (!Info || !Info->bWildHarvest || Info->GrowthStages.IsEmpty() || bWildHarvestInProgress)
+	{
+		return;
+	}
+
+	{
+		TGuardValue<bool> StateGuard(bWildHarvestInProgress, true);
+		GetWorldTimerManager().ClearTimer(RefruitTimerHandle);
+		for (AItemActor* Fruit : SpawnedFruits)
+		{
+			if (IsValid(Fruit))
+			{
+				Fruit->StopRipening();
+				Fruit->Destroy();
+			}
+		}
+		SpawnedFruits.Empty();
+
+		WildSaveKey = BuildWildSaveKey();
+		const UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetGameInstance());
+		const float Remaining = GI ? GI->GetWildPlantRegrowRemaining(WildSaveKey) : 0.f;
+		WildRegrowDeadline = Remaining > 0.f ? FPlatformTime::Seconds() + Remaining : 0.0;
+		bWildStateInitialized = true;
+		bHarvested = Remaining > 0.f;
+		StageTimer = 0.f;
+		RegrowDelayRemaining = 0.f;
+		WaterLevel = 0.f;
+		bWatered = false;
+		bPest = false;
+		PestTimer = 0.f;
+		bRainedOn = false;
+		ResetThirstWindowState();
+		CareWaterTime = -1000.f;
+		CarePestTime = -1000.f;
+		bPestAppearedThisCycle = false;
+
+		ApplyWildHarvestVisualState();
+		DisableReceivingDecals(this);
+		InitSoilDecal(); // 隐藏贴花而非移除组件或资产。
+		if (!bHarvested)
+		{
+			SpawnFruit();
+		}
+	}
+	if (!bHarvested)
+	{
+		OnReadyToHarvest();
+	}
+	UpdateHarvestHintOutline();
+}
+
+void APlant::ApplyWildHarvestVisualState()
+{
+	const FPlantInfo* Info = GetPlantInfo();
+	if (!Info || Info->GrowthStages.IsEmpty())
+	{
+		return;
+	}
+	const int32 FinalStage = Info->GrowthStages.Num() - 1;
+	CurrentStageIndex = bHarvested && !Info->bShowFruitOnPlant
+		? FMath::Clamp(Info->WildDepletedStageIndex, 0, FinalStage) : FinalStage;
+
+	// 直接跳阶段时，解析空 StageMesh 的继承，不逐阶段缩放以免扰动交互范围。
+	if (PlantMesh && !Info->GrowthStages[CurrentStageIndex].StageMesh)
+	{
+		for (int32 Index = CurrentStageIndex - 1; Index >= 0; --Index)
+		{
+			if (Info->GrowthStages[Index].StageMesh)
+			{
+				PlantMesh->SetStaticMesh(Info->GrowthStages[Index].StageMesh);
+				break;
+			}
+		}
+	}
+	ApplyStageMesh(CurrentStageIndex);
+	OnStageChanged(CurrentStageIndex, GetCurrentStageName());
+	OnPlantStageChanged.Broadcast(CurrentStageIndex, GetCurrentStageName());
+}
+
+void APlant::CompleteWildRegrow()
+{
+	{
+		TGuardValue<bool> StateGuard(bWildHarvestInProgress, true);
+		WildRegrowDeadline = 0.0;
+		bHarvested = false;
+		StageTimer = 0.f;
+		ApplyWildHarvestVisualState();
+		SpawnFruit(); // 野外挂果禁用熟度，整株作物无需生成隐藏果实。
+		SaveWildHarvestState();
+	}
+	OnReadyToHarvest();
+	UpdateHarvestHintOutline();
+}
+
+bool APlant::HarvestForCharacter(AShootCharacter* Character)
+{
+	// 游戏线程同步事务锁：防止 Spawn/入包/蓝图广播重入，也防同屏角色重复收获。
+	if (!IsInGameThread() || !IsValid(Character) || Character->IsActorBeingDestroyed()
+		|| Character->GetWorld() != GetWorld() || !UsesWildHarvest() || bWildHarvestInProgress
+		|| IsActorBeingDestroyed() || !InteractionSphere)
+	{
+		return false;
+	}
+
+	const UCapsuleComponent* Capsule = Character->GetCapsuleComponent();
+	if (!Capsule)
+	{
+		return false;
+	}
+	const FPlantInfo* Info = GetPlantInfo();
+	const float Tolerance = FMath::IsFinite(Info->WildHarvestRangeTolerance)
+		? FMath::Max(0.f, Info->WildHarvestRangeTolerance) : 0.f;
+	const float CapsuleRadius = Capsule->GetScaledCapsuleRadius();
+	const float SegmentHalfLength = FMath::Max(0.f, Capsule->GetScaledCapsuleHalfHeight() - CapsuleRadius);
+	const FVector CapsuleCenter = Capsule->GetComponentLocation();
+	const FVector Axis = Capsule->GetUpVector() * SegmentHalfLength;
+	const FVector SphereCenter = InteractionSphere->GetComponentLocation();
+	const FVector ClosestPoint = FMath::ClosestPointOnSegment(SphereCenter, CapsuleCenter - Axis, CapsuleCenter + Axis);
+	const float AllowedDistance = InteractionSphere->GetScaledSphereRadius() + CapsuleRadius + Tolerance;
+	if (FVector::DistSquared(SphereCenter, ClosestPoint) > FMath::Square(AllowedDistance))
+	{
+		return false;
+	}
+	if (IngredientUnlockID >= 0 && !bIngredientUnlocked)
+	{
+		TGuardValue<bool> LockedGuard(bWildHarvestInProgress, true);
+		OnHarvestLocked();
+		return false;
+	}
+	if (!CanHarvest() || !GetWorld())
+	{
+		return false;
+	}
+
+	const int32 Quantity = FMath::Max(1, Info->FruitCount); // 野外产量只取数据表，无照料连击。
+	const float RespawnSeconds = FMath::IsFinite(Info->WildRespawnSeconds)
+		? FMath::Max(1.f, Info->WildRespawnSeconds) : 1.f;
+	UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetGameInstance());
+	if (GI)
+	{
+		GI->BeginWildHarvestTransaction();
+	}
+	ON_SCOPE_EXIT
+	{
+		if (IsValid(GI))
+		{
+			GI->EndWildHarvestTransaction();
+		}
+	};
+	TGuardValue<bool> HarvestGuard(bWildHarvestInProgress, true);
+
+	// 仅生成一个承载类型/食物数据的对象，数量由原子入包接口一次性提交。
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.Owner = this;
+	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	AItemActor* Fruit = GetWorld()->SpawnActor<AItemActor>(Info->FruitClass, GetActorTransform(), SpawnParams);
+	if (!IsValid(Fruit))
+	{
+		return false;
+	}
+	Fruit->bPickable = false;
+	Fruit->SetActorHiddenInGame(true);
+	Fruit->SetActorEnableCollision(false);
+	Fruit->ConfigureAndStartRipening(false, 0.f, 0.f);
+	Fruit->SetIngredientQuality(EIngredientQuality::Normal);
+
+	if (!IsValid(Character) || !Character->AddItemsToInventory(Fruit, Quantity))
+	{
+		if (IsValid(Fruit))
+		{
+			Fruit->Destroy();
+		}
+		return false; // 所有原挂果、阶段、冷却保持原样。
+	}
+	if (IsValid(Fruit))
+	{
+		Fruit->Destroy(); // 通常入包接口已销毁；兜底不留下临时载体。
+	}
+
+	// 全量提交成功后，才消耗植株并开始恢复。
+	bHarvested = true;
+	WildRegrowDeadline = FPlatformTime::Seconds() + RespawnSeconds;
+	SaveWildHarvestState();
+	for (AItemActor* OldFruit : SpawnedFruits)
+	{
+		if (IsValid(OldFruit))
+		{
+			OldFruit->StopRipening();
+			OldFruit->Destroy();
+		}
+	}
+	SpawnedFruits.Empty();
+	GetWorldTimerManager().ClearTimer(RefruitTimerHandle);
+	ApplyWildHarvestVisualState();
+	UpdateHarvestHintOutline();
+	if (IsValid(Character))
+	{
+		Character->PlayHarvestEffect(PlantMesh ? PlantMesh->Bounds.Origin : GetActorLocation());
+	}
+	return true;
 }
 
 void APlant::ApplyStageMesh(int32 StageIndex)
@@ -204,6 +486,26 @@ void APlant::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
+	// 野外恢复必须先于所有种植门控/早退；不依赖玩家在不在交互范围。
+	if (UsesWildHarvest())
+	{
+		if (bWildStateInitialized && !bWildHarvestInProgress && bHarvested && GetWildRegrowRemaining() <= 0.f)
+		{
+			CompleteWildRegrow();
+		}
+		UpdateHarvestHintOutline();
+		if (bDebug)
+		{
+			DebugPrintTimer += DeltaTime;
+			if (DebugPrintTimer >= 0.5f)
+			{
+				DebugPrintTimer = 0.f;
+				PrintDebugInfo();
+			}
+		}
+		return; // 保留普通植物的雨水、生长、照料代码，野外模式完全绕开。
+	}
+
 	// ============ 交互范围调试可视化（控制台 Shoot.DebugInteract 1） ============
 	// 绿=当前待交互植株，灰=在范围内但不是当前目标
 	if (InteractionDebug::IsEnabled() && InteractionSphere)
@@ -236,6 +538,12 @@ void APlant::Tick(float DeltaTime)
 	if (!Info || Info->GrowthStages.Num() == 0)
 	{
 		return;
+	}
+
+	UpdateRainState(DeltaTime);
+	if (bRainedOn && Info->bRequiresWater)
+	{
+		ApplyRainWater(*Info);
 	}
 
 	// 随机生虫
@@ -379,7 +687,16 @@ void APlant::UpdateThirstWindow(float DeltaTime)
 		const float Progress = StageDuration > 0.f ? StageTimer / StageDuration : 1.f;
 		if (Progress >= FMath::Clamp(Info->ThirstWindowProgress, 0.05f, 1.f))
 		{
-			OpenThirstWindow();
+			if (bRainedOn)
+			{
+				// 雨水已满足本阶段需水，不再打开口渴窗口
+				bThirstWindowOpenedThisStage = true;
+				bThirstWindowSatisfied = true;
+			}
+			else
+			{
+				OpenThirstWindow();
+			}
 		}
 	}
 
@@ -398,6 +715,14 @@ void APlant::PrintDebugInfo()
 {
 	if (!GEngine)
 	{
+		return;
+	}
+
+	if (UsesWildHarvest())
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 0.5f, FColor::Green,
+			FString::Printf(TEXT("[WildPlant] %s  %s  恢复剩余:%.1fs"),
+				*GetName(), CanHarvest() ? TEXT("可采摘") : TEXT("不可采摘"), GetWildRegrowRemaining()));
 		return;
 	}
 
@@ -501,7 +826,7 @@ void APlant::ResetToSeedStage()
 void APlant::Water(float /*Amount*/)
 {
 	const FPlantInfo* Info = GetPlantInfo();
-	if (!Info)
+	if (!Info || Info->bWildHarvest)
 	{
 		return;
 	}
@@ -541,7 +866,7 @@ void APlant::Water(float /*Amount*/)
 bool APlant::NeedsWater() const
 {
 	const FPlantInfo* Info = GetPlantInfo();
-	if (!Info || !Info->bRequiresWater)
+	if (!Info || Info->bWildHarvest || !Info->bRequiresWater)
 	{
 		return false;
 	}
@@ -557,17 +882,65 @@ bool APlant::NeedsWater() const
 bool APlant::UsesThirstWindows() const
 {
 	const FPlantInfo* Info = GetPlantInfo();
-	if (!Info)
+	if (!Info || Info->bWildHarvest)
 	{
 		return false;
 	}
 	return Info->bUseThirstWindows || CVarForcePlantThirstWindows.GetValueOnGameThread() != 0;
 }
 
+void APlant::UpdateRainState(float DeltaTime)
+{
+	RainCheckRemaining -= DeltaTime;
+	if (RainCheckRemaining > 0.f)
+	{
+		return;
+	}
+	RainCheckRemaining = 0.5f;
+
+	UWorld* World = GetWorld();
+	if (!bWateredByRain || !World)
+	{
+		bRainedOn = false;
+		return;
+	}
+
+	if (!CachedWeatherSystem.IsValid())
+	{
+		TActorIterator<AWeatherSystem> It(World);
+		CachedWeatherSystem = It ? *It : nullptr;
+	}
+
+	bool bRaining = CachedWeatherSystem.IsValid() && CachedWeatherSystem->IsRaining();
+	if (bRaining)
+	{
+		const FVector Location = GetActorLocation();
+		for (TActorIterator<ARainExclusionVolume> It(World); It; ++It)
+		{
+			if (It->bExcludeRain && It->GetBoundsBox().IsInsideOrOn(Location))
+			{
+				bRaining = false;
+				break;
+			}
+		}
+	}
+	bRainedOn = bRaining;
+}
+
+void APlant::ApplyRainWater(const FPlantInfo& Info)
+{
+	WaterLevel = Info.WaterMax;
+	bWatered = true;
+	if (bThirstWindowOpen)
+	{
+		CloseThirstWindow(true);
+	}
+}
+
 int32 APlant::EvaluateCareComboBonus() const
 {
 	const FPlantInfo* Info = GetPlantInfo();
-	if (!Info || !Info->bEnableCareCombo || !GetWorld())
+	if (!Info || Info->bWildHarvest || !Info->bEnableCareCombo || !GetWorld())
 	{
 		return 0;
 	}
@@ -658,7 +1031,7 @@ void APlant::InitSoilDecal()
 	}
 
 	const FPlantInfo* Info = GetPlantInfo();
-	const bool bShow = Info && Info->bRequiresWater;
+	const bool bShow = Info && !Info->bWildHarvest && Info->bRequiresWater;
 	SoilDecal->SetVisibility(bShow);
 	if (!bShow)
 	{
@@ -682,7 +1055,8 @@ void APlant::InitSoilDecal()
 float APlant::GetTargetSoilWetness() const
 {
 	const FPlantInfo* Info = GetPlantInfo();
-	return Info && Info->WaterMax > 0.f ? FMath::Clamp(WaterLevel / Info->WaterMax, 0.f, 1.f) : 0.f;
+	return Info && !Info->bWildHarvest && Info->WaterMax > 0.f
+		? FMath::Clamp(WaterLevel / Info->WaterMax, 0.f, 1.f) : 0.f;
 }
 
 void APlant::UpdateSoilWetness(float DeltaTime)
@@ -705,6 +1079,10 @@ void APlant::UpdateSoilWetness(float DeltaTime)
 
 void APlant::RemovePest()
 {
+	if (UsesWildHarvest())
+	{
+		return;
+	}
 	if (bPest)
 	{
 		bPest = false;
@@ -716,6 +1094,11 @@ void APlant::RemovePest()
 
 bool APlant::Harvest()
 {
+	if (UsesWildHarvest())
+	{
+		return HarvestForCharacter(InteractingCharacter.Get());
+	}
+
 	// 食材未解锁：禁止采摘（如关卡目标未达成时玉米田里的玉米不可摘）
 	if (IngredientUnlockID >= 0 && !bIngredientUnlocked)
 	{
@@ -871,6 +1254,11 @@ void APlant::SpawnFruit()
 		return;
 	}
 
+	if (Info->bWildHarvest && !Info->bShowFruitOnPlant)
+	{
+		return; // 整株作物无需隐藏熟度载体，采摘入口会临时生成一个全量入包载体。
+	}
+
 	// 避免重复生成（同一轮结果只生成一次）
 	SpawnedFruits.Empty();
 
@@ -936,10 +1324,10 @@ void APlant::SpawnSingleFruit(int32 Index)
 		// 入背包采摘模式下，树上的果实不再可被玩家单独拾取，仅作为普通场景物件；
 		// 采摘由植物在 Harvest 中统一处理入背包。旧模式（挂手上）则保持可拾取。
 		// 不显示的果实同样不可被单独拾取。
-		Fruit->bPickable = Info->bShowFruitOnPlant && !bHarvestToInventory;
+		Fruit->bPickable = !Info->bWildHarvest && Info->bShowFruitOnPlant && !bHarvestToInventory;
 
 		// 写入熟度配置并启动该果实自身的熟度计时（每个果实独立累计，互不影响）
-		Fruit->ConfigureAndStartRipening(Info->bEnableRipeness, Info->RipeTime, Info->OverripeTime);
+		Fruit->ConfigureAndStartRipening(!Info->bWildHarvest && Info->bEnableRipeness, Info->RipeTime, Info->OverripeTime);
 	}
 }
 
@@ -972,6 +1360,10 @@ void APlant::RefruitOneFruit()
 
 FName APlant::GetCurrentStageName() const
 {
+	if (UsesWildHarvest())
+	{
+		return GetRipenessStageName();
+	}
 	// 结果阶段：名称反映熟度子阶段（未成熟 / 成熟 / 熟过头），便于 UI 提示当前素材阶段
 	if (IsFruiting())
 	{
@@ -987,6 +1379,12 @@ FName APlant::GetCurrentStageName() const
 
 float APlant::GetGrowthProgress() const
 {
+	if (UsesWildHarvest())
+	{
+		const FPlantInfo* Info = GetPlantInfo();
+		const float Duration = FMath::IsFinite(Info->WildRespawnSeconds) ? FMath::Max(1.f, Info->WildRespawnSeconds) : 1.f;
+		return FMath::Clamp(1.f - GetWildRegrowRemaining() / Duration, 0.f, 1.f);
+	}
 	// 结果阶段：进度条改为显示熟度进度（距“熟过头”的进度），复用已有 UI 绑定
 	if (IsFruiting())
 	{
@@ -1007,6 +1405,10 @@ float APlant::GetGrowthProgress() const
 
 EIngredientQuality APlant::GetCurrentQuality() const
 {
+	if (UsesWildHarvest())
+	{
+		return EIngredientQuality::Normal;
+	}
 	// 熟度已下沉到每个果实；此处返回代表性（第一个）果实的品质，供整株级 UI 兼容显示。
 	// 按单个果实展示时请直接绑定果实的 GetCurrentQuality()。
 	if (SpawnedFruits.Num() > 0 && IsValid(SpawnedFruits[0]))
@@ -1018,6 +1420,10 @@ EIngredientQuality APlant::GetCurrentQuality() const
 
 float APlant::GetRipenessProgress() const
 {
+	if (UsesWildHarvest())
+	{
+		return 0.f;
+	}
 	// 返回代表性（第一个）果实的熟度进度，供整株级 UI 兼容显示
 	if (SpawnedFruits.Num() > 0 && IsValid(SpawnedFruits[0]))
 	{
@@ -1028,6 +1434,10 @@ float APlant::GetRipenessProgress() const
 
 FName APlant::GetRipenessStageName() const
 {
+	if (UsesWildHarvest())
+	{
+		return bHarvested ? FName(TEXT("恢复中")) : FName(TEXT("成熟"));
+	}
 	// 返回代表性（第一个）果实的熟度阶段名，供整株级 UI 兼容显示
 	if (SpawnedFruits.Num() > 0 && IsValid(SpawnedFruits[0]))
 	{
@@ -1040,6 +1450,11 @@ bool APlant::IsFruiting() const
 {
 	const FPlantInfo* Info = GetPlantInfo();
 	if (!Info || Info->GrowthStages.Num() == 0)
+	{
+		return false;
+	}
+	// 野外挂果植株采空后仍保留末阶段外观，但不能再报告可采。
+	if (Info->bWildHarvest && (!bWildStateInitialized || bHarvested))
 	{
 		return false;
 	}
@@ -1086,10 +1501,9 @@ void APlant::UpdateHarvestHintOutline()
 	}
 
 	// 采摘提示：入背包采摘模式 + 已结果 + 未收获 + 已解锁 + 是角色选出的唯一交互目标
-	const bool bHarvestHint = bHarvestToInventory
-		&& IsFruiting()
-		&& !bHarvested
-		&& (IngredientUnlockID < 0 || bIngredientUnlocked)
+	const bool bHarvestHint = (UsesWildHarvest() ? CanHarvest()
+		: (bHarvestToInventory && IsFruiting() && !bHarvested
+			&& (IngredientUnlockID < 0 || bIngredientUnlocked)))
 		&& bHighlightRequested;
 
 	// 浇水提示：植被还需要浇水——作为“可浇水 / 待浇水”的前置指示（先于浇水动作出现）；

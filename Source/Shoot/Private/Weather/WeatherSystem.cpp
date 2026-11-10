@@ -746,6 +746,22 @@ void AWeatherSystem::UpdateLightning(float DeltaSeconds)
 		return;
 	}
 
+	// huanglily：营业专注期间不让闪电照亮全场（随闪电触发的雷声同时暂停）；雨效仍按天气继续。
+	if (bSuppressLightningDuringBusiness)
+	{
+		const UTimeSystem* Time = GetTimeSystem();
+		if (Time && Time->IsBusinessVisualFocusActive())
+		{
+			if (FlashRemaining > 0.f || LightningLight->IsVisible())
+			{
+				FlashRemaining = 0.f;
+				LightningLight->SetIntensity(0.f);
+				LightningLight->SetVisibility(false);
+			}
+			return;
+		}
+	}
+
 	if (FlashRemaining > 0.f)
 	{
 		FlashRemaining = FMath::Max(0.f, FlashRemaining - DeltaSeconds);

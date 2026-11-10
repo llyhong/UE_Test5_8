@@ -49,6 +49,10 @@ class SHOOT_API UMySaveGame : public USaveGame
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Shoot|Spawner")
 	TMap<FString, int32> SpawnerRemaining;
 
+	/** 野外植物冷却快照（秒）；0 表示可采，不计算游戏关闭期间的时间。 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, SaveGame, Category = "Shoot|Plant")
+	TMap<FString, float> WildPlantRegrowRemaining;
+
 	/** 已发现过的物品键（DT 行名，如 "7"）：用于首次发现弹窗与奖励只触发一次。跨存档持久化。 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Shoot|Discovery")
 	TArray<FName> DiscoveredItemKeys;

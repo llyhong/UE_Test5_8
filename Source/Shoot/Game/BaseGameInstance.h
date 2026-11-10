@@ -202,6 +202,18 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Spawner")
 	void SetSpawnerRemaining(const FGuid& SpawnerGuid, int32 Value);
 
+	/** 野外植物运行时剩余秒数快照（含已卸载区域）；0 表示可采。 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient, Category = "Shoot|Plant")
+	TMap<FString, float> WildPlantRegrowRemaining;
+
+	/** 同一运行会话内扣除快照后的时间，保证卸载区域也继续恢复。 */
+	float GetWildPlantRegrowRemaining(const FString& Key) const;
+	void SetWildPlantRegrowRemaining(const FString& Key, float Remaining);
+
+	/** 入包中的首次发现等可能请求保存，延至采摘提交/失败回滚后才执行。 */
+	void BeginWildHarvestTransaction();
+	void EndWildHarvestTransaction();
+
 	/** 当前已解锁的食材 ID 集合（运行时） */
 	TSet<int32> UnlockedIngredientIDs;
 
@@ -215,6 +227,13 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Gameplay")
 	FORCEINLINE void SetMultiPlayerState(bool state){IsMultiPlayerState = state;}
 private:
+	// 单调时钟仅用于本次进程，不写入存档。
+	TMap<FString, double> WildPlantSnapshotTimes;
+	int32 ActiveWildHarvestTransactions = 0;
+	bool bWildHarvestSavePending = false;
+	void RefreshWildPlantRegrowSnapshots();
+	void RestoreCurrentWorldWildPlants();
+
 	bool IsMultiPlayerState = false;
 	
 };

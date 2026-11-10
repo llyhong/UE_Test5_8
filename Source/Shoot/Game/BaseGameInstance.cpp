@@ -9,6 +9,9 @@
 #include "Engine/Engine.h"
 #include "NPC/GuestCharacter.h"
 #include "Machine/StorageWarehouse.h"
+#include "Item/Plant.h"
+#include "Engine/World.h"
+#include "HAL/PlatformTime.h"
 
 /** 控制台命令：切换空碟玩法开关，方便 A/B 对比两种玩法（运行时输入：Game.ToggleDirtyPlateFlow） */
 static FAutoConsoleCommand CmdToggleDirtyPlateFlow(
@@ -106,6 +109,9 @@ void UBaseGameInstance::NewGameData()
 	curSaveGameData = SaveData;
 	UnlockedIngredientIDs.Reset();
 	DiscoveredItemKeys.Reset();
+	WildPlantRegrowRemaining.Reset();
+	WildPlantSnapshotTimes.Reset();
+	RestoreCurrentWorldWildPlants();
 	SaveGameData();
 
 	// 新游戏：将经营模拟（日期 / 员工）重置回初始（存档默认 BizYear=1、BizRoster 空）
@@ -116,9 +122,28 @@ void UBaseGameInstance::NewGameData()
 }
 void UBaseGameInstance::SaveGameData()
 {
+	if (ActiveWildHarvestTransactions > 0)
+	{
+		bWildHarvestSavePending = true;
+		return;
+	}
 
 	if (curSaveGameData != nullptr)
 	{
+		// 先刷新已卸载区域的剩余时间，再抓取当前世界植株快照；不在每帧写存档。
+		RefreshWildPlantRegrowSnapshots();
+		if (UWorld* World = GetWorld())
+		{
+			for (TActorIterator<APlant> It(World); It; ++It)
+			{
+				if (It->UsesWildHarvest())
+				{
+					It->SaveWildHarvestState();
+				}
+			}
+		}
+		curSaveGameData->WildPlantRegrowRemaining = WildPlantRegrowRemaining;
+
 		// 保存到指定插槽（SlotName为文件名，UserIndex通常为0）
 		UGameplayStatics::SaveGameToSlot(curSaveGameData, TEXT("SaveSlot_01"), 0);
 	}
@@ -129,6 +154,14 @@ bool UBaseGameInstance::LoadGameData() {
 	UMySaveGame* LoadedData = Cast<UMySaveGame>(UGameplayStatics::LoadGameFromSlot(TEXT("SaveSlot_01"), 0));
 	if (!LoadedData) return false;
 	curSaveGameData = LoadedData;
+	WildPlantRegrowRemaining = LoadedData->WildPlantRegrowRemaining;
+	WildPlantSnapshotTimes.Reset();
+	const double Now = FPlatformTime::Seconds();
+	for (TPair<FString, float>& Entry : WildPlantRegrowRemaining)
+	{
+		Entry.Value = FMath::IsFinite(Entry.Value) ? FMath::Max(0.f, Entry.Value) : 0.f;
+		WildPlantSnapshotTimes.Add(Entry.Key, Now);
+	}
 	if (economySystem)
 	{
 		economySystem->Load();
@@ -153,7 +186,70 @@ bool UBaseGameInstance::LoadGameData() {
 			DiscoveredItemKeys.AddUnique(Key);
 		}
 	}
+	RestoreCurrentWorldWildPlants();
 	return true;
+}
+
+float UBaseGameInstance::GetWildPlantRegrowRemaining(const FString& Key) const
+{
+	const float* Remaining = WildPlantRegrowRemaining.Find(Key);
+	if (!Remaining || !FMath::IsFinite(*Remaining) || *Remaining <= 0.f)
+	{
+		return 0.f;
+	}
+	const double* SnapshotTime = WildPlantSnapshotTimes.Find(Key);
+	const double Elapsed = SnapshotTime ? FMath::Max(0.0, FPlatformTime::Seconds() - *SnapshotTime) : 0.0;
+	return static_cast<float>(FMath::Max(0.0, static_cast<double>(*Remaining) - Elapsed));
+}
+
+void UBaseGameInstance::SetWildPlantRegrowRemaining(const FString& Key, float Remaining)
+{
+	WildPlantRegrowRemaining.FindOrAdd(Key) = FMath::IsFinite(Remaining) ? FMath::Max(0.f, Remaining) : 0.f;
+	WildPlantSnapshotTimes.FindOrAdd(Key) = FPlatformTime::Seconds();
+}
+
+void UBaseGameInstance::BeginWildHarvestTransaction()
+{
+	++ActiveWildHarvestTransactions;
+}
+
+void UBaseGameInstance::EndWildHarvestTransaction()
+{
+	if (!ensure(ActiveWildHarvestTransactions > 0))
+	{
+		return;
+	}
+	--ActiveWildHarvestTransactions;
+	if (ActiveWildHarvestTransactions == 0 && bWildHarvestSavePending)
+	{
+		bWildHarvestSavePending = false;
+		SaveGameData(); // 仅兑现事务内已经请求的保存，不新增自动保存触发点。
+	}
+}
+
+void UBaseGameInstance::RefreshWildPlantRegrowSnapshots()
+{
+	const double Now = FPlatformTime::Seconds();
+	for (TPair<FString, float>& Entry : WildPlantRegrowRemaining)
+	{
+		Entry.Value = GetWildPlantRegrowRemaining(Entry.Key);
+		WildPlantSnapshotTimes.FindOrAdd(Entry.Key) = Now;
+	}
+}
+
+void UBaseGameInstance::RestoreCurrentWorldWildPlants()
+{
+	if (UWorld* World = GetWorld())
+	{
+		for (TActorIterator<APlant> It(World); It; ++It)
+		{
+			if (It->HasActorBegunPlay() && !It->IsActorBeingDestroyed() && It->UsesWildHarvest())
+			{
+				It->SetIngredientUnlocked(IsIngredientUnlocked(It->IngredientUnlockID));
+				It->RestoreWildHarvestState();
+			}
+		}
+	}
 }
 
 bool UBaseGameInstance::IsItemDiscovered(FName ItemKey) const

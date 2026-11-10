@@ -524,6 +524,8 @@ public:
 
 	void RefreshInteractionPromptTarget();
 	void UpdateInteractionPrompt();
+	void UpdateItemInteractionHighlight();
+	TWeakObjectPtr<AItemActor> HighlightedInteractionItem;
 
 	/** 查找目标身上作为“E 提示位置锚点”的 WBP_Prompt 控件（烹饪设备/大门等蓝图里的 TipsWidget）。
 	 *  统一提示显示在它的世界坐标处，保留美术在蓝图里摆的位置；设备自己的提示不再显示。
@@ -675,6 +677,10 @@ public:
 	// 注意：这里记录的是"类型"，取出时按 ItemClass 重新生成。
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Inventory")
 	bool AddItemToInventory(AItemActor* Item);
+
+	/** 同类采摘产物一次性入包：整批共享一个槽位，失败不销毁物品。 */
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Inventory")
+	bool AddItemsToInventory(AItemActor* Item, int32 Quantity);
 
 	/** 轻量提示卡片（仅本地控制玩家弹出）：浇水时机、照料连击等即时反馈 */
 	UFUNCTION(BlueprintCallable, Category = "Shoot|UI")
@@ -908,6 +914,7 @@ public:
 public:
 	// Called every frame
 	virtual void Tick(float DeltaTime) override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	
 	/** Returns CameraBoom subobject **/
 	FORCEINLINE class USpringArmComponent* GetCameraBoom() const { return CameraBoom; }
@@ -927,7 +934,7 @@ public:
 
 	/** 俯视相机臂长，越大视野越广 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Camera", meta = (EditCondition = "bUseTopDownCamera", ClampMin = "100.0"))
-	float TopDownArmLength = 1400.0f;
+	float TopDownArmLength = 950.0f;
 
 	/** 俯视相机俯仰角（负值向下看，-62 约为斜俯视） */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Camera", meta = (EditCondition = "bUseTopDownCamera", ClampMin = "-89.0", ClampMax = "-15.0"))

@@ -129,6 +129,14 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Weather|Precipitation")
 	float PrecipitationFollowHeight = 400.f;
 
+	/** 雨强（0~1）达到该值即视为下雨：室外植物自动获得水分，无需浇水 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Weather|Precipitation", meta = (ClampMin = "0.01", ClampMax = "1"))
+	float RainWateringThreshold = 0.2f;
+
+	/** 营业与收尾期间禁止强闪电照亮全场，天气/雨效继续运行。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Weather|Lightning")
+	bool bSuppressLightningDuringBusiness = true;
+
 	/** 雷电闪光强度 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Weather|Lightning", meta = (ClampMin = "0"))
 	float LightningFlashIntensity = 20000.f;
@@ -147,6 +155,13 @@ public:
 
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Weather")
 	bool IsWeatherTransitioning() const { return bTransitioning; }
+
+	/** 当前雨强 0~1（含天气过渡插值） */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Weather")
+	float GetRainStrength() const { return BlendCurrent.RainStrength; }
+
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Weather")
+	bool IsRaining() const { return BlendCurrent.RainStrength >= RainWateringThreshold; }
 
 	/** 取当前天气预设（表里找不到返回 false） */
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Weather")
