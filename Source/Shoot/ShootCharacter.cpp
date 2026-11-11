@@ -1285,8 +1285,8 @@ void AShootCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComp
 	if (UEnhancedInputComponent* EnhancedInputComponent = Cast<UEnhancedInputComponent>(PlayerInputComponent)) {
 		
 		// Jumping
-		EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Started, this, &ACharacter::Jump);
-		EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Completed, this, &ACharacter::StopJumping);
+		EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Started, this, &AShootCharacter::DoJumpStart);
+		EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Completed, this, &AShootCharacter::DoJumpEnd);
 
 		// Moving
 		EnhancedInputComponent->BindAction(MoveAction, ETriggerEvent::Triggered, this, &AShootCharacter::Move);
@@ -2410,7 +2410,87 @@ void AShootCharacter::UpdateCameraView()
 
 void AShootCharacter::DoJumpStart()
 {
-	Jump();
+	const UWorld* World = GetWorld();
+	if (!World)
+	{
+		Jump();
+		return;
+	}
+
+	if (CanJump())
+	{
+		Jump();
+		JumpBufferExpireTime = 0.0;
+		return;
+	}
+
+	// huanglily：空中按下时先记缓冲，落地那一帧自动补跳，减少“明明按了却没跳”的挫败感
+	if (JumpBufferTime > 0.f)
+	{
+		JumpBufferExpireTime = World->GetTimeSeconds() + JumpBufferTime;
+	}
+}
+
+bool AShootCharacter::CanJumpInternal_Implementation() const
+{
+	return Super::CanJumpInternal_Implementation() || CanCoyoteJump();
+}
+
+void AShootCharacter::OnJumped_Implementation()
+{
+	Super::OnJumped_Implementation();
+
+	bUsedAirJump = true;
+}
+
+bool AShootCharacter::CanCoyoteJump() const
+{
+	const UWorld* World = GetWorld();
+	const UCharacterMovementComponent* Move = GetCharacterMovement();
+	if (!World || !Move || CoyoteTime <= 0.f || bUsedAirJump || Move->IsMovingOnGround())
+	{
+		return false;
+	}
+	return static_cast<float>(World->GetTimeSeconds() - LastGroundedTime) <= CoyoteTime;
+}
+
+void AShootCharacter::UpdateJumpAssist()
+{
+	const UWorld* World = GetWorld();
+	const UCharacterMovementComponent* Move = GetCharacterMovement();
+	if (!World || !Move)
+	{
+		return;
+	}
+
+	const double Now = World->GetTimeSeconds();
+	if (Move->IsMovingOnGround())
+	{
+		LastGroundedTime = Now;
+		bUsedAirJump = false;
+
+		if (JumpBufferExpireTime > 0.0 && Now <= JumpBufferExpireTime && CanJump())
+		{
+			Jump();
+			JumpBufferExpireTime = 0.0;
+		}
+		return;
+	}
+
+	if (JumpBufferExpireTime <= 0.0)
+	{
+		return;
+	}
+	if (Now > JumpBufferExpireTime)
+	{
+		JumpBufferExpireTime = 0.0;
+		return;
+	}
+	if (CanJump())
+	{
+		Jump();
+		JumpBufferExpireTime = 0.0;
+	}
 }
 
 void AShootCharacter::DoJumpEnd()
@@ -3270,6 +3350,7 @@ void AShootCharacter::DoRepairEnd()
  {
 	Super::Tick(DeltaTime);
 
+	UpdateJumpAssist();
 	UpdateCameraView();
 	UpdateHarvestEffects();
 

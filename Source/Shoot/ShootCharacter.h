@@ -400,8 +400,31 @@ protected:
 
 	bool bIsSprinting = false;
 
+	// ============ 跳跃手感（野外小径） ============
+	/** 离开地面后仍允许起跳的宽限时间（土狼时间），0 为关闭 */
+	UPROPERTY(EditDefaultsOnly, Category = "Shoot|Movement|Jump")
+	float CoyoteTime = 0.16f;
+
+	/** 落地前提前按下跳跃的缓冲时间，0 为关闭 */
+	UPROPERTY(EditDefaultsOnly, Category = "Shoot|Movement|Jump")
+	float JumpBufferTime = 0.12f;
+
+	/** 土狼窗口内已经起跳过，回到地面才复位，避免窗口内重复起跳 */
+	bool bUsedAirJump = false;
+
+	double LastGroundedTime = -1000.0;
+	double JumpBufferExpireTime = -1000.0;
+
+	bool CanCoyoteJump() const;
+	void UpdateJumpAssist();
 
 public:
+
+	/** 土狼时间内把空中状态视为可起跳，让 Jump() 走正常的起跳/动画流程 */
+	virtual bool CanJumpInternal_Implementation() const override;
+
+	/** 跳跃真正生效时再标记，避免土狼起跳在生效前把自己否掉 */
+	virtual void OnJumped_Implementation() override;
 
 	/** Constructor */
 	AShootCharacter();	
