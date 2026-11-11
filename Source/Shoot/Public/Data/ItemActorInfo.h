@@ -35,6 +35,12 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Data")
 	TObjectPtr<UTexture2D> Icon = nullptr;
 
+	/** 野外专属食材：勾选后食材箱（AFoodSpawner）不再产出该物品，
+	 *  只能从野外采摘（APlant）、散布点（AItemScatterSpawner）或猎物掉落（AAnimalCharacter）获得。
+	 *  见 营业忙乱机制配置.md 第 16 节；默认 false，旧数据不受影响。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Data|Wild")
+	bool bWildOnly = false;
+
 	/** 从行名解析物品 ID：行名为纯数字（约定 RowName == ItemID）时返回该值，否则返回 INDEX_NONE */
 	static int32 GetItemIDFromRowName(FName RowName)
 	{

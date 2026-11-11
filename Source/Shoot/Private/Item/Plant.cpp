@@ -404,7 +404,13 @@ bool APlant::HarvestForCharacter(AShootCharacter* Character)
 	};
 	TGuardValue<bool> HarvestGuard(bWildHarvestInProgress, true);
 
-	// 仅生成一个承载类型/食物数据的对象，数量由原子入包接口一次性提交。
+	// 营业中：果实直接挂到手上，出门一趟回来能立刻扔锅；打烊后仍走原来的整批入包。
+	// 时钟取不到时按「营业中」处理，与角色打烊拾取重定向的兜底一致。
+	const bool bBusinessOpen = (GI && GI->businessSimulation && GI->businessSimulation->TimeSystem)
+		? GI->businessSimulation->TimeSystem->IsBusinessOpen()
+		: true;
+
+	// 生成承载类型/食物数据的对象：营业中即手采物，打烊时仅为入包载体。
 	FActorSpawnParameters SpawnParams;
 	SpawnParams.Owner = this;
 	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
@@ -414,12 +420,47 @@ bool APlant::HarvestForCharacter(AShootCharacter* Character)
 		return false;
 	}
 	Fruit->bPickable = false;
-	Fruit->SetActorHiddenInGame(true);
 	Fruit->SetActorEnableCollision(false);
 	Fruit->ConfigureAndStartRipening(false, 0.f, 0.f);
 	Fruit->SetIngredientQuality(EIngredientQuality::Normal);
+	// 挂手必须可见；打烊走入包载体，保持隐藏
+	Fruit->SetActorHiddenInGame(!bBusinessOpen);
 
-	if (!IsValid(Character) || !Character->AddItemsToInventory(Fruit, Quantity))
+	if (bBusinessOpen)
+	{
+		// 手上已有物品：本次采摘不生效（植株保持可采），既不覆盖手上原物品，也不产生背包囤积
+		if (Character->GetPickingItem() != nullptr)
+		{
+			Fruit->Destroy();
+			if (GEngine)
+			{
+				GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Yellow,
+					TEXT("[采摘] 手上已有物品，先处理掉再来采"));
+			}
+			return false;
+		}
+
+		Character->HoldItemInHand(Fruit, true);
+
+		// 数据表 FruitCount > 1 的余量仍按原方式入包，避免丢产量（番茄 FruitCount=1，不会触发）
+		if (Quantity > 1)
+		{
+			AItemActor* Rest = GetWorld()->SpawnActor<AItemActor>(Info->FruitClass, GetActorTransform(), SpawnParams);
+			if (IsValid(Rest))
+			{
+				Rest->bPickable = false;
+				Rest->SetActorHiddenInGame(true);
+				Rest->SetActorEnableCollision(false);
+				Rest->ConfigureAndStartRipening(false, 0.f, 0.f);
+				Rest->SetIngredientQuality(EIngredientQuality::Normal);
+				if (!Character->AddItemsToInventory(Rest, Quantity - 1))
+				{
+					Rest->Destroy();
+				}
+			}
+		}
+	}
+	else if (!Character->AddItemsToInventory(Fruit, Quantity))
 	{
 		if (IsValid(Fruit))
 		{
@@ -427,7 +468,7 @@ bool APlant::HarvestForCharacter(AShootCharacter* Character)
 		}
 		return false; // 所有原挂果、阶段、冷却保持原样。
 	}
-	if (IsValid(Fruit))
+	else if (IsValid(Fruit))
 	{
 		Fruit->Destroy(); // 通常入包接口已销毁；兜底不留下临时载体。
 	}

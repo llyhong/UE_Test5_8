@@ -11,6 +11,10 @@
 #include "Game/BusinessTime.h"
 #include "Item/ItemActor.h"
 #include "LandscapeHeightfieldCollisionComponent.h"
+#include "LandscapeComponent.h"
+#include "LandscapeInfo.h"
+#include "LandscapeLayerInfoObject.h"
+#include "PhysicalMaterials/PhysicalMaterial.h"
 
 namespace
 {
@@ -413,7 +417,7 @@ AItemActor* AItemScatterSpawner::SpawnIntoSlot(int32 SlotIndex, bool bUseOrigina
 
 	if (!bPlaced)
 	{
-		UE_LOG(LogTemp, Verbose, TEXT("[ItemScatterSpawner] %s 在 %d 次尝试内没找到可放置的位置（可调小 MinSpacing 或调大 SpawnRadius）"),
+		UE_LOG(LogTemp, Verbose, TEXT("[ItemScatterSpawner] %s 在 %d 次尝试内没找到可放置的位置（可调小 MinSpacing / MinLandscapeLayerWeight、调大 SpawnRadius，或放宽地形层名单）"),
 			*GetName(), MaxPlaceAttempts);
 		return nullptr;
 	}
@@ -504,6 +508,8 @@ bool AItemScatterSpawner::ProjectToGroundAndRotate(const FVector& InPoint, FVect
 
 		FHitResult Hit;
 		FCollisionQueryParams QueryParams(FName(TEXT("ItemScatterGround")), false, this);
+		// 物理材质过滤需要命中结果带 PhysMaterial；默认 LineTrace 不填充，必须显式开启
+		QueryParams.bReturnPhysicalMaterial = bFilterByPhysicalSurface;
 
 		if (bOnlyOnLandscape)
 		{
@@ -536,6 +542,12 @@ bool AItemScatterSpawner::ProjectToGroundAndRotate(const FVector& InPoint, FVect
 
 		OutLocation = Hit.ImpactPoint;
 		Normal = Hit.ImpactNormal;
+
+		// 地形层 / 物理材质筛选：不合格的点直接丢弃，由 SpawnIntoSlot 重新采样
+		if (!IsGroundAllowedByFilter(Hit, Hit.ImpactPoint))
+		{
+			return false;
+		}
 	}
 
 	const float Yaw = Rand.FRandRange(YawRange.X, YawRange.Y);
@@ -556,6 +568,177 @@ bool AItemScatterSpawner::ProjectToGroundAndRotate(const FVector& InPoint, FVect
 	OutLocation += Normal * GroundOffset;
 
 	return true;
+}
+
+bool AItemScatterSpawner::IsGroundAllowedByFilter(const FHitResult& Hit, const FVector& CandidateLocation)
+{
+	if (!bFilterByLandscapeLayer && !bFilterByPhysicalSurface)
+	{
+		return true;
+	}
+
+	bool bSawGroundInfo = false;
+
+	// ---------- 通道 1：物理材质 / SurfaceType（全平台可用，打包版推荐）----------
+	if (bFilterByPhysicalSurface)
+	{
+		const bool bHasLists = AllowedSurfaceTypes.Num() > 0 || AllowedPhysicalMaterials.Num() > 0;
+		if (bHasLists)
+		{
+			const UPhysicalMaterial* PhysMat = Hit.PhysMaterial.Get();
+			if (!PhysMat)
+			{
+				if (!bAllowUnknownGround)
+				{
+					return false;
+				}
+			}
+			else
+			{
+				bSawGroundInfo = true;
+
+				bool bMatched = false;
+				for (const TEnumAsByte<EPhysicalSurface>& Surface : AllowedSurfaceTypes)
+				{
+					const EPhysicalSurface Value = Surface;
+					if (PhysMat->SurfaceType == Value)
+					{
+						bMatched = true;
+						break;
+					}
+				}
+				if (!bMatched)
+				{
+					for (const TObjectPtr<UPhysicalMaterial>& Mat : AllowedPhysicalMaterials)
+					{
+						if (Mat.Get() == PhysMat)
+						{
+							bMatched = true;
+							break;
+						}
+					}
+				}
+				if (!bMatched)
+				{
+					return false;
+				}
+			}
+		}
+	}
+
+	// ---------- 通道 2：Landscape 图层名（编辑器 / PIE）----------
+	if (bFilterByLandscapeLayer)
+	{
+		const bool bHasLists = AllowedLandscapeLayers.Num() > 0 || BlockedLandscapeLayers.Num() > 0;
+		if (bHasLists)
+		{
+#if WITH_EDITOR
+			ULandscapeHeightfieldCollisionComponent* CollisionComp =
+				Cast<ULandscapeHeightfieldCollisionComponent>(Hit.GetComponent());
+			ULandscapeComponent* RenderComp = CollisionComp ? CollisionComp->GetRenderComponent() : nullptr;
+			ULandscapeInfo* Info = RenderComp ? RenderComp->GetLandscapeInfo() : nullptr;
+
+			if (!RenderComp || !Info)
+			{
+				if (!bAllowUnknownGround)
+				{
+					return false;
+				}
+			}
+			else
+			{
+				bSawGroundInfo = true;
+
+				// 同一渲染组件内跨采样点复用权重纹理数据，避免每次重读整张 weightmap
+				if (CachedLayerComponent.Get() != RenderComp)
+				{
+					CachedLayerComponent = RenderComp;
+					LayerWeightCache.Reset();
+				}
+
+				auto WeightOf = [&](FName LayerName) -> float
+				{
+					ULandscapeLayerInfoObject* Layer = Info->GetLayerInfoByName(LayerName);
+					if (!Layer)
+					{
+						return -1.f;
+					}
+					TArray<uint8>& Cache = LayerWeightCache.FindOrAdd(Layer);
+					return RenderComp->GetLayerWeightAtLocation(CandidateLocation, Layer, &Cache);
+				};
+
+				// 黑名单优先：踩到任何被禁止的主导层就丢弃
+				for (const FName& LayerName : BlockedLandscapeLayers)
+				{
+					if (WeightOf(LayerName) >= MinLandscapeLayerWeight)
+					{
+						return false;
+					}
+				}
+				// 白名单：至少一个允许的层权重达标
+				if (AllowedLandscapeLayers.Num() > 0)
+				{
+					bool bAnyAllowed = false;
+					for (const FName& LayerName : AllowedLandscapeLayers)
+					{
+						if (WeightOf(LayerName) >= MinLandscapeLayerWeight)
+						{
+							bAnyAllowed = true;
+							break;
+						}
+					}
+					if (!bAnyAllowed)
+					{
+						return false;
+					}
+				}
+			}
+#else
+			// 打包版没有 GetLayerInfoByName / GetLayerWeightAtLocation：按"未知"处理，
+			// 且不引用 editor-only 符号，保证 Game target 能链接。要打包请改用物理材质通道。
+			if (!bAllowUnknownGround)
+			{
+				return false;
+			}
+#endif
+		}
+	}
+
+	return bSawGroundInfo || bAllowUnknownGround;
+}
+
+float AItemScatterSpawner::GetLandscapeLayerWeight(FName LayerName, const FVector& WorldLocation) const
+{
+#if WITH_EDITOR
+	if (!GetWorld() || LayerName.IsNone())
+	{
+		return -1.f;
+	}
+
+	// 竖直打线找到该点下方的地形渲染组件，再读它的权重图
+	const FVector Start = WorldLocation + FVector(0.f, 0.f, TraceUp);
+	const FVector End = WorldLocation - FVector(0.f, 0.f, TraceDown);
+	FCollisionQueryParams QueryParams(FName(TEXT("ItemScatterLayerProbe")), false, this);
+	TArray<FHitResult> Hits;
+	GetWorld()->LineTraceMultiByChannel(Hits, Start, End, GroundChannel, QueryParams);
+
+	for (const FHitResult& H : Hits)
+	{
+		ULandscapeHeightfieldCollisionComponent* CollisionComp =
+			Cast<ULandscapeHeightfieldCollisionComponent>(H.GetComponent());
+		ULandscapeComponent* RenderComp = CollisionComp ? CollisionComp->GetRenderComponent() : nullptr;
+		ULandscapeInfo* Info = RenderComp ? RenderComp->GetLandscapeInfo() : nullptr;
+		ULandscapeLayerInfoObject* Layer = Info ? Info->GetLayerInfoByName(LayerName) : nullptr;
+		if (RenderComp && Layer)
+		{
+			TArray<uint8> Cache;
+			return RenderComp->GetLayerWeightAtLocation(WorldLocation, Layer, &Cache);
+		}
+	}
+	return -1.f;
+#else
+	return -1.f;
+#endif
 }
 
 bool AItemScatterSpawner::IsLocationFree(const FVector& InLocation) const

@@ -210,6 +210,14 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Chair|Tips", meta = (ClampMin = "0.0"))
 	float TipsWidgetHideDistance = 800.f;
 
+	/** 显示距离下限（cm）：实际生效距离 = max(TipsWidgetHideDistance, MinTipsWidgetHideDistance)。
+	 *  关卡里早期摆放的餐桌实例把 TipsWidgetHideDistance 存成了 1200，而 Kitchen_New 实测餐桌到最远灶台约 1983cm，
+	 *  玩家在灶台煮饭时远端桌子的订单会被隐藏。改 C++ 默认值影响不了这些已保存的覆盖值，
+	 *  因此用一个新增字段兜底：旧实例没有该字段的覆盖，会直接继承这个默认值并立即生效。
+	 *  想更远：在实例上调 TipsWidgetHideDistance；想更近（调试）：把这个下限调小。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Chair|Tips", meta = (ClampMin = "0.0"))
+	float MinTipsWidgetHideDistance = 2400.f;
+
 	/** 当前桌况（空 / 入座中 / 等待点单 / 等待上菜 / 用餐中 / 待收空碟），提示控件按它决定显示什么 */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Chair|Tips")
 	EChairTipsState GetSeatState() const;

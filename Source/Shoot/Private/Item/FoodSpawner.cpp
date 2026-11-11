@@ -3,6 +3,7 @@
 #include "Item/FoodSpawner.h"
 #include "Game/BaseGameInstance.h"
 #include "Machine/StorageWarehouse.h"
+#include "Data/ItemActorInfo.h"
 #include "Engine/World.h"
 
 namespace
@@ -69,6 +70,22 @@ FGuid AFoodSpawner::GetSpawnerSaveGuid()
 
 bool AFoodSpawner::CanSpawn() const
 {
+	// 野外专属食材（DT_ItemInfo::bWildOnly）默认不从食材箱产出：
+	// 直接读生成目标 CDO 上的 ItemInfoRow，不需要运行时查表，也不影响其他系统。
+	if (!bAllowWildOnlyItems && SpawnItemActorClass)
+	{
+		if (const AItemActor* DefaultItem = SpawnItemActorClass->GetDefaultObject<AItemActor>())
+		{
+			if (const FItemActorInfo* Row = DefaultItem->ItemInfoRow.GetRow<FItemActorInfo>(TEXT("FoodSpawner::CanSpawn")))
+			{
+				if (Row->bWildOnly)
+				{
+					return false;
+				}
+			}
+		}
+	}
+
 	// 仓库驱动模式：能否生成取决于仓库中该食材是否有库存（取一件扣一件）
 	if (UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetWorld()->GetGameInstance()))
 	{

@@ -6,6 +6,8 @@
 #include "BaseGameInstance.h"
 #include "NPC/GuestCharacter.h"
 #include "Game/FoodSystem.h"
+#include "Game/BusinessTime.h"
+#include "Game/BusinessSimulation.h"
 #include "Data/MenuData.h"
 
 // Sets default values
@@ -53,7 +55,8 @@ void AOrderSystem::Tick(float DeltaTime)
 			orderHandle->waitTime += DeltaTime;
 			if (orderHandle->IsExpired())
 			{
-				ABaseLevelBP::AddScore(this, -orderHandle->GetOrderPrice());
+				// 野味订单有价格倍率，但超时惩罚仍按基础价，避免"只奖励不惩罚"被放大
+				ABaseLevelBP::AddScore(this, -orderHandle->GetBaseOrderPrice());
 				OnFailOrder.Broadcast(orderHandle, orderHandle->OrderData);
 				GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, TEXT("订单超时"));
 
@@ -114,6 +117,11 @@ void AOrderSystem::InitCfg(ULevelOrderCfg* cfg)
 	// 关卡（重新）开始：配置订单的顺序游标从第一单重新开始
 	CurConfigOrderIndex = 0;
 	OrderID = 0;
+	// 新的一天：野味订单计数归零（下一次点餐会再按 UTimeSystem::Day 校准）
+	WildOrderDay = INDEX_NONE;
+	WildOrdersIssuedToday = 0;
+	ActivePrepWindowGrace = 0.f;
+	bPrepWindowActive = false;
 
 	// 订单池改为按菜品表（MenuDataTable / FMenuData）构建
 	RebuildOrderPool();
@@ -198,16 +206,30 @@ void AOrderSystem::RebuildOrderPool()
 			{
 				continue;
 			}
+			// 含野外专属菜品的套餐不进常规池：只在备料窗口作为限时野味订单发放
+			bool bHasWildMenu = false;
+			for (const int32 FoodID : Custom.FoodIDs)
+			{
+				if (FS->GetMenuData(FoodID).bRequiresWildIngredient)
+				{
+					bHasWildMenu = true;
+					break;
+				}
+			}
+			if (bHasWildMenu)
+			{
+				continue;
+			}
 			OrderPool.Add(BuildOrder(Custom.FoodIDs));
 			OrderWeights.Add(WeightOf(Custom.FoodIDs));
 		}
 	}
 
-	// 2) 菜品表里每道 Probabilitys>0 的菜各成一单
+	// 2) 菜品表里每道 Probabilitys>0 的菜各成一单（野味菜品除外）
 	for (const int32 FoodID : FS->GetFoodIDsByMachine(0))
 	{
 		const FMenuData Menu = FS->GetMenuData(FoodID);
-		if (Menu.FoodID < 0 || Menu.Probabilitys <= 0.f)
+		if (Menu.FoodID < 0 || Menu.Probabilitys <= 0.f || Menu.bRequiresWildIngredient)
 		{
 			continue;
 		}
@@ -345,6 +367,62 @@ bool AOrderSystem::GetNextConfigOrder(FOrderData& OutOrder)
 	return false;
 }
 
+// ==================== 备料窗口 / 限时野味订单（第 16 节 P0） ====================
+
+void AOrderSystem::SetPrepWindowGrace(float Seconds, bool bWindowActive)
+{
+	ActivePrepWindowGrace = FMath::Max(0.f, Seconds);
+	bPrepWindowActive = bWindowActive;
+
+	for (UOrderHandle* Handle : waitList)
+	{
+		if (Handle)
+		{
+			Handle->SetPrepWindowGraceSeconds(bWindowActive ? ActivePrepWindowGrace : 0.f);
+		}
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("[OrderSystem] 备料窗口 %s：在场 %d 单宽限 %.1fs"),
+		bWindowActive ? TEXT("开启") : TEXT("关闭"), waitList.Num(),
+		bWindowActive ? ActivePrepWindowGrace : 0.f);
+}
+
+int32 AOrderSystem::GetCurrentBusinessDay() const
+{
+	UBaseGameInstance* GI = GetWorld() ? Cast<UBaseGameInstance>(GetWorld()->GetGameInstance()) : nullptr;
+	UTimeSystem* TS = GI && GI->businessSimulation ? GI->businessSimulation->TimeSystem.Get() : nullptr;
+	return TS ? TS->Day : 0;
+}
+
+bool AOrderSystem::TryBuildWildOrder(FOrderData& OutOrder) const
+{
+	UBaseGameInstance* GI = GetWorld() ? Cast<UBaseGameInstance>(GetWorld()->GetGameInstance()) : nullptr;
+	UFoodSystem* FS = GI ? GI->foodSystem : nullptr;
+	if (!FS)
+	{
+		return false;
+	}
+
+	TArray<int32> Candidates;
+	for (const int32 FoodID : FS->GetFoodIDsByMachine(0))
+	{
+		const FMenuData Menu = FS->GetMenuData(FoodID);
+		if (Menu.FoodID >= 0 && Menu.bRequiresWildIngredient)
+		{
+			Candidates.Add(FoodID);
+		}
+	}
+	if (Candidates.Num() == 0)
+	{
+		// 表里没配野味菜品：静默跳过，订单来源完全退回旧逻辑
+		return false;
+	}
+
+	OutOrder = FOrderData();
+	OutOrder.FoodIDs.Add(Candidates[FMath::RandRange(0, Candidates.Num() - 1)]);
+	return true;
+}
+
 bool AOrderSystem::CanAcceptNewOrder() const
 {
 	const int32 MaxOrders = orderCfg ? FMath::Max(1, orderCfg->MaxWaitOrderNum) : 4;
@@ -371,10 +449,27 @@ UOrderHandle* AOrderSystem::RequestOrderForGuest(AGuestCharacter* Guest)
 		return nullptr;
 	}
 
-	// 点餐来源：优先按关卡订单配置（Level_01_Order 等）的顺序依次取；
+	// 跨日重置野味订单计数（UTimeSystem::Day；拿不到时钟时固定为 0，行为退化为只发一次）
+	const int32 Today = GetCurrentBusinessDay();
+	if (Today != WildOrderDay)
+	{
+		WildOrderDay = Today;
+		WildOrdersIssuedToday = 0;
+	}
+
+	// 点餐来源：备料窗口内优先发「限时野味订单」（不消耗配置订单序列游标，属窗口内额外机会单）；
+	// 否则优先按关卡订单配置（Level_01_Order 等）的顺序依次取；
 	// 关闭顺序出单或配置里没有订单时，才退回按菜品表 Probabilitys 的随机订单池
 	FOrderData OrderData;
-	if (bUseConfigOrderSequence && orderCfg && orderCfg->Orders.Num() > 0)
+	bool bWildOrder = false;
+	if (bEnableWildOrderInPrepWindow && bPrepWindowActive
+		&& WildOrderDailyLimit > 0 && WildOrdersIssuedToday < WildOrderDailyLimit
+		&& TryBuildWildOrder(OrderData))
+	{
+		bWildOrder = true;
+		WildOrdersIssuedToday++;
+	}
+	else if (bUseConfigOrderSequence && orderCfg && orderCfg->Orders.Num() > 0)
 	{
 		if (!GetNextConfigOrder(OrderData))
 		{
@@ -400,11 +495,30 @@ UOrderHandle* AOrderSystem::RequestOrderForGuest(AGuestCharacter* Guest)
 	orderHandle->OrderData = OrderData;
 	orderHandle->waitTime = 0.f;
 	orderHandle->Guest = Guest;
+	orderHandle->SetPrepWindowGraceSeconds(ActivePrepWindowGrace);
+	if (bWildOrder)
+	{
+		orderHandle->SetWildOrder(WildOrderPriceMultiplier);
+	}
 	orderHandle->RefreshOrderStats();
 	orderHandle->InitializePatience(orderCfg);
 
 	waitList.Add(orderHandle);
 	OnStartOrder.Broadcast(orderHandle, orderHandle->OrderData);
+
+	if (bWildOrder)
+	{
+		// HUD 接入点：蓝图监听 OnWildOrderOffered 做正式提示；这里给一条零配置屏幕提示
+		OnWildOrderOffered.Broadcast(orderHandle);
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Yellow,
+				FString::Printf(TEXT("限时野味订单：%s（需要野外食材 · 收益 x%.1f）"),
+					*orderHandle->GetOrderDisplayName(), WildOrderPriceMultiplier));
+		}
+		UE_LOG(LogTemp, Log, TEXT("[OrderSystem] 备料窗口野味订单 %d/%d：%s"),
+			WildOrdersIssuedToday, WildOrderDailyLimit, *orderHandle->GetOrderDisplayName());
+	}
 
 	// 屏幕提示由客人侧（AGuestCharacter::PlaceOrder）统一打印，这里只留日志避免重复刷屏
 	UE_LOG(LogTemp, Log, TEXT("[OrderSystem] 客人 %s 点餐：%s（等待 %.0fs）"),
@@ -669,10 +783,27 @@ void UOrderHandle::EnsureStatsCached() const
 	bStatsCached = true;
 }
 
-int32 UOrderHandle::GetOrderPrice() const
+int32 UOrderHandle::GetBaseOrderPrice() const
 {
 	EnsureStatsCached();
 	return CachedPrice;
+}
+
+int32 UOrderHandle::GetOrderPrice() const
+{
+	EnsureStatsCached();
+	return WildPriceMultiplier > 1.f ? FMath::RoundToInt(CachedPrice * WildPriceMultiplier) : CachedPrice;
+}
+
+void UOrderHandle::SetPrepWindowGraceSeconds(float Seconds)
+{
+	PrepWindowGraceSeconds = FMath::Max(0.f, Seconds);
+}
+
+void UOrderHandle::SetWildOrder(float InPriceMultiplier)
+{
+	WildPriceMultiplier = FMath::Max(1.f, InPriceMultiplier);
+	bIsWildOrder = WildPriceMultiplier > 1.f;
 }
 
 void UOrderHandle::InitializePatience(const ULevelOrderCfg* Config)
@@ -710,7 +841,9 @@ float UOrderHandle::GetOrderMaxWaitTime(int32 MenuID) const
 
 float UOrderHandle::GetOrderTimeout() const
 {
-	return NormalWaitTime > 0.f ? NormalWaitTime + LateServeGraceSeconds : 0.f;
+	// 备料窗口宽限叠加在原有的迟到宽限之上；窗口结束由订单系统清零，不改 InitializePatience 的结果
+	const float TotalGrace = LateServeGraceSeconds + PrepWindowGraceSeconds;
+	return NormalWaitTime > 0.f ? NormalWaitTime + TotalGrace : 0.f;
 }
 
 bool UOrderHandle::IsLate() const

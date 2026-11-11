@@ -58,6 +58,15 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Warehouse")
 	TArray<FInventorySlot> StoredItems;
 
+	/** 营业期间锁定仓库：存入 / 取出都被拒绝（打烊后解锁），堵住「打烊囤货、营业取回」的绕过。
+	 *  营业时钟取不到时按「营业中」处理（即锁定），与角色打烊拾取重定向的兜底一致。默认开启。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Warehouse")
+	bool bLockWhileBusinessOpen = true;
+
+	/** 当前是否处于营业锁定（bLockWhileBusinessOpen 且营业中）。蓝图提示文案 / UI 可用它区分营业与打烊。 */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Warehouse")
+	bool IsLockedWhileOpen() const;
+
 	/** 玩家按 E：把背包里的全部物品转入仓库（背包清空）。返回转入的“种类”数（受容量上限截断，未转入的留在背包）。 */
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Warehouse")
 	int32 DepositFromInventory(AShootCharacter* Player);

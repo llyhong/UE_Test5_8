@@ -5,10 +5,14 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Game/BusinessTime.h"
+#include "PhysicalMaterials/PhysicalMaterial.h"
 #include "ItemScatterSpawner.generated.h"
 
 class AItemActor;
 class UTimeSystem;
+class ULandscapeComponent;
+class ULandscapeLayerInfoObject;
+struct FHitResult;
 
 /** 生成 / 回收食材时广播，供蓝图挂特效、音效、提示 */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FScatterItemEvent, AItemActor*, Item);
@@ -92,6 +96,8 @@ struct FScatterSlot
  *  - 避让：任何两个生成点之间保持 MinSpacing 的水平距离；开启 bAvoidWorldItems 时
  *          也不会压在关卡里已摆放的物品上；
  *  - 地面吸附：向下 LineTrace 贴合地面（可选沿法线旋转），打不到地面的点直接丢弃；
+ *  - 地形层筛选：可按 Landscape 图层名（Grass / Gravel / Farmfield…）或物理材质 / SurfaceType
+ *          限制"长在哪类地面上"，不合格的采样点会被丢弃并重新采样；
  *  - 重生：检测"被玩家拿起（EIS_Equipped / 已 Attach 到 Pawn）"与"被 Destroy"两种离场方式，
  *          按 RespawnDelayMin~Max 随机延迟后重生，可配一半回原位、一半换新位置；
  *  - 全部参数均为 EditAnywhere，可在关卡里的实例上直接调，无需改代码。
@@ -174,6 +180,48 @@ public:
 	 *  适合户外农场区域（防止食材生成到屋顶上）；若某生成器区域是普通静态网格地面，请关闭此项。 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Scatter|Ground", meta = (EditCondition = "bSnapToGround"))
 	bool bOnlyOnLandscape = true;
+
+	// ==================== 配置：地形层筛选 ====================
+
+	/** 按 Landscape 图层名筛选生成点（编辑器 / PIE 有效；打包版没有图层权重读取接口，会自动跳过本通道）。
+	 *  例：AllowedLandscapeLayers = [Grass, Farmfield]，BlockedLandscapeLayers = [Gravel, Floor]，
+	 *  蘑菇就只长在草地 / 农田上，不会落在碎石路或石板上。
+	 *  层名取自 LayerInfo 资产里的 LayerName（不是资产名）。本项目 Fantastic_Village_Pack/build 实测值：
+	 *  Grass / Farmfield / Gravel / "Gravel 2" / Pavingstone / "Pavingstone 2" / Floor（带空格的要照抄）。
+	 *  本包 LayerInfo 均未配 Physical Material，所以用图层名通道最省事；打包版请改走下方物理材质通道。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Scatter|GroundLayer")
+	bool bFilterByLandscapeLayer = false;
+
+	/** 允许生成的图层名；留空 = 不按"允许名单"限制（可只用黑名单）。任一层权重达标即通过。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Scatter|GroundLayer", meta = (EditCondition = "bFilterByLandscapeLayer"))
+	TArray<FName> AllowedLandscapeLayers;
+
+	/** 禁止生成的图层名（优先级高于允许名单），如 Gravel / Pavingstone1 / Floor。任一层权重达标即拒绝。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Scatter|GroundLayer", meta = (EditCondition = "bFilterByLandscapeLayer"))
+	TArray<FName> BlockedLandscapeLayers;
+
+	/** 判定"该层占主导"的最低权重（0~1）：默认 0.5。调小可让混合过渡带也算合格。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Scatter|GroundLayer",
+		meta = (EditCondition = "bFilterByLandscapeLayer", ClampMin = "0", ClampMax = "1"))
+	float MinLandscapeLayerWeight = 0.5f;
+
+	/** 按物理材质 / 表面类型筛选（全平台可用，打包版推荐用这条）。
+	 *  需给 LandscapeLayerInfoObject 配 Physical Material，并在 Project Settings > Physics > Physical Surface 定义 SurfaceType。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Scatter|GroundLayer")
+	bool bFilterByPhysicalSurface = false;
+
+	/** 允许的物理表面类型；与 AllowedPhysicalMaterials 是"或"关系，两个都留空 = 本通道不限制 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Scatter|GroundLayer", meta = (EditCondition = "bFilterByPhysicalSurface"))
+	TArray<TEnumAsByte<EPhysicalSurface>> AllowedSurfaceTypes;
+
+	/** 允许的物理材质资产；留空 = 不限制 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Scatter|GroundLayer", meta = (EditCondition = "bFilterByPhysicalSurface"))
+	TArray<TObjectPtr<UPhysicalMaterial>> AllowedPhysicalMaterials;
+
+	/** 完全读不到地形层信息 / 物理材质时是否放行：默认 true，避免整片区域颗粒无收。
+	 *  调试时设 false 可强制"必须命中过滤条件"才生成（用来确认层名有没有填对）。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Scatter|GroundLayer")
+	bool bAllowUnknownGround = true;
 
 	// ==================== 配置：数量与避让 ====================
 
@@ -295,6 +343,12 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Scatter|Season")
 	ESeason GetCurrentSeason() const;
 
+	/** 查询某个世界坐标处指定 Landscape 图层的权重（0~1）；返回 -1 表示读不到
+	 *  （层名不存在 / 该点不在地形上 / 打包版无图层权重接口）。
+	 *  用于验证 AllowedLandscapeLayers 里填的层名是否正确。 */
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Scatter|GroundLayer")
+	float GetLandscapeLayerWeight(FName LayerName, const FVector& WorldLocation) const;
+
 	/** 当前正在等待重生的坑位数量 */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Scatter")
 	int32 GetPendingRespawnCount() const;
@@ -333,8 +387,18 @@ protected:
 	/** 采样一个区域内的候选点（未贴地） */
 	FVector SamplePointInArea();
 
-	/** 把候选点贴到地面并算出旋转；返回 false 表示打不到地面，应丢弃 */
+	/** 把候选点贴到地面并算出旋转；返回 false 表示打不到地面 / 不满足地形层筛选，应丢弃 */
 	bool ProjectToGroundAndRotate(const FVector& InPoint, FVector& OutLocation, FRotator& OutRotation);
+
+	/** 地面命中是否满足地形层 / 物理材质筛选；不满足的点会被丢弃并重新采样 */
+	bool IsGroundAllowedByFilter(const FHitResult& Hit, const FVector& CandidateLocation);
+
+#if WITH_EDITOR
+	/** 图层权重纹理读取缓存：key = LayerInfo；仅当 RenderComponent 与 CachedLayerComponent 一致时有效，
+	 *  避免每个采样点都重读一次整张权重纹理。用 UObject 弱引用避免头文件引入完整 Landscape 类型。 */
+	TWeakObjectPtr<UObject> CachedLayerComponent;
+	TMap<ULandscapeLayerInfoObject*, TArray<uint8>> LayerWeightCache;
+#endif
 
 	/** 判断某个水平位置是否满足避让（够远） */
 	bool IsLocationFree(const FVector& InLocation) const;

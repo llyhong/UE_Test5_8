@@ -6,6 +6,21 @@
 #include "Components/WidgetComponent.h"
 #include "Engine/Engine.h"
 #include "Interaction/InteractionConfig.h"
+#include "Game/BaseGameInstance.h"
+
+bool AStorageWarehouse::IsLockedWhileOpen() const
+{
+	if (!bLockWhileBusinessOpen)
+	{
+		return false;
+	}
+	// 与 AShootCharacter 打烊拾取重定向同一兜底：取不到营业时钟时按「营业中」处理（即锁定）
+	UBaseGameInstance* GI = GetWorld() ? Cast<UBaseGameInstance>(GetWorld()->GetGameInstance()) : nullptr;
+	const bool bBusinessOpen = (GI && GI->businessSimulation && GI->businessSimulation->TimeSystem)
+		? GI->businessSimulation->TimeSystem->IsBusinessOpen()
+		: true;
+	return bBusinessOpen;
+}
 
 AStorageWarehouse::AStorageWarehouse()
 {
@@ -112,6 +127,17 @@ void AStorageWarehouse::OnInteractionEndOverlap(UPrimitiveComponent* OverlappedC
 
 int32 AStorageWarehouse::DepositFromInventory(AShootCharacter* Player)
 {
+	// 营业期间仓库锁定：拒绝存入（打烊后解锁）
+	if (IsLockedWhileOpen())
+	{
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Yellow,
+				TEXT("[仓库] 营业期间已锁定，打烊后才能存取"));
+		}
+		return 0;
+	}
+
 	if (!Player)
 	{
 		return 0;
@@ -163,6 +189,17 @@ int32 AStorageWarehouse::DepositFromInventory(AShootCharacter* Player)
 
 bool AStorageWarehouse::RetrieveToInventory(AShootCharacter* Player, int32 SlotIndex)
 {
+	// 营业期间仓库锁定：拒绝取回（打烊后解锁）
+	if (IsLockedWhileOpen())
+	{
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Yellow,
+				TEXT("[仓库] 营业期间已锁定，打烊后才能存取"));
+		}
+		return false;
+	}
+
 	if (!Player || !StoredItems.IsValidIndex(SlotIndex))
 	{
 		return false;

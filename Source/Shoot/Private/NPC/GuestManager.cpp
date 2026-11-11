@@ -35,6 +35,10 @@ AGuestManager::AGuestManager()
 	RushBannerIcon = BannerIcon.Object;
 	RushBannerText = NSLOCTEXT("GuestManager", "CustomerRush", "客流波峰来袭！");
 	RushBannerDescription = NSLOCTEXT("GuestManager", "CustomerRushDescription", "来客速度加快，准备接单！");
+	PrepWindowText = NSLOCTEXT("GuestManager", "PrepWindow", "备料时间");
+	PrepWindowDescription = NSLOCTEXT("GuestManager", "PrepWindowDescription", "波峰结束 · 可去野外采食材");
+	static ConstructorHelpers::FObjectFinder<UTexture2D> PrepIcon(TEXT("/Game/_Demo/Textures/ICON/T_Event_Warning"));
+	PrepWindowIcon = PrepIcon.Object;
 	BusinessOpenText = NSLOCTEXT("GuestManager", "BusinessOpen", "OPEN");
 	BusinessClosedText = NSLOCTEXT("GuestManager", "BusinessClosed", "CLOSED");
 	BusinessOpenDescription = NSLOCTEXT("GuestManager", "BusinessOpenDescription", "开始营业 · 欢迎光临");
@@ -112,7 +116,11 @@ void AGuestManager::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	{
 		World->GetTimerManager().ClearTimer(SeatStatusLogHandle);
 		World->GetTimerManager().ClearTimer(ClosingTimeoutHandle);
+		World->GetTimerManager().ClearTimer(PrepWindowTimerHandle);
+		World->GetTimerManager().ClearTimer(PrepBannerTimerHandle);
 	}
+	HidePrepBanner();
+	bInPrepWindow = false;
 	if (UTimeSystem* TS = BoundTimeSystem.Get())
 	{
 		TS->OnBusinessOpenChanged.RemoveDynamic(this, &AGuestManager::OnBusinessOpenChanged);
@@ -172,7 +180,8 @@ void AGuestManager::TickSpawn()
 	AGuestCharacter* Guest = SpawnGuest();
 	if (bCustomerPacingStarted)
 	{
-		const float Interval = bInCustomerRush ? FMath::Max(RushSpawnInterval, 0.1f) : SpawnInterval;
+		// 备料窗口内放慢来客（GetEffectiveSpawnInterval 只放宽不收紧）
+		const float Interval = bInCustomerRush ? FMath::Max(RushSpawnInterval, 0.1f) : GetEffectiveSpawnInterval();
 		ScheduleNextSpawn(Guest ? Interval : FMath::Max(SpawnRetryDelay, 0.1f));
 	}
 }
@@ -197,6 +206,8 @@ void AGuestManager::AdvanceRushPhase()
 	float PhaseDelay;
 	if (bInCustomerRush)
 	{
+		// 新波峰开始：立刻关闭备料窗口（恢复来客节奏与订单宽限）
+		ClosePrepWindow();
 		PhaseDelay = FMath::Max(RushDuration, 0.1f);
 		const double CycleDuration = FMath::Max(static_cast<double>(RushInterval), static_cast<double>(PhaseDelay) + 0.1);
 		NextRushStartTime = World->GetTimeSeconds() + CycleDuration;
@@ -205,9 +216,20 @@ void AGuestManager::AdvanceRushPhase()
 	else
 	{
 		PhaseDelay = static_cast<float>(FMath::Max(NextRushStartTime - World->GetTimeSeconds(), 0.1));
+
+		// 波峰结束 = 平峰空档：开一个"备料窗口"，长度取配置值与「距下一波峰剩余 -2 秒」的较小者，
+		// 保证玩家赶得回来，且不压缩下一轮波峰。见 营业忙乱机制配置.md 第 16 节。
+		if (bEnablePrepWindow)
+		{
+			const float Available = PhaseDelay - 2.f;
+			if (Available >= 1.f)
+			{
+				OpenPrepWindow(FMath::Min(PrepWindowSeconds, Available));
+			}
+		}
 	}
 
-	ScheduleNextSpawn(bInCustomerRush ? FMath::Max(RushSpawnInterval, 0.1f) : SpawnInterval);
+	ScheduleNextSpawn(bInCustomerRush ? FMath::Max(RushSpawnInterval, 0.1f) : GetEffectiveSpawnInterval());
 	World->GetTimerManager().SetTimer(RushPhaseTimerHandle,
 		this, &AGuestManager::AdvanceRushPhase, PhaseDelay, false);
 }
@@ -280,6 +302,140 @@ void AGuestManager::HideRushBanner()
 		}
 	}
 	RushBanners.Reset();
+}
+
+// ==================== 备料窗口（营业忙乱机制配置.md 第 16 节 P0） ====================
+
+float AGuestManager::GetEffectiveSpawnInterval() const
+{
+	// 只放宽不收紧：配置里把 PrepWindowSpawnInterval 调小也不会让来客变快
+	return bInPrepWindow ? FMath::Max(SpawnInterval, PrepWindowSpawnInterval) : SpawnInterval;
+}
+
+void AGuestManager::OpenPrepWindow(float Seconds)
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	const float Duration = FMath::Max(Seconds > 0.f ? Seconds : PrepWindowSeconds, 1.f);
+	bInPrepWindow = true;
+
+	// 在场订单追加超时宽限；窗口内新接的订单由 AOrderSystem::ActivePrepWindowGrace 继承
+	ApplyPrepWindowGrace(FMath::Max(0.f, PrepWindowOrderGraceSeconds));
+	ShowPrepBanner(Duration);
+	OnPrepWindowChanged.Broadcast(true, Duration);
+
+	World->GetTimerManager().SetTimer(PrepWindowTimerHandle,
+		this, &AGuestManager::ClosePrepWindow, Duration, false);
+
+	UE_LOG(LogTemp, Log, TEXT("[GuestManager] 备料窗口开启：%.1fs（来客间隔 %.1fs，订单宽限 +%.1fs）"),
+		Duration, GetEffectiveSpawnInterval(), PrepWindowOrderGraceSeconds);
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 4.f, FColor::Green,
+			FString::Printf(TEXT("备料窗口 %.0f 秒 · 可以出门采食材"), Duration));
+	}
+}
+
+void AGuestManager::ClosePrepWindow()
+{
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(PrepWindowTimerHandle);
+	}
+	HidePrepBanner();
+	if (!bInPrepWindow)
+	{
+		return;
+	}
+	bInPrepWindow = false;
+	ApplyPrepWindowGrace(0.f);
+	OnPrepWindowChanged.Broadcast(false, 0.f);
+	UE_LOG(LogTemp, Log, TEXT("[GuestManager] 备料窗口关闭：来客间隔与订单宽限已还原"));
+}
+
+void AGuestManager::ApplyPrepWindowGrace(float Seconds)
+{
+	if (AOrderSystem* OS = Cast<AOrderSystem>(UGameplayStatics::GetActorOfClass(this, AOrderSystem::StaticClass())))
+	{
+		OS->SetPrepWindowGrace(Seconds, bInPrepWindow);
+	}
+}
+
+void AGuestManager::ShowPrepBanner(float Seconds)
+{
+	HidePrepBanner();
+	UWorld* World = GetWorld();
+	if (!World || !RushBannerClass)
+	{
+		return;
+	}
+
+	const FText Desc = FText::FromString(
+		FString::Printf(TEXT("%s（%.0f 秒）"), *PrepWindowDescription.ToString(), Seconds));
+
+	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+	{
+		APlayerController* PC = It->Get();
+		if (!PC || !PC->IsLocalController())
+		{
+			continue;
+		}
+		UUserWidget* Banner = CreateWidget<UUserWidget>(PC, RushBannerClass);
+		if (!Banner)
+		{
+			continue;
+		}
+		Banner->SetVisibility(ESlateVisibility::HitTestInvisible);
+		if (UTextBlock* Title = Cast<UTextBlock>(Banner->GetWidgetFromName(TEXT("Txt_Title"))))
+		{
+			Title->SetText(PrepWindowText);
+		}
+		if (UTextBlock* Description = Cast<UTextBlock>(Banner->GetWidgetFromName(TEXT("Txt_Desc"))))
+		{
+			Description->SetText(Desc);
+		}
+		for (FName Name : {FName(TEXT("Txt_Countdown")), FName(TEXT("PB_TimeLeft"))})
+		{
+			if (UWidget* Countdown = Banner->GetWidgetFromName(Name))
+			{
+				Countdown->SetVisibility(ESlateVisibility::Collapsed);
+			}
+		}
+		if (UImage* Icon = Cast<UImage>(Banner->GetWidgetFromName(TEXT("Icon_Event"))))
+		{
+			Icon->SetBrushFromTexture(PrepWindowIcon);
+			Icon->SetVisibility(PrepWindowIcon ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+		}
+		Banner->AddToPlayerScreen(90);
+		Banner->SetDesiredSizeInViewport(FVector2D(600.f, 160.f));
+		Banner->SetPositionInViewport(FVector2D(0.f, 60.f), false);
+		Banner->SetAlignmentInViewport(FVector2D(0.5f, 0.f));
+		// 设置尺寸/位置会重置锚点，必须最后设置
+		Banner->SetAnchorsInViewport(FAnchors(0.5f, 0.f));
+		PrepBanners.Add(Banner);
+	}
+	World->GetTimerManager().SetTimer(PrepBannerTimerHandle,
+		this, &AGuestManager::HidePrepBanner, FMath::Max(PrepWindowBannerSeconds, 0.1f), false);
+}
+
+void AGuestManager::HidePrepBanner()
+{
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(PrepBannerTimerHandle);
+	}
+	for (UUserWidget* Banner : PrepBanners)
+	{
+		if (Banner)
+		{
+			Banner->RemoveFromParent();
+		}
+	}
+	PrepBanners.Reset();
 }
 
 void AGuestManager::ShowBusinessSign(bool bOpen)
@@ -783,6 +939,7 @@ void AGuestManager::ClearAllGuests()
 void AGuestManager::PauseSpawning()
 {
 	HideRushBanner();
+	ClosePrepWindow();
 	bSpawningPaused = true;
 	bCustomerPacingStarted = false;
 	bInCustomerRush = false;
@@ -807,12 +964,12 @@ void AGuestManager::ResumeSpawning()
 	bSpawningPaused = false;
 	if (!TS || !TS->IsBusinessOpen())
 	{
-		ScheduleNextSpawn(SpawnInterval);
+		ScheduleNextSpawn(GetEffectiveSpawnInterval());
 		return;
 	}
 
 	bCustomerPacingStarted = true;
-	ScheduleNextSpawn(SpawnInterval);
+	ScheduleNextSpawn(GetEffectiveSpawnInterval());
 	World->GetTimerManager().SetTimer(RushPhaseTimerHandle,
 		this, &AGuestManager::AdvanceRushPhase, FMath::Max(FirstRushDelay, 0.1f), false);
 }

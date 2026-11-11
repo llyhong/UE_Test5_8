@@ -17,6 +17,10 @@ class UBusinessSignWidget;
 /** 打烊收尾完成广播：已点菜的客人都处理完（上完菜 / 等待超时离场）后才触发，表示"真正打烊、可以结束这一天" */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnClosingFinishedSignature);
 
+/** 备料窗口变化：bOpen=true 表示波峰刚结束、进入可离场窗口；Seconds 为本次窗口时长（秒）。
+ *  供 HUD 倒计时、野外事件与限时野味订单监听；窗口关闭时 bOpen=false、Seconds=0。 */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnPrepWindowChangedSignature, bool, bOpen, float, Seconds);
+
 /**
  * 客人统一管理器：负责按配置周期性生成 / 销毁 GuestCharacter，
  * 维护在场客人列表，并约束最大同时在场数量（避免抢占过多座位）。
@@ -95,6 +99,44 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GuestManager|Pacing|UI", meta = (ClampMin = "0.1", Units = "s"))
 	float RushBannerSeconds = 3.0f;
+
+	// ========== 备料窗口（波峰结束后的可离场时段，配合第 16 节野外玩法） ==========
+	/** 是否启用备料窗口：关闭则波峰结束后不做任何放宽，行为与旧版完全一致 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GuestManager|PrepWindow")
+	bool bEnablePrepWindow = true;
+
+	/** 备料窗口时长（秒）。实际时长还会被「距下一次波峰的剩余时间 -2 秒」截断，保证能赶回来 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GuestManager|PrepWindow", meta = (ClampMin = "1.0", Units = "s"))
+	float PrepWindowSeconds = 30.f;
+
+	/** 窗口内的来客间隔（秒）：只在比 SpawnInterval 更慢时生效，只放宽不收紧 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GuestManager|PrepWindow", meta = (ClampMin = "0.1", Units = "s"))
+	float PrepWindowSpawnInterval = 25.f;
+
+	/** 窗口内给在场订单追加的超时宽限（秒）：叠加到 UOrderHandle 的 LateServeGraceSeconds 之上，窗口结束还原 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GuestManager|PrepWindow", meta = (ClampMin = "0.0", Units = "s"))
+	float PrepWindowOrderGraceSeconds = 8.f;
+
+	/** 当前是否处于备料窗口（运行时只读） */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|GuestManager|PrepWindow")
+	bool bInPrepWindow = false;
+
+	/** 备料窗口变化广播（HUD / 野外事件 / 限时野味订单监听） */
+	UPROPERTY(BlueprintAssignable, Category = "Shoot|GuestManager|PrepWindow")
+	FOnPrepWindowChangedSignature OnPrepWindowChanged;
+
+	/** 备料窗口提示横幅文本（复用 RushBannerClass 的 WBP_EventBanner） */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GuestManager|PrepWindow|UI")
+	FText PrepWindowText;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GuestManager|PrepWindow|UI")
+	FText PrepWindowDescription;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GuestManager|PrepWindow|UI")
+	TObjectPtr<UTexture2D> PrepWindowIcon = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GuestManager|PrepWindow|UI", meta = (ClampMin = "0.1", Units = "s"))
+	float PrepWindowBannerSeconds = 3.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GuestManager|BusinessSign", meta = (ClampMin = "0.1", Units = "s"))
 	float BusinessSignSeconds = 3.f;
@@ -219,6 +261,18 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Shoot|GuestManager")
 	void ResumeSpawning();
 
+	/** 手动开启备料窗口（关卡脚本 / 调试用）。Seconds<=0 时按 PrepWindowSeconds；重复调用会重置计时 */
+	UFUNCTION(BlueprintCallable, Category = "Shoot|GuestManager|PrepWindow")
+	void OpenPrepWindow(float Seconds = 0.f);
+
+	/** 手动关闭备料窗口（恢复来客节奏与订单宽限，并广播 bOpen=false） */
+	UFUNCTION(BlueprintCallable, Category = "Shoot|GuestManager|PrepWindow")
+	void ClosePrepWindow();
+
+	/** 当前生效的来客间隔：备料窗口内取更慢的那个值 */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|GuestManager|PrepWindow")
+	float GetEffectiveSpawnInterval() const;
+
 	/** 客人入队：返回分配的排队序号，并把它摆到对应的队列位置（重复入队会移到队尾） */
 	UFUNCTION(BlueprintCallable, Category = "Shoot|GuestManager|Queue")
 	int32 EnqueueGuest(AGuestCharacter* Guest);
@@ -290,6 +344,16 @@ private:
 	void HideRushBanner();
 	void ShowBusinessSign(bool bOpen);
 	void HideBusinessSign();
+
+	/** 备料窗口：横幅提示、来客节奏、订单宽限 */
+	void ShowPrepBanner(float Seconds);
+	void HidePrepBanner();
+	void ApplyPrepWindowGrace(float Seconds);
+	FTimerHandle PrepWindowTimerHandle;
+	FTimerHandle PrepBannerTimerHandle;
+
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UUserWidget>> PrepBanners;
 
 	FTimerHandle BusinessSignTimerHandle;
 

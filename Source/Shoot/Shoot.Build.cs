@@ -23,6 +23,7 @@ public class Shoot : ModuleRules
 			"GeometryCollectionEngine",
 			"Niagara",
 			"Landscape",
+			"PhysicsCore",
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] { "SlateCore" });

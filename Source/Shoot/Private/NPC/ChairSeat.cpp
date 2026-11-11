@@ -528,8 +528,11 @@ void AChairSeat::UpdateTipsVisibility()
 
 bool AChairSeat::IsPlayerWithinTipsWidgetDistance() const
 {
+	// 旧关卡实例把 TipsWidgetHideDistance 存成了 1200，取下限兜底（见头文件 MinTipsWidgetHideDistance 注释）
+	const float EffectiveDistance = FMath::Max(TipsWidgetHideDistance, MinTipsWidgetHideDistance);
+
 	// <=0 视为不限制距离，任何距离都允许显示
-	if (TipsWidgetHideDistance <= 0.f)
+	if (EffectiveDistance <= 0.f)
 	{
 		return true;
 	}
@@ -537,7 +540,7 @@ bool AChairSeat::IsPlayerWithinTipsWidgetDistance() const
 	if (APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0))
 	{
 		const float DistSq = FVector::DistSquared(GetActorLocation(), PlayerPawn->GetActorLocation());
-		return DistSq <= FMath::Square(TipsWidgetHideDistance);
+		return DistSq <= FMath::Square(EffectiveDistance);
 	}
 
 	// 拿不到玩家时不强制隐藏，避免误隐藏

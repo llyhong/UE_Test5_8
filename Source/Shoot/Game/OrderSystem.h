@@ -36,6 +36,22 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Shoot|Order")
 	int32 GetOrderPrice() const;
 
+	/** 基础价格（不含限时野味订单倍率）：订单超时扣分用这个，避免高价单放大惩罚 */
+	UFUNCTION(BlueprintPure, Category = "Shoot|Order")
+	int32 GetBaseOrderPrice() const;
+
+	/** 备料窗口内追加的超时宽限（秒）：由 AOrderSystem::SetPrepWindowGrace 统一下发，窗口结束归零 */
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Order|PrepWindow")
+	void SetPrepWindowGraceSeconds(float Seconds);
+
+	/** 标记为限时野味订单并应用价格倍率（>=1）；1 表示普通订单 */
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Order|Wild")
+	void SetWildOrder(float InPriceMultiplier);
+
+	/** 本单是否为限时野味订单 */
+	UFUNCTION(BlueprintPure, Category = "Shoot|Order|Wild")
+	bool IsWildOrder() const { return bIsWildOrder; }
+
 	UFUNCTION(BlueprintPure, Category = "Shoot|Order")
 	int32 GetOrderSettlementPrice() const;
 
@@ -75,6 +91,11 @@ private:
 	float NormalWaitTime = 0.f;
 	float LateServeGraceSeconds = 0.f;
 	float LateServePriceMultiplier = 1.f;
+	/** 备料窗口追加宽限（不写进存档、不进 InitializePatience，窗口结束由订单系统清零） */
+	float PrepWindowGraceSeconds = 0.f;
+	/** 限时野味订单价格倍率（1=普通单） */
+	float WildPriceMultiplier = 1.f;
+	bool bIsWildOrder = false;
 	TMap<int32, float> MenuWaitTimes;
 
 	/** 汇总结果缓存：Tick 里每帧都要读等待时间，避免每次都遍历菜品表 */
@@ -86,7 +107,10 @@ private:
 	void EnsureStatsCached() const;
 };
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOrderEvent2,const UOrderHandle*, Handle,const FOrderData&,Order); 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOrderEvent2,const UOrderHandle*, Handle,const FOrderData&,Order);
+
+/** 限时野味订单发放：供 HUD 提示「需要野外食材」。见 营业忙乱机制配置.md 第 16 节 P0 */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnWildOrderOfferedSignature, const UOrderHandle*, Handle);
 UCLASS()
 class SHOOT_API AOrderSystem : public AActor
 {
@@ -165,6 +189,37 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Order")
 	int32 CurConfigOrderIndex = 0;
 
+	// ========== 备料窗口 / 限时野味订单（第 16 节 P0） ==========
+	/** 备料窗口内是否优先发放限时野味订单（菜品表里勾选 bRequiresWildIngredient 的菜）。
+	 *  默认开启；但没有任何野味菜品时静默跳过，行为与旧版完全一致。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Order|Wild")
+	bool bEnableWildOrderInPrepWindow = true;
+
+	/** 每个营业日最多发放几单野味订单（0 = 不发放） */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Order|Wild", meta = (ClampMin = "0"))
+	int32 WildOrderDailyLimit = 3;
+
+	/** 野味订单价格倍率：只影响收益，订单超时扣分仍按基础价 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Order|Wild", meta = (ClampMin = "1.0"))
+	float WildOrderPriceMultiplier = 2.f;
+
+	/** 本营业日已发放的野味订单数（运行时只读，跨日自动归零） */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Order|Wild")
+	int32 WildOrdersIssuedToday = 0;
+
+	/** 当前是否处于备料窗口（由 AGuestManager 下发，运行时只读） */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Order|PrepWindow")
+	bool bPrepWindowActive = false;
+
+	/** 统一下发备料窗口状态：给在场订单追加宽限，并记住状态供窗口内新接订单继承。
+	 *  bWindowActive 与 Seconds 分开传，允许把宽限配成 0 而窗口仍然有效。 */
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Order|PrepWindow")
+	void SetPrepWindowGrace(float Seconds, bool bWindowActive);
+
+	/** 限时野味订单发放广播（蓝图挂 HUD 提示「需要野外食材」） */
+	UPROPERTY(BlueprintAssignable, Category = "Shoot|Order|Wild")
+	FOnWildOrderOfferedSignature OnWildOrderOffered;
+
 	/** 订单池：只存"点了哪几道菜"（FoodIDs = MenuDataTable 的 FoodID）。
 	 *  价格 / 等待时间 / 显示名 / 机器图片由 UOrderHandle 的查询函数实时按菜品表（FMenuData）派生。
 	 *  权重（OrderWeights）来自菜品表的 Probabilitys。 */
@@ -204,4 +259,15 @@ public:
 private:
 	/** 订单 ID 自增器（原先是文件作用域全局变量，改为成员以避免多实例/多世界共享状态与外部链接污染） */
 	int32 OrderID = 0;
+
+	/** 备料窗口当前下发的宽限秒数：窗口内新接的订单也继承这个值 */
+	float ActivePrepWindowGrace = 0.f;
+
+	/** 上次发放野味订单时的营业日（UTimeSystem::Day）；跨日自动重置计数 */
+	int32 WildOrderDay = INDEX_NONE;
+
+	int32 GetCurrentBusinessDay() const;
+
+	/** 从菜品表里挑一道 bRequiresWildIngredient 的菜组成订单；表里没配时返回 false（静默跳过） */
+	bool TryBuildWildOrder(FOrderData& OutOrder) const;
 };

@@ -28,6 +28,12 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Spawn")
 	int32 RemainingCount = -1;
 
+	/** 是否允许本箱产出「野外专属食材」（DT_ItemInfo 行里 bWildOnly=true 的物品）。
+	 *  默认 false：野外专属食材只能靠采摘 / 散布 / 打猎获得，食材箱不出（见第 16 节）。
+	 *  设为 true 可用于 A/B 对比或临时补料，行为与旧版完全一致。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Spawn")
+	bool bAllowWildOnlyItems = false;
+
 	/** 是否还能生成：仓库驱动模式下取决于仓库是否有该食材库存；否则原逻辑（无限或剩余>0） */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Spawn")
 	bool CanSpawn() const;

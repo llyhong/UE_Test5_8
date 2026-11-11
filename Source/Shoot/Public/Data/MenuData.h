@@ -60,6 +60,12 @@ USTRUCT(BlueprintType)
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Order")
 	float Probabilitys = 1.f;
 
+	/** 野外专属菜品：本菜需要野外食材（DT_ItemInfo 里 bWildOnly=true 的食材）。
+	 *  勾选后这道菜不会进常规订单池，只在备料窗口内作为「限时高价订单」发放（见第 16 节）。
+	 *  默认 false，旧菜品不受影响。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Order|Wild")
+	bool bRequiresWildIngredient = false;
+
 	// ========== 成品品质奖励（上菜时按成品品质额外结算，叠加在基础菜价/声誉之上） ==========
 	/** 佳品：额外金钱（在订单基础金钱之外） */
 	UPROPERTY(EditAnywhere,BlueprintReadWrite, Category = "Shoot|Quality")
