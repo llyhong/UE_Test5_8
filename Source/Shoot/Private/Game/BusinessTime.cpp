@@ -9,14 +9,6 @@
 #include "Game/BaseGameInstance.h"
 #include "NPC/GuestManager.h"
 
-namespace
-{
-	double WrapVisualHour(double Hour)
-	{
-		return FMath::Fmod(FMath::Fmod(Hour, 24.0) + 24.0, 24.0);
-	}
-}
-
 ESeason UTimeSystem::SeasonFromMonth(int32 InMonth, int32 InMonthsPerSeason)
 {
 	const int32 PerSeason = FMath::Clamp(InMonthsPerSeason, 1, 12);
@@ -48,10 +40,6 @@ void UTimeSystem::Init()
 	// Init 仍保持打烊，首个 Tick 经 OpenBusiness 广播，不能跳过 UI / 客流的开门通知。
 	bIsBusinessOpen = false;
 	bBusinessClosedForDay = false;
-	bVisualRecoveryInitialized = false;
-	VisualHour = static_cast<float>(WrapVisualHour(
-		bStabilizeBusinessLighting && bAutoOpenBusiness && IsWithinBusinessHours()
-			? BusinessStartVisualHour : GetCurrentHour()));
 	UpdateSun();
 }
 
@@ -65,7 +53,6 @@ void UTimeSystem::AdvanceDays(int32 Days)
 	if (Days > 0)
 	{
 		UpdateBusinessState();
-		UpdateVisualHour(0.f);
 		UpdateSun();
 	}
 }
@@ -143,8 +130,7 @@ void UTimeSystem::Tick(float DeltaTime)
 		}
 	}
 
-	// 只暂停经营时钟；非 focused 的视觉仍可平滑恢复，不全局暂停玩家 / 客人 / 雨效。
-	UpdateVisualHour(SafeDeltaTime);
+	// 太阳 / 天空的视觉时间始终等于经营时钟，不再因营业状态锁时。
 	UpdateSun();
 
 	if (bShowDebugInfo && GEngine)
@@ -191,46 +177,6 @@ bool UTimeSystem::IsBusinessVisualFocusActive() const
 	return bStabilizeBusinessLighting && (bIsBusinessOpen || HasPendingClosingGuests());
 }
 
-void UTimeSystem::UpdateVisualHour(float DeltaTime)
-{
-	if (!bStabilizeBusinessLighting)
-	{
-		VisualHour = GetCurrentHour();
-		bVisualRecoveryInitialized = false;
-		return;
-	}
-	if (IsBusinessVisualFocusActive())
-	{
-		// huanglily：营业 / 收尾期间顺时针过渡到固定视觉小时后静止；开门最初几秒完成，之后光影不再变化。
-		bVisualRecoveryInitialized = false;
-		const double Current = WrapVisualHour(VisualHour);
-		const double Remaining = WrapVisualHour(static_cast<double>(BusinessStartVisualHour) - Current);
-		const double Step = BusinessFocusTransitionHoursPerSecond > 0.f
-			? static_cast<double>(BusinessFocusTransitionHoursPerSecond) * FMath::Max(0.f, DeltaTime) : Remaining;
-		VisualHour = static_cast<float>(Remaining <= Step || Remaining < 1.e-3 || Remaining > 24.0 - 1.e-3
-			? WrapVisualHour(BusinessStartVisualHour) : WrapVisualHour(Current + Step));
-		return;
-	}
-
-	const double ClockHour = WrapVisualHour(GetCurrentHour());
-	if (!bVisualRecoveryInitialized)
-	{
-		VisualRecoveryHour = WrapVisualHour(VisualHour);
-		VisualRecoveryTargetHour = VisualRecoveryHour + WrapVisualHour(ClockHour - VisualRecoveryHour);
-		bVisualRecoveryInitialized = true;
-	}
-	else
-	{
-		// 23 -> 0 及经营日回绕都向前展开；追平后保持连续目标，避免浮点误差制造 24 小时假差值。
-		VisualRecoveryTargetHour += WrapVisualHour(ClockHour - LastVisualClockHour);
-	}
-	LastVisualClockHour = ClockHour;
-	const double RecoveryStep = static_cast<double>(FMath::Max(0.f, VisualRecoveryHoursPerSecond))
-		* FMath::Max(0.f, DeltaTime);
-	VisualRecoveryHour = FMath::Min(VisualRecoveryHour + RecoveryStep, VisualRecoveryTargetHour);
-	VisualHour = static_cast<float>(WrapVisualHour(VisualRecoveryHour));
-}
-
 bool UTimeSystem::IsWithinBusinessHours() const
 {
 	const float h = GetCurrentHour();
@@ -252,7 +198,6 @@ bool UTimeSystem::OpenBusiness()
 		return false; // 未到营业时间（如白天备货时段），拒绝开门
 	}
 	bBusinessClosedForDay = false;
-	bVisualRecoveryInitialized = false;
 	bIsBusinessOpen = true;
 	UE_LOG(LogTemp, Warning, TEXT("[TimeSystem] >>> 开门营业！当前小时=%.2f（调用来源可能是玩家按 E 或蓝图）"), GetCurrentHour());
 	OnBusinessOpenChanged.Broadcast(true);
@@ -298,7 +243,7 @@ void UTimeSystem::UpdateSun()
 		DLC->SetMobility(EComponentMobility::Movable);
 	}
 
-	const float Hour = GetVisualHour();
+	const float Hour = GetCurrentHour();
 	const bool bIsDay = Hour > SunriseHour && Hour < SunsetHour;
 
 	// 太阳高度系数：白天为 sin 曲线（0 在地平线，1 在正午），夜晚 < 0（在地平线下）

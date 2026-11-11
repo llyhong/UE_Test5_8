@@ -82,10 +82,6 @@ bool UStylizedSkyBridge::InitializeVisuals()
 	}
 
 	VisualSkyTime = ReadNumber(Owner, TEXT("Current Time of Day"));
-	SunBaseIntensity = Sun->Intensity;
-	SunBaseColor = FLinearColor(Sun->LightColor);
-	SkyLightBaseIntensity = SkyLight->Intensity;
-	SkyLightBaseColor = FLinearColor(SkyLight->LightColor);
 	// 停止原蓝图的自动状态机，但 Set Time 仍可主动采样昼夜 Timeline 的视觉曲线。
 	Owner->SetActorTickEnabled(false);
 	TInlineComponentArray<UTimelineComponent*> Timelines(Owner);
@@ -149,7 +145,7 @@ void UStylizedSkyBridge::UpdateVisuals(const UTimeSystem& Time, float DeltaTime)
 		return;
 	}
 	UpdateLightingWeatherBlend(Time, DeltaTime);
-	const double HourSinceSunrise = FMath::Fmod(Time.GetVisualHour() - Time.SunriseHour + 24.0, 24.0);
+	const double HourSinceSunrise = FMath::Fmod(Time.GetCurrentHour() - Time.SunriseHour + 24.0, 24.0);
 	if (Time.bDriveSun)
 	{
 		VisualSkyTime = HourSinceSunrise < DayHours
@@ -191,11 +187,12 @@ void UStylizedSkyBridge::UpdateVisuals(const UTimeSystem& Time, float DeltaTime)
 
 	UpdateRainStreaks(DeltaTime, Rain);
 
-	// 始终以初始化时的基础光照为基准：直接乘当前值会逐帧叠加衰减，几十秒后太阳/天光归零、场景全黑。
-	Sun->SetIntensity(SunBaseIntensity * LightingWeatherBlend.SunIntensityScale);
-	Sun->SetLightColor(SunBaseColor * LightingWeatherBlend.SunColorTint);
-	SkyLight->SetIntensity(SkyLightBaseIntensity * LightingWeatherBlend.SkyLightIntensityScale);
-	SkyLight->SetLightColor(SkyLightBaseColor * LightingWeatherBlend.SkyLightColor);
+	// Set Time 已按昼夜 Timeline 写好本帧的太阳 / 天光，这里只叠加天气相对倍率。
+	// 若改用启动时快照会覆盖昼夜曲线，入夜后太阳仍是白天强度、天色不变暗。
+	Sun->SetIntensity(Sun->Intensity * LightingWeatherBlend.SunIntensityScale);
+	Sun->SetLightColor(FLinearColor(Sun->LightColor) * LightingWeatherBlend.SunColorTint);
+	SkyLight->SetIntensity(SkyLight->Intensity * LightingWeatherBlend.SkyLightIntensityScale);
+	SkyLight->SetLightColor(FLinearColor(SkyLight->LightColor) * LightingWeatherBlend.SkyLightColor);
 	Fog->SetFogDensity(LightingWeatherBlend.FogDensity);
 	Fog->SetFogHeightFalloff(LightingWeatherBlend.FogHeightFalloff);
 	Fog->SetFogMaxOpacity(LightingWeatherBlend.FogMaxOpacity);

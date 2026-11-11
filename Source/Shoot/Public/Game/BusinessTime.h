@@ -128,28 +128,9 @@ public:
 	float GetCurrentHour() const { return DayStartHour + DayProgress * (DayEndHour - DayStartHour); }
 
 	// ========== 营业视觉（不改变经营时钟或游戏日长度） ==========
-	/** 营业及打烊收尾期间锁住视觉小时；关闭后恢复原来的实时昼夜 / 天气表现。 */
+	/** 营业及打烊收尾期间冻结天气对光照的过渡（避免雨雾光照闪跳）；时间与太阳始终跟随经营时钟。 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Time|Lighting")
 	bool bStabilizeBusinessLighting = true;
-
-	/** 营业 / 收尾期间固定的视觉小时（默认正午，阴影短且静止）；经营时钟照常走。 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Time|Lighting", meta = (ClampMin = "0", ClampMax = "24"))
-	float BusinessStartVisualHour = 12.f;
-
-	/** 开门时视觉小时顺时针过渡到 BusinessStartVisualHour 的速度（游戏小时 / 真实秒）；0 为瞬切。
-	 *  过渡只在开门最初几秒（首位客人到店前）完成，之后整段营业光影静止。 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Time|Lighting", meta = (ClampMin = "0"))
-	float BusinessFocusTransitionHoursPerSecond = 3.f;
-
-	/** 收尾结束后顺时针追赶经营小时的速度（游戏小时 / 真实秒）。 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Time|Lighting", meta = (ClampMin = "0"))
-	float VisualRecoveryHoursPerSecond = 1.f;
-
-	UPROPERTY(Transient, BlueprintReadOnly, Category = "Shoot|Time|Lighting")
-	float VisualHour = 8.f;
-
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Time|Lighting")
-	float GetVisualHour() const { return bStabilizeBusinessLighting ? VisualHour : GetCurrentHour(); }
 
 	/** 稳光开启且正在营业或任意 GuestManager 尚在收尾；不依赖 UObject 默认 GetWorld。 */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Time|Lighting")
@@ -179,7 +160,7 @@ public:
 	UPROPERTY(Transient, BlueprintReadOnly, Category = "Shoot|Time|Sun")
 	TObjectPtr<AActor> StylizedSkyActor;
 
-	/** 是否自动驱动太阳（角度 / 颜色 / 强度随 GetVisualHour 变化）；关闭保留原太阳行为 */
+	/** 是否自动驱动太阳（角度 / 颜色 / 强度随经营时钟变化）；关闭保留原太阳行为 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Time|Sun")
 	bool bDriveSun = true;
 
@@ -218,7 +199,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Time|Sun")
 	float SunsetHour = 18.f;
 
-	/** 根据 GetVisualHour 更新太阳方向 / 颜色 / 强度（SunLight 为空或 bDriveSun=false 时跳过） */
+	/** 根据 GetCurrentHour 更新太阳方向 / 颜色 / 强度（SunLight 为空或 bDriveSun=false 时跳过） */
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Time|Sun")
 	void UpdateSun();
 
@@ -256,16 +237,9 @@ public:
 private:
 	void AdvanceOneDay(bool bResetDayProgress = false);
 	void UpdateBusinessState();
-	void UpdateVisualHour(float DeltaTime);
 	bool HasPendingClosingGuests() const;
 
 	double Accum = 0.0;
 	bool bPausedState = false;
 	bool bBusinessClosedForDay = false;
-
-	// 用连续小时追赶，不每帧从两个已回绕的 float 推断方向，避免追平后误判为再转一整圈。
-	double VisualRecoveryHour = 0.0;
-	double VisualRecoveryTargetHour = 0.0;
-	double LastVisualClockHour = 0.0;
-	bool bVisualRecoveryInitialized = false;
 };

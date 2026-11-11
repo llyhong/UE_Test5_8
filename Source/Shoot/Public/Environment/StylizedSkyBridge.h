@@ -129,12 +129,6 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UFunction> SetTimeFunction;
 
-	/** 初始化时记录的基础光照：天气系数必须乘在基础值上，若每帧乘当前值会指数衰减到全黑 */
-	float SunBaseIntensity = 0.f;
-	FLinearColor SunBaseColor = FLinearColor::White;
-	float SkyLightBaseIntensity = 0.f;
-	FLinearColor SkyLightBaseColor = FLinearColor::White;
-
 	// 真实天气继续驱动雨丝 / 湿度 / 积水；光照只使用独立保存的混合。
 	FWeatherBlendState WeatherBlend;
 	FWeatherBlendState LightingWeatherBlend;
