@@ -229,6 +229,8 @@ public:
 
 	// ---- FTickableGameObject ----
 	virtual void Tick(float DeltaTime) override;
+	/** huanglily：CDO / 原型对象不能参与 Tick，否则编辑器里类默认值的 DayProgress 会自行漂移 */
+	virtual bool IsTickable() const override { return !HasAnyFlags(RF_ClassDefaultObject | RF_ArchetypeObject); }
 	virtual TStatId GetStatId() const override
 	{
 		RETURN_QUICK_DECLARE_CYCLE_STAT(UTimeSystem, STATGROUP_Tickables);

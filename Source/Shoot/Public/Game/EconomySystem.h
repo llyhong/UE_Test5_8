@@ -34,6 +34,18 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Economy")
 	int32 ReputationLossOnFail = 3;
 
+	/** 订单超时扣声誉（赛季版本主用；>0 时覆盖 ReputationLossOnFail） */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Economy")
+	int32 ReputationLossOnOrderTimeout = 8;
+
+	/** 食材成本占订单价的比例（普通单） */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Economy", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float IngredientCostRate = 0.30f;
+
+	/** 食材成本占订单价的比例（野味单，鼓励跑野外） */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Economy", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float WildIngredientCostRate = 0.20f;
+
 	/** 完成订单的固定金钱奖励（与价格奖励叠加） */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Economy")
 	int32 MoneyPerOrder = 0;
@@ -90,6 +102,8 @@ enum class EMoneySource : uint8
 	ShopPurchase	UMETA(DisplayName = "商店消费"),
 	Maintenance		UMETA(DisplayName = "设施维护"),
 	Wages			UMETA(DisplayName = "工资支出"),
+	IngredientCost	UMETA(DisplayName = "食材成本"),
+	SeasonReset		UMETA(DisplayName = "赛季回退"),
 	Debug			UMETA(DisplayName = "调试"),
 };
 
@@ -144,13 +158,27 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Economy")
 	int32 GetMoney() const { return Money; }
 
-	/** 订单完成：增加声誉 + 获得金钱（Money 由 OrderPrice 换算） */
+	/** 订单完成：增加声誉 + 获得金钱（Money 由 OrderPrice 换算），并扣除食材成本 */
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Economy")
-	void OnOrderCompleted(int32 OrderPrice);
+	void OnOrderCompleted(int32 OrderPrice, bool bWildOrder = false);
 
 	/** 订单失败：扣除声誉 */
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Economy")
 	void OnOrderFailed();
+
+	/** 记一笔未付账单（钱不够付食材/维护/工资时）；赛季用连续未付天数判定“入不敷出” */
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Economy")
+	void AddUnpaidBill(int32 Amount);
+
+	/** 取出并清零未付账单（赛季日结调用） */
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Economy")
+	int32 TakeUnpaidBills();
+
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Economy")
+	void ClearUnpaidBills() { UnpaidBills = 0; }
+
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Economy")
+	int32 GetUnpaidBills() const { return UnpaidBills; }
 
 	/** 花费金钱：足够则扣减并返回 true，不足返回 false */
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Economy")
@@ -188,6 +216,9 @@ private:
 	int32 Reputation = 0;
 	int32 Money = 0;
 	TMap<int32, int32> OwnedProps;
+
+	/** 当日未付账单累计（不写档；由赛季日结取走） */
+	int32 UnpaidBills = 0;
 
 	/** 解析后的最终配置（Init 时确定） */
 	FEconomyConfigRow ResolvedConfig;

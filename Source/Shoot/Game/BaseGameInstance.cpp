@@ -79,8 +79,30 @@ void UBaseGameInstance::Init()
 	economySystem->Init();
 
 	// 经营模拟核心：依赖经济系统，负责 时钟 / 员工 / 日-月-年结算 / 经营星级
-	businessSimulation = NewObject<UBusinessSimulation>(this);
+	// 直接按配置类创建，避免关卡 BeginPlay 再替换实例、留下旧时钟继续并行推进
+	UClass* SimClass = UBusinessSimulation::StaticClass();
+	if (!BusinessSimulationClassPath.IsNull())
+	{
+		if (UClass* LoadedClass = BusinessSimulationClassPath.TryLoadClass<UBusinessSimulation>())
+		{
+			SimClass = LoadedClass;
+		}
+		else
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[GameInstance] BusinessSimulationClassPath 无法加载：%s，回退原生 UBusinessSimulation"),
+				*BusinessSimulationClassPath.ToString());
+		}
+	}
+	businessSimulation = NewObject<UBusinessSimulation>(this, SimClass);
 	businessSimulation->Init(economySystem);
+
+	// 赛季：日评级 / 胜负 / 幕检查点，日结算由 BusinessSimulation 驱动
+	seasonSystem = NewObject<USeasonSystem>(this);
+	seasonSystem->ConfigTable = SeasonConfigTable;
+	seasonSystem->ConfigRowName = SeasonConfigRowName;
+	seasonSystem->Init(economySystem, businessSimulation);
+	businessSimulation->SeasonSystem = seasonSystem;
+	businessSimulation->RefreshStars();
 
 	playerInfo = CreateDefaultPlayerInfo();
 	Super::Init();
@@ -118,6 +140,10 @@ void UBaseGameInstance::NewGameData()
 	if (businessSimulation)
 	{
 		businessSimulation->Load();
+	}
+	if (seasonSystem)
+	{
+		seasonSystem->ResetForNewGame();
 	}
 }
 void UBaseGameInstance::SaveGameData()
@@ -169,6 +195,14 @@ bool UBaseGameInstance::LoadGameData() {
 	if (businessSimulation)
 	{
 		businessSimulation->Load();
+	}
+	if (seasonSystem)
+	{
+		seasonSystem->Load();
+	}
+	if (businessSimulation)
+	{
+		businessSimulation->RefreshStars();
 	}
 	// 同步已解锁食材集合（跨存档持久化）
 	UnlockedIngredientIDs.Reset();

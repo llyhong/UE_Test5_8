@@ -199,9 +199,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GuestManager|Queue", meta = (ClampMin = "0.0"))
 	float QueueWanderPauseMax = 2.0f;
 
-	/** 排队等待超时后扣除的声誉 */
+	/** 排队等待超时后扣除的声誉（赛季版本默认 5；关卡蓝图实例若覆盖了旧值需手动同步） */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GuestManager|Queue")
-	int32 ReputationPenaltyOnWaitTimeout = 3;
+	int32 ReputationPenaltyOnWaitTimeout = 5;
 
 	/** 是否绘制等候区可视化（蓝色圆环=徘徊范围，绿球=每位等待客人当前位置） */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GuestManager|Debug")

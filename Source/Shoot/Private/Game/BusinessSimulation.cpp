@@ -2,6 +2,7 @@
 
 #include "Game/BusinessSimulation.h"
 #include "Game/BaseGameInstance.h"
+#include "Game/SeasonSystem.h"
 #include "Engine/Engine.h"
 
 void UBusinessSimulation::Init(UEconomySystem* InEconomy)
@@ -36,6 +37,31 @@ void UBusinessSimulation::Init(UEconomySystem* InEconomy)
 	}
 
 	RecomputeStars();
+}
+
+void UBusinessSimulation::Shutdown()
+{
+	if (TimeSystem)
+	{
+		// huanglily：时钟是独立的 FTickableGameObject，只置 bAutoAdvance 仍会执行 UpdateBusinessState 自动开关门
+		if (TimeSystem->bIsBusinessOpen)
+		{
+			TimeSystem->CloseBusiness();
+		}
+		TimeSystem->SetTickableTickType(ETickableTickType::Never);
+		TimeSystem->bAutoAdvance = false;
+		TimeSystem->bAutoOpenBusiness = false;
+		TimeSystem->OnDayChanged.Clear();
+		TimeSystem->OnMonthChanged.Clear();
+		TimeSystem->OnYearChanged.Clear();
+		TimeSystem->OnSeasonChanged.Clear();
+		TimeSystem->OnBusinessOpenChanged.Clear();
+	}
+	if (Economy)
+	{
+		Economy->OnMoneyChanged.RemoveDynamic(this, &UBusinessSimulation::HandleMoneyChanged);
+	}
+	SeasonSystem = nullptr;
 }
 
 void UBusinessSimulation::HandleMoneyChanged(int32 NewValue, int32 Delta, EMoneySource Source)
@@ -78,20 +104,39 @@ void UBusinessSimulation::OnDay(int32 Y, int32 M, int32 D)
 		// 租金 / 设施收入
 		Economy->AddMoney(DailyRentIncome, EMoneySource::DailyIncome);
 
-		// 维护支出：受经理"管理"属性减免
+		// 维护支出：受经理"管理"属性减免；付不出时记一笔未付账单（钱的下限是 0，不能用负数判破产）
 		const int32 Maint = FMath::Max(0, DailyMaintenance - (StaffSystem ? StaffSystem->GetManagementBonus() : 0));
-		Economy->SpendMoney(Maint, EMoneySource::Maintenance);
+		if (!Economy->SpendMoney(Maint, EMoneySource::Maintenance))
+		{
+			Economy->AddUnpaidBill(Maint);
+		}
+
+		// 员工工资按日计提（月薪 / 30），月末不再重复发薪
+		if (bAccrueWagesDaily && StaffSystem)
+		{
+			const int32 DailyWage = StaffSystem->GetTotalMonthlyWages() / 30;
+			if (DailyWage > 0 && !Economy->SpendMoney(DailyWage, EMoneySource::Wages))
+			{
+				Economy->AddUnpaidBill(DailyWage);
+			}
+		}
 	}
+
+	RecomputeStars();
 
 	// 日报表（已含当日被动收支与玩家当日消费）
 	FBusinessReport R = MakeReport(Y, M, D);
 	OnDailyReport.Broadcast(R);
 
+	// 赛季：日评级 → 连续失败线 → 丰收祭胜负（用当日报表，账本清零前调用）
+	if (SeasonSystem)
+	{
+		SeasonSystem->EvaluateDay(R.Net, R.Money, R.Reputation, RestaurantStars);
+	}
+
 	// 重置日账本
 	TodayIncome = 0;
 	TodayExpense = 0;
-
-	RecomputeStars();
 
 	// 日结算后自动持久化（每游戏日一次，最多丢失一天进度）
 	Save();
@@ -99,8 +144,8 @@ void UBusinessSimulation::OnDay(int32 Y, int32 M, int32 D)
 
 void UBusinessSimulation::OnMonth(int32 Y, int32 M, int32 D)
 {
-	// 月末发工资
-	if (Economy && StaffSystem)
+	// 月末发工资：工资已改为按日计提时不重复扣
+	if (Economy && StaffSystem && !bAccrueWagesDaily)
 	{
 		Economy->SpendMoney(StaffSystem->GetTotalMonthlyWages(), EMoneySource::Wages);
 	}
@@ -151,18 +196,17 @@ void UBusinessSimulation::RecomputeStars()
 
 	const int32 Rep = Economy->GetReputation();
 	int32 Stars = 0;
-	if (Rep >= 200)      Stars = 5;
-	else if (Rep >= 120) Stars = 4;
-	else if (Rep >= 70)  Stars = 3;
-	else if (Rep >= 30)  Stars = 2;
-	else if (Rep >= 10)  Stars = 1;
-
-	// 服务品质加成（最多 +2 星）：服务属性之和每 20 点 +1 星
-	if (StaffSystem)
+	if (SeasonSystem)
 	{
-		const float Service = StaffSystem->GetServiceQuality();
-		Stars += FMath::Clamp(FMath::FloorToInt(Service / 20.f), 0, 2);
+		// 星级只由声誉决定：服务品质加成会让 3 星声誉直接跳到 5 星，使季末胜利条件失效（见文档 18.6）
+		Stars = SeasonSystem->GetStarsForReputation(Rep);
 	}
+	else if (Rep >= 200)      Stars = 5;
+	else if (Rep >= 120)      Stars = 4;
+	else if (Rep >= 70)       Stars = 3;
+	else if (Rep >= 30)       Stars = 2;
+	else if (Rep >= 10)       Stars = 1;
+
 	Stars = FMath::Clamp(Stars, 0, 5);
 
 	if (Stars != RestaurantStars)
@@ -189,6 +233,10 @@ void UBusinessSimulation::Save()
 	if (StaffSystem)
 	{
 		GI->curSaveGameData->BizRoster = StaffSystem->Roster;
+	}
+	if (SeasonSystem)
+	{
+		SeasonSystem->Save();
 	}
 
 	GI->SaveGameData();

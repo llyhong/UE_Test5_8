@@ -11,6 +11,9 @@
 #include "Blueprint/UserWidget.h"
 #include "UI/OrderWidget.h"
 #include "UI/HUDWidget.h"
+#include "UI/SeasonDailyCardWidget.h"
+#include "UI/SeasonWarningWidget.h"
+#include "UI/SeasonEndingWidget.h"
 #include "Game/BusinessTime.h"
 #include "Engine/DirectionalLight.h"
 #include "EngineUtils.h"
@@ -174,6 +177,20 @@ else
 			TEXT("[BaseLevelBP] HUDWidgetClass 为空，HUD 未创建。请在关卡 BaseLevelBP 实例的 \"UI|HUD\" 分类下指定 HUD 类（如 WBP_HUD）。"));
 }
 
+	// 赛季 UI：把日结 / 警告 / 结局事件转给各本地玩家，控件按本地玩家实例化
+	if (UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetGameInstance()))
+	{
+		if (USeasonSystem* Season = GI->seasonSystem)
+		{
+			Season->OnDailyGrade.RemoveDynamic(this, &ABaseLevelBP::HandleSeasonDailyGrade);
+			Season->OnDailyGrade.AddDynamic(this, &ABaseLevelBP::HandleSeasonDailyGrade);
+			Season->OnSeasonWarning.RemoveDynamic(this, &ABaseLevelBP::HandleSeasonWarning);
+			Season->OnSeasonWarning.AddDynamic(this, &ABaseLevelBP::HandleSeasonWarning);
+			Season->OnSeasonEnded.RemoveDynamic(this, &ABaseLevelBP::HandleSeasonEnded);
+			Season->OnSeasonEnded.AddDynamic(this, &ABaseLevelBP::HandleSeasonEnded);
+		}
+	}
+
 	// 启动时钟刷新：每秒把当前时间与营业状态推给 HUD（白天/傍晚/打烊一目了然）
 	if (UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetGameInstance()))
 	{
@@ -181,12 +198,27 @@ else
 		// 仅在类不匹配时重建（避免每次进关都重置）；重建后从存档恢复日期 / 员工名册。
 		if (GI->businessSimulation && BusinessSimulationClass && !GI->businessSimulation->IsA(BusinessSimulationClass))
 		{
+			// 旧实例的时钟是独立的 FTickableGameObject，不退役会和新时钟各自推进一天，
+			// 日结算 / 开门打烊都会双份触发（玩家看到约 2 倍速的一天）。
+			if (UBusinessSimulation* OldSim = GI->businessSimulation)
+			{
+				OldSim->Shutdown();
+			}
+
 			UBusinessSimulation* NewSim = NewObject<UBusinessSimulation>(GI, BusinessSimulationClass.Get());
 			if (GI->economySystem)
 			{
 				NewSim->Init(GI->economySystem);
 			}
+			// 替换实例后必须补挂赛季系统：Load 里的 RecomputeStars 会读它取星级阈值，
+			// 漏挂会退回旧的声誉阈值，日结算也不再上报赛季
+			if (GI->seasonSystem)
+			{
+				NewSim->SeasonSystem = GI->seasonSystem;
+			}
 			NewSim->Load();
+			// Load 在无存档数据时会提前返回，星级会停留在新实例的默认值，这里显式重算一次
+			NewSim->RefreshStars();
 			GI->businessSimulation = NewSim;
 		}
 
@@ -246,6 +278,13 @@ void ABaseLevelBP::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	Super::EndPlay(EndPlayReason);
 	if (UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetGameInstance()))
 	{
+		// 解除赛季 UI 事件订阅：关卡销毁后回调对象已失效，避免悬空委托
+		if (GI->seasonSystem)
+		{
+			GI->seasonSystem->OnDailyGrade.RemoveDynamic(this, &ABaseLevelBP::HandleSeasonDailyGrade);
+			GI->seasonSystem->OnSeasonWarning.RemoveDynamic(this, &ABaseLevelBP::HandleSeasonWarning);
+			GI->seasonSystem->OnSeasonEnded.RemoveDynamic(this, &ABaseLevelBP::HandleSeasonEnded);
+		}
 		// 退出关卡时统一落盘：箱内剩余数量等已在内存中更新，这里一次性写入存档（避免每次摘取都写盘）
 		GI->SaveGameData();
 		GI->curLevelBP = nullptr;
@@ -868,9 +907,16 @@ void ABaseLevelBP::HandleOrderFinished(const UOrderHandle* Handle, const FOrderD
 
 	if (UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetGameInstance()))
 	{
+		const bool bWild = Handle ? Handle->IsWildOrder() : false;
+		const int32 Price = Handle ? Handle->GetOrderSettlementPrice() : 0;
+
 		if (GI->economySystem)
 		{
-			GI->economySystem->OnOrderCompleted(Handle ? Handle->GetOrderSettlementPrice() : 0);
+			GI->economySystem->OnOrderCompleted(Price, bWild);
+		}
+		if (GI->seasonSystem)
+		{
+			GI->seasonSystem->NotifyOrderServed(Handle ? Handle->waitTime : 0.f, bWild, Price);
 		}
 	}
 }
@@ -882,6 +928,77 @@ void ABaseLevelBP::HandleOrderFailed(const UOrderHandle* Handle, const FOrderDat
 		if (GI->economySystem)
 		{
 			GI->economySystem->OnOrderFailed();
+		}
+		if (GI->seasonSystem)
+		{
+			GI->seasonSystem->NotifyOrderFailed();
+		}
+	}
+}
+
+void ABaseLevelBP::HandleSeasonDailyGrade(ESeasonGrade Grade, int32 GradeScore, int32 Served, int32 Failed)
+{
+	UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetGameInstance());
+	if (!GI || !GI->seasonSystem || !GetWorld())
+	{
+		return;
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("[SeasonUI] 日结卡：评级 %s（%d 分，服务 %d / 失败 %d）"),
+		*GI->seasonSystem->GetGradeName(Grade), GradeScore, Served, Failed);
+
+	for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+	{
+		if (APlayerController* PC = It->Get())
+		{
+			if (PC->IsLocalController())
+			{
+				USeasonDailyCardWidget::ShowForPlayer(PC, GI->seasonSystem);
+			}
+		}
+	}
+}
+
+void ABaseLevelBP::HandleSeasonWarning(FString Reason, int32 StreakDays, int32 DaysLeft)
+{
+	if (!GetWorld())
+	{
+		return;
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("[SeasonUI] 警告条：%s（连续 %d 天，还剩 %d 天）"), *Reason, StreakDays, DaysLeft);
+
+	for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+	{
+		if (APlayerController* PC = It->Get())
+		{
+			if (PC->IsLocalController())
+			{
+				USeasonWarningWidget::ShowForPlayer(PC, Reason, StreakDays, DaysLeft);
+			}
+		}
+	}
+}
+
+void ABaseLevelBP::HandleSeasonEnded(bool bWon, ESeasonEnding Ending)
+{
+	UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetGameInstance());
+	if (!GI || !GI->seasonSystem || !GetWorld())
+	{
+		return;
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("[SeasonUI] 结局界面：胜利=%d 结局=%s"),
+		bWon ? 1 : 0, *GI->seasonSystem->GetEndingName(Ending));
+
+	for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+	{
+		if (APlayerController* PC = It->Get())
+		{
+			if (PC->IsLocalController())
+			{
+				USeasonEndingWidget::ShowForPlayer(PC, GI->seasonSystem, bWon, Ending);
+			}
 		}
 	}
 }

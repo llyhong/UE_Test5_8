@@ -57,5 +57,46 @@ class SHOOT_API UMySaveGame : public USaveGame
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Shoot|Discovery")
 	TArray<FName> DiscoveredItemKeys;
 
+	// —— 赛季（USeasonSystem）持久化字段：48 天三幕 + 幕检查点 ——
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Shoot|Season")
+	int32 SeasonDay = 1;
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Shoot|Season")
+	int32 SeasonAct = 1;
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Shoot|Season")
+	int32 SeasonMoneyEarned = 0;
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Shoot|Season")
+	int32 SeasonLastGrade = 0;
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Shoot|Season")
+	int32 SeasonPoorDays = 0;
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Shoot|Season")
+	int32 SeasonLowRepDays = 0;
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Shoot|Season")
+	int32 SeasonDebtDays = 0;
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Shoot|Season")
+	bool bSeasonFailed = false;
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Shoot|Season")
+	bool bSeasonWon = false;
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Shoot|Season")
+	bool bSeasonEnded = false;
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Shoot|Season")
+	int32 SeasonEnding = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Shoot|Season|Checkpoint")
+	bool bSeasonCheckpointValid = false;
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Shoot|Season|Checkpoint")
+	int32 CheckpointDay = 1;
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Shoot|Season|Checkpoint")
+	int32 CheckpointMoney = 0;
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Shoot|Season|Checkpoint")
+	int32 CheckpointReputation = 0;
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Shoot|Season|Checkpoint")
+	int32 CheckpointSeasonMoneyEarned = 0;
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Shoot|Season|Checkpoint")
+	int32 CheckpointYear = 1;
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Shoot|Season|Checkpoint")
+	int32 CheckpointMonth = 1;
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Shoot|Season|Checkpoint")
+	int32 CheckpointDayOfMonth = 1;
+
 	UMySaveGame();
 };

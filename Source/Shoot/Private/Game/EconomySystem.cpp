@@ -44,18 +44,46 @@ void UEconomySystem::Save()
 	}
 }
 
-void UEconomySystem::OnOrderCompleted(int32 OrderPrice)
+void UEconomySystem::OnOrderCompleted(int32 OrderPrice, bool bWildOrder)
 {
 	AddReputation(ResolvedConfig.ReputationGainOnComplete);
 
 	int32 Gain = ResolvedConfig.MoneyPerOrder + FMath::RoundToInt(OrderPrice * ResolvedConfig.MoneyPriceMultiplier);
 	Gain = FMath::Max(Gain, ResolvedConfig.MinMoneyOnComplete);
 	AddMoney(Gain, EMoneySource::OrderComplete);
+
+	// 食材成本：付得起就扣，付不起记未付账单（赛季据此判定连续入不敷出）
+	const float Rate = bWildOrder ? ResolvedConfig.WildIngredientCostRate : ResolvedConfig.IngredientCostRate;
+	const int32 Cost = FMath::RoundToInt(FMath::Max(0, OrderPrice) * FMath::Clamp(Rate, 0.f, 1.f));
+	if (Cost > 0 && !SpendMoney(Cost, EMoneySource::IngredientCost))
+	{
+		AddUnpaidBill(Cost);
+	}
 }
 
 void UEconomySystem::OnOrderFailed()
 {
-	AddReputation(-ResolvedConfig.ReputationLossOnFail);
+	const int32 Loss = ResolvedConfig.ReputationLossOnOrderTimeout > 0
+		? ResolvedConfig.ReputationLossOnOrderTimeout
+		: ResolvedConfig.ReputationLossOnFail;
+	AddReputation(-Loss);
+}
+
+void UEconomySystem::AddUnpaidBill(int32 Amount)
+{
+	if (Amount <= 0)
+	{
+		return;
+	}
+	UnpaidBills += Amount;
+	UE_LOG(LogTemp, Warning, TEXT("[Economy] 未付账单 +%d（今日累计 %d）"), Amount, UnpaidBills);
+}
+
+int32 UEconomySystem::TakeUnpaidBills()
+{
+	const int32 Result = UnpaidBills;
+	UnpaidBills = 0;
+	return Result;
 }
 
 void UEconomySystem::AddReputation(int32 Delta)

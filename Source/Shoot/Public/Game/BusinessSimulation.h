@@ -9,6 +9,8 @@
 #include "Game/StaffSystem.h"
 #include "BusinessSimulation.generated.h"
 
+class USeasonSystem;
+
 /** 一份经营报表（日 / 月 / 年 结算时广播给 UI） */
 USTRUCT(BlueprintType)
 struct FBusinessReport
@@ -76,6 +78,14 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Business")
 	TObjectPtr<UEconomySystem> Economy;
 
+	/** 赛季系统（由 GameInstance 注入）：星级阈值与日评级都走它 */
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Business")
+	TObjectPtr<USeasonSystem> SeasonSystem;
+
+	/** 员工工资是否按日计提（月薪 / 30）；开启后月末不再重复发薪 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Business")
+	bool bAccrueWagesDaily = true;
+
 	// ---- 经营参数（也可后续迁移到数据表） ----
 	/** 每日租金 / 设施被动收入 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Business", meta = (ClampMin = "0"))
@@ -113,9 +123,16 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Business")
 	void Init(UEconomySystem* InEconomy);
 
+	/** 退役实例：停掉时钟 Tick 并解除所有委托（被新实例替换时调用，避免双时钟并行推进） */
+	void Shutdown();
+
 	/** 当前星级 */
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Business")
 	int32 GetStars() const { return RestaurantStars; }
+
+	/** 重算经营星级（赛季系统注入后 / 读档后由外部调用） */
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Business")
+	void RefreshStars() { RecomputeStars(); }
 
 	/** 写入存档（日期 + 员工名册）。会在每次日结算时自动调用，也可手动调用。 */
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Business")

@@ -1058,16 +1058,17 @@ void AGuestManager::HandleQueueTimeout(AGuestCharacter* Guest)
 {
 	RemoveFromQueue(Guest);
 
-	if (ReputationPenaltyOnWaitTimeout == 0)
-	{
-		return;
-	}
-
 	if (const UWorld* W = GetWorld())
 	{
 		if (UBaseGameInstance* GI = Cast<UBaseGameInstance>(W->GetGameInstance()))
 		{
-			if (GI->economySystem)
+			// 排队超时也算一次“到店未服务”，计入赛季日评级（与是否扣声誉无关）
+			if (GI->seasonSystem)
+			{
+				GI->seasonSystem->NotifyGuestQueueTimeout();
+			}
+
+			if (ReputationPenaltyOnWaitTimeout != 0 && GI->economySystem)
 			{
 				GI->economySystem->AddReputation(-ReputationPenaltyOnWaitTimeout);
 

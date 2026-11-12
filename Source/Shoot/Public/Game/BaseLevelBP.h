@@ -10,6 +10,7 @@
 #include "Game/EconomySystem.h"
 #include "Game/BusinessSimulation.h"
 #include "Game/LevelGoalData.h"
+#include "Game/SeasonSystem.h"
 #include "NPC/ChairSeat.h"
 #include "BaseLevelBP.generated.h"
 
@@ -21,6 +22,9 @@ enum class EWidgetZOrder : int32
 {
 	HUD = 0,
 	Order = 10,
+	SeasonCard = 20,
+	SeasonWarning = 25,
+	SeasonEnding = 30,
 };
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FSocceEvent,float,s);
@@ -301,4 +305,14 @@ public:
 	/** 打烊收尾完成回调（已点菜客人全部处理完）：按开关决定是否自动结束这一天 */
 	UFUNCTION()
 	void HandleClosingFinished();
+
+	// —— 赛季 UI 事件（转给各本地玩家的日结卡 / 警告条 / 结局界面） ——
+	UFUNCTION()
+	void HandleSeasonDailyGrade(ESeasonGrade Grade, int32 GradeScore, int32 Served, int32 Failed);
+
+	UFUNCTION()
+	void HandleSeasonWarning(FString Reason, int32 StreakDays, int32 DaysLeft);
+
+	UFUNCTION()
+	void HandleSeasonEnded(bool bWon, ESeasonEnding Ending);
 };

@@ -11,6 +11,7 @@
 #include "PlateSystem.h"
 #include "Game/EconomySystem.h"
 #include "Game/BusinessSimulation.h"
+#include "Game/SeasonSystem.h"
 #include "GameFramework/SaveGame.h"
 #include "MySaveGame.h"
 #include "Data/DiscoveryInfo.h"
@@ -106,9 +107,26 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Gameplay|Spawner")
 	bool ConsumeWarehouseItem(TSubclassOf<AItemActor> ItemClass);
 
+	/** 经营模拟类（DefaultGame.ini 的 [/Script/Shoot.BaseGameInstance] 段可配），留空则用原生 UBusinessSimulation。
+	 *  在 Init 时直接创建正确类，避免进关后再替换实例（替换后旧时钟仍会推进，且已绑定旧时钟的灯饰接不到开门事件）。 */
+	UPROPERTY(Config)
+	FSoftClassPath BusinessSimulationClassPath;
+
 	/** 开罗式经营模拟核心（时钟 / 员工 / 日-月-年结算 / 经营星级） */
 	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Gameplay")
 	TObjectPtr<UBusinessSimulation> businessSimulation;
+
+	/** 赛季系统（48 天三幕 / 日评级 / 胜负 / 幕检查点） */
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Gameplay|Season")
+	TObjectPtr<USeasonSystem> seasonSystem;
+
+	/** 赛季配置数据表（RowStruct = FSeasonConfigRow）。可为空（用 C++ 默认值） */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Season")
+	TObjectPtr<UDataTable> SeasonConfigTable = nullptr;
+
+	/** 赛季配置表行名 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Season")
+	FName SeasonConfigRowName = TEXT("Default");
 
 	/** 经济配置数据表（RowStruct = FEconomyConfigRow）。可为空（用下方内置默认） */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Economy")
