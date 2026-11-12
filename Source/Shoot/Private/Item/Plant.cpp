@@ -420,7 +420,9 @@ bool APlant::HarvestForCharacter(AShootCharacter* Character)
 		return false;
 	}
 	Fruit->bPickable = false;
-	Fruit->SetActorEnableCollision(false);
+	// 营业中手采物会离手参与物理（投锅 / 抛掷）：Actor 级碰撞必须保留，
+	// 否则离手后没有任何地面接触，会直接穿过锅和地板一直下坠。打烊入包只是隐藏的数据载体，才关碰撞。
+	Fruit->SetActorEnableCollision(bBusinessOpen);
 	Fruit->ConfigureAndStartRipening(false, 0.f, 0.f);
 	Fruit->SetIngredientQuality(EIngredientQuality::Normal);
 	// 挂手必须可见；打烊走入包载体，保持隐藏

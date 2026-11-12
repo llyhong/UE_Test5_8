@@ -5,6 +5,8 @@
 #include "Components/BoxComponent.h"
 #include "Components/SceneComponent.h"
 #include "Components/WidgetComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "Engine/Engine.h"
 #include "Interfaces/PickupInterface.h"
 #include "Game/BaseGameInstance.h"
@@ -514,6 +516,41 @@ bool ACookingMachine::AddFoodMateral(int32 FoodMaterialID)
 	return canAdd;
 }
 
+void ACookingMachine::UpdateKnifeAnim()
+{
+	// 约定：骨骼刀 Tag 为 CookingKnife，待机静态刀为 CookingKnifeIdle，
+	// 切菜动画配在骨骼刀组件自带的 AnimationData 上；这里只按 IsCooking 切换状态。
+	static const FName KnifeTag(TEXT("CookingKnife"));
+	static const FName IdleKnifeTag(TEXT("CookingKnifeIdle"));
+
+	USkeletalMeshComponent* Knife = FindComponentByTag<USkeletalMeshComponent>(KnifeTag);
+	if (!Knife || !Knife->AnimationData.AnimToPlay)
+	{
+		return;
+	}
+
+	const bool bWantPlay = IsCooking;
+	if (Knife->IsVisible() == bWantPlay)
+	{
+		return;
+	}
+
+	if (UStaticMeshComponent* IdleKnife = FindComponentByTag<UStaticMeshComponent>(IdleKnifeTag))
+	{
+		IdleKnife->SetVisibility(!bWantPlay, true);
+	}
+	Knife->SetVisibility(bWantPlay, true);
+
+	if (bWantPlay)
+	{
+		Knife->PlayAnimation(Knife->AnimationData.AnimToPlay, true);
+	}
+	else
+	{
+		Knife->Stop();
+	}
+}
+
 // Called every frame
 void ACookingMachine::Tick(float DeltaTime)
 {
@@ -571,6 +608,7 @@ void ACookingMachine::Tick(float DeltaTime)
 			}
 		}
 	}
+	UpdateKnifeAnim();
 	Super::Tick(DeltaTime);
 
 }

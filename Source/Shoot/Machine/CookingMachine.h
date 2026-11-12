@@ -79,6 +79,12 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Food")
 	float MinCookSpeedMultiplier = 0.3f;
 
+	// ========== 烹饪刀具动画（可选） ==========
+	/** 约定：骨骼刀组件打 Tag "CookingKnife"，待机静态刀打 Tag "CookingKnifeIdle"，
+	 *  切菜动画配在骨骼 mesh 组件的 AnimationData 里。
+	 *  找不到骨骼刀时整段逻辑跳过，其他灶台不受影响。 */
+	void UpdateKnifeAnim();
+
 	/** 当前烹饪速度倍率（持有越多高级灶台越快，运行时动态计算） */
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Food")
 	float GetCookSpeedMultiplier() const;
