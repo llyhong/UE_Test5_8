@@ -45,6 +45,14 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Food")
 	UTexture2D* GetItemIcon(int32 ItemID);
 
+	/** 按 ItemID 取物品显示名（FItemActorInfo::DisplayName）；没配时退回"食材#ItemID" */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Food")
+	FString GetItemDisplayName(int32 ItemID);
+
+	/** 菜品表里的全部 FoodID（含未解锁菜谱），供菜谱图鉴等 UI 遍历；按 ID 升序 */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Food")
+	TArray<int32> GetAllFoodIDs() const;
+
 	/** 按 ItemID 取食材图标（FItemActorInfo::Icon，与 GetItemIcon 同一字段）；取不到时返回 null */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Food")
 	UTexture2D* GetItemFoodIcon(int32 ItemID);
@@ -64,6 +72,11 @@ public:
 	 *  MachineID<=0 时返回全部菜品 */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Food")
 	TArray<int32> GetFoodIDsByMachine(int32 MachineID) const;
+
+	/** 菜品是否默认可用（FMenuData::bRequiresResearch 未勾选）。
+	 *  查不到行时按 true 处理：不让数据缺失本身变成“锁住所有菜”。 */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Food")
+	bool IsRecipeDefaultUnlocked(int32 FoodID) const;
 	/** 生成成品模型。SpawnLocation 建议传"盘子/灶台的世界位置"：
 	 *  以前固定生成在世界原点，一旦挂点失败成品就停在地图原点（常常在地板以下）。 */
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Food")

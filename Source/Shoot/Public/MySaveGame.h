@@ -45,6 +45,10 @@ class SHOOT_API UMySaveGame : public USaveGame
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Shoot|Ingredient")
 	TArray<int32> UnlockedIngredients;
 
+	/** 已解锁的菜谱（菜品 FoodID，由研究炉解锁）。跨存档持久化。 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Shoot|Recipe")
+	TArray<int32> UnlockedRecipes;
+
 	/** 食物箱剩余数量持久化：键 = 箱子 ActorGuid 字符串，值 = 剩余可生成数量。跨存档持久化。 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Shoot|Spawner")
 	TMap<FString, int32> SpawnerRemaining;

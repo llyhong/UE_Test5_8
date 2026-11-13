@@ -9,6 +9,41 @@
 #include "Game/BusinessTime.h"
 #include "Game/BusinessSimulation.h"
 #include "Data/MenuData.h"
+#include "Data/PlantInfo.h"
+#include "EngineUtils.h"
+#include "Item/FoodSpawner.h"
+#include "Item/ItemScatterSpawner.h"
+#include "Item/Plant.h"
+#include "Animal/AnimalCharacter.h"
+#include "Machine/CookingMachine.h"
+
+namespace
+{
+	/** 把“某个物品类”登记为食材来源；该类本身会再生成别的物品时（切配：生蘑菇 → 切好蘑菇），产出物也算来源 */
+	void AddItemSupply(TSet<int32>& OutItemIDs, TSubclassOf<AItemActor> ItemClass)
+	{
+		if (!ItemClass)
+		{
+			return;
+		}
+		const AItemActor* CDO = ItemClass->GetDefaultObject<AItemActor>();
+		if (!CDO)
+		{
+			return;
+		}
+		if (const int32 ItemID = CDO->GetItemID(); ItemID >= 0)
+		{
+			OutItemIDs.Add(ItemID);
+		}
+		if (const AItemActor* OutputCDO = CDO->SpawnItemActorClass ? CDO->SpawnItemActorClass->GetDefaultObject<AItemActor>() : nullptr)
+		{
+			if (const int32 OutputID = OutputCDO->GetItemID(); OutputID >= 0)
+			{
+				OutItemIDs.Add(OutputID);
+			}
+		}
+	}
+}
 
 // Sets default values
 AOrderSystem::AOrderSystem()
@@ -21,11 +56,25 @@ AOrderSystem::AOrderSystem()
 void AOrderSystem::BeginPlay()
 {
 	Super::BeginPlay();
-	
+
+	// 研究炉解锁菜谱 / 关卡目标解锁食材后，订单池要立刻跟上：
+	// 否则新菜得等下一关才点得到，或客人一直点“还没解锁/没食材”的菜
+	if (UBaseGameInstance* GI = GetWorld() ? Cast<UBaseGameInstance>(GetWorld()->GetGameInstance()) : nullptr)
+	{
+		GI->OnRecipesUnlocked.AddDynamic(this, &AOrderSystem::HandleRecipesUnlocked);
+		GI->OnIngredientsUnlocked.AddDynamic(this, &AOrderSystem::HandleIngredientsUnlocked);
+	}
 }
 
 void AOrderSystem::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	// 解除 GameInstance 广播绑定：GameInstance 跨关卡存活，绑定到本 Actor 会指向已销毁对象
+	if (UBaseGameInstance* GI = GetWorld() ? Cast<UBaseGameInstance>(GetWorld()->GetGameInstance()) : nullptr)
+	{
+		GI->OnRecipesUnlocked.RemoveDynamic(this, &AOrderSystem::HandleRecipesUnlocked);
+		GI->OnIngredientsUnlocked.RemoveDynamic(this, &AOrderSystem::HandleIngredientsUnlocked);
+	}
+
 	// 清空所有未完成订单：waitList 是 UPROPERTY，句柄会随本 Actor 一起被 GC 回收，无需 AddToRoot。
 	waitList.Empty();
 	// 解除所有蓝图委托绑定，避免退出时回调到已销毁的蓝图对象
@@ -149,6 +198,32 @@ void AOrderSystem::RebuildOrderPool()
 	int32 BadPrice = 0;
 	int32 BadWait = 0;
 
+	// 本关能拿到的食材来源：没有来源的食材不进订单，杜绝“表里加了菜但没摆箱子”的无解订单
+	CollectSuppliedItemIDs(CachedSuppliedItemIDs);
+	// 本关实际存在的加工机器：菜谱指定的机器不在场，同样做不出来
+	CollectAvailableMachineIDs(CachedAvailableMachineIDs);
+	int32 BlockedByLock = 0;
+	int32 BlockedBySupply = 0;
+	auto IsServableOrLog = [this, FS, &BlockedByLock, &BlockedBySupply](int32 FoodID) -> bool
+	{
+		FString Reason;
+		if (IsMenuServable(FoodID, CachedSuppliedItemIDs, Reason)
+			&& IsMenuMachinePresent(FoodID, CachedAvailableMachineIDs, Reason))
+		{
+			return true;
+		}
+		if (Reason.Contains(TEXT("未解锁")))
+		{
+			BlockedByLock++;
+		}
+		else
+		{
+			BlockedBySupply++;
+		}
+		UE_LOG(LogTemp, Log, TEXT("[OrderSystem] 跳过菜品 %d（%s）：%s"), FoodID, *FS->GetMenuData(FoodID).FoodName, *Reason);
+		return false;
+	};
+
 	// 订单里只存 FoodIDs（菜品表 FoodID），其余信息（价格/等待/菜名/机器）全部由菜品表派生
 	auto BuildOrder = [FS, &BadPrice, &BadWait](const TArray<int32>& FoodIDs) -> FOrderData
 	{
@@ -220,6 +295,21 @@ void AOrderSystem::RebuildOrderPool()
 			{
 				continue;
 			}
+
+			// 套餐里任何一道菜没解锁 / 食材没来源，整单都不发，避免客人点出做不齐的单
+			bool bServable = true;
+			for (const int32 FoodID : Custom.FoodIDs)
+			{
+				if (!IsServableOrLog(FoodID))
+				{
+					bServable = false;
+					break;
+				}
+			}
+			if (!bServable)
+			{
+				continue;
+			}
 			OrderPool.Add(BuildOrder(Custom.FoodIDs));
 			OrderWeights.Add(WeightOf(Custom.FoodIDs));
 		}
@@ -230,6 +320,10 @@ void AOrderSystem::RebuildOrderPool()
 	{
 		const FMenuData Menu = FS->GetMenuData(FoodID);
 		if (Menu.FoodID < 0 || Menu.Probabilitys <= 0.f || Menu.bRequiresWildIngredient)
+		{
+			continue;
+		}
+		if (!IsServableOrLog(FoodID))
 		{
 			continue;
 		}
@@ -251,17 +345,17 @@ void AOrderSystem::RebuildOrderPool()
 
 	if (OrderPool.Num() == 0)
 	{
-		UE_LOG(LogTemp, Error, TEXT("[OrderSystem] 订单池为空：菜品表里没有 Probabilitys>0 的菜，也没有自定义套餐（ULevelOrderCfg::Orders）"));
+		UE_LOG(LogTemp, Error, TEXT("[OrderSystem] 订单池为空：菜品表里没有可出的菜（检查 Probabilitys>0、菜谱解锁、食材来源），也没有自定义套餐（ULevelOrderCfg::Orders）"));
 		if (GEngine)
 		{
 			GEngine->AddOnScreenDebugMessage(-1, 8.f, FColor::Red,
-				TEXT("[订单] 订单池为空！请在 MenuDataTable 给菜品配 Probabilitys>0"));
+				TEXT("[订单] 订单池为空！检查菜品 Probabilitys>0、菜谱是否解锁、本关是否摆了对应食材来源"));
 		}
 	}
 	else
 	{
-		UE_LOG(LogTemp, Log, TEXT("[OrderSystem] 订单池已按菜品表构建：%d 条（含自定义套餐 %d 条）"),
-			OrderPool.Num(), orderCfg ? orderCfg->Orders.Num() : 0);
+		UE_LOG(LogTemp, Log, TEXT("[OrderSystem] 订单池已按菜品表构建：%d 条（含自定义套餐 %d 条；因未解锁跳过 %d、因缺食材/机器跳过 %d）"),
+			OrderPool.Num(), orderCfg ? orderCfg->Orders.Num() : 0, BlockedByLock, BlockedBySupply);
 		if (BadPrice > 0 || BadWait > 0)
 		{
 			UE_LOG(LogTemp, Warning, TEXT("[OrderSystem] 订单池里有 %d 条价格<=0、%d 条等待时间<=0（请在 MenuDataTable 给菜品配 Price / MaxWaitTime）"),
@@ -269,6 +363,178 @@ void AOrderSystem::RebuildOrderPool()
 		}
 	}
 }
+void AOrderSystem::HandleRecipesUnlocked(const TArray<int32>& UnlockedFoodIDs)
+{
+	UE_LOG(LogTemp, Log, TEXT("[OrderSystem] 菜谱解锁 %d 个，重建订单池"), UnlockedFoodIDs.Num());
+	RebuildOrderPool();
+}
+
+void AOrderSystem::HandleIngredientsUnlocked(const TArray<int32>& UnlockedIDs)
+{
+	UE_LOG(LogTemp, Log, TEXT("[OrderSystem] 食材解锁 %d 个，重建订单池"), UnlockedIDs.Num());
+	RebuildOrderPool();
+}
+
+void AOrderSystem::CollectSuppliedItemIDs(TSet<int32>& OutItemIDs) const
+{
+	OutItemIDs.Reset();
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	UBaseGameInstance* GI = Cast<UBaseGameInstance>(World->GetGameInstance());
+	// 仓库驱动模式下箱子能不能出料取决于当时的库存，不能用“此刻空箱”判定本关没有这种食材
+	const bool bWarehouseDriven = GI && GI->bLinkSpawnerToWarehouse;
+
+	for (TActorIterator<AFoodSpawner> It(World); It; ++It)
+	{
+		if (bWarehouseDriven || It->CanSpawn())
+		{
+			AddItemSupply(OutItemIDs, It->SpawnItemActorClass);
+		}
+	}
+
+	// 野外散布点：当季不长的采集物不算来源，否则会点出“要等到明年”的单
+	for (TActorIterator<AItemScatterSpawner> It(World); It; ++It)
+	{
+		const ESeason Season = It->GetCurrentSeason();
+		for (const FScatterSpawnEntry& Entry : It->Entries)
+		{
+			if (Entry.Seasons.Num() > 0 && !Entry.Seasons.Contains(Season))
+			{
+				continue;
+			}
+			AddItemSupply(OutItemIDs, Entry.ItemClass);
+		}
+	}
+
+	// 可采植株：还没解锁的作物不算来源（对应 IngredientUnlockID 门闩）
+	for (TActorIterator<APlant> It(World); It; ++It)
+	{
+		if (It->IngredientUnlockID >= 0 && GI && !GI->IsIngredientUnlocked(It->IngredientUnlockID))
+		{
+			continue;
+		}
+		if (const FPlantInfo* Info = It->PlantInfoRow.GetRow<FPlantInfo>(TEXT("OrderSystem::CollectSuppliedItemIDs")))
+		{
+			AddItemSupply(OutItemIDs, Info->FruitClass);
+		}
+	}
+
+	// 猎物掉落（鸡腿 / 鹿肉等）
+	for (TActorIterator<AAnimalCharacter> It(World); It; ++It)
+	{
+		UClass* DropClass = It->DropActorClass.Get();
+		if (DropClass && DropClass->IsChildOf(AItemActor::StaticClass()))
+		{
+			AddItemSupply(OutItemIDs, DropClass);
+		}
+	}
+
+	// 加工链：上一级有来源且菜谱已解锁时，加工产物也算来源（生蘑菇 → 切好蘑菇）。
+	// 只回溯一层，够覆盖“切配后再下锅”这一层，也不至于把整张表递归扫一遍。
+	if (GI && GI->foodSystem)
+	{
+		UFoodSystem* FS = GI->foodSystem;
+		for (const int32 FoodID : FS->GetFoodIDsByMachine(0))
+		{
+			FString Reason;
+			if (!IsMenuServable(FoodID, OutItemIDs, Reason))
+			{
+				continue;
+			}
+			const FMenuData Menu = FS->GetMenuData(FoodID);
+			if (!Menu.CookedActorClass)
+			{
+				continue;
+			}
+			if (const AItemActor* OutputCDO = Cast<AItemActor>(Menu.CookedActorClass->GetDefaultObject()))
+			{
+				if (const int32 OutputID = OutputCDO->GetItemID(); OutputID >= 0)
+				{
+					OutItemIDs.Add(OutputID);
+				}
+			}
+		}
+	}
+}
+
+bool AOrderSystem::IsMenuServable(int32 FoodID, const TSet<int32>& SuppliedItemIDs, FString& OutReason) const
+{
+	UBaseGameInstance* GI = GetWorld() ? Cast<UBaseGameInstance>(GetWorld()->GetGameInstance()) : nullptr;
+	UFoodSystem* FS = GI ? GI->foodSystem : nullptr;
+	if (!FS)
+	{
+		OutReason = TEXT("找不到 UFoodSystem");
+		return false;
+	}
+
+	const FMenuData Menu = FS->GetMenuData(FoodID);
+	if (Menu.FoodID < 0)
+	{
+		OutReason = TEXT("菜品行无效");
+		return false;
+	}
+	if (!GI->IsRecipeUnlocked(FoodID))
+	{
+		OutReason = TEXT("菜谱未解锁（需研究炉研究）");
+		return false;
+	}
+	if (Menu.MenuItems.Num() == 0)
+	{
+		OutReason = TEXT("菜品没配食材");
+		return false;
+	}
+	for (const TPair<int32, int32>& Item : Menu.MenuItems)
+	{
+		if (Item.Value > 0 && !SuppliedItemIDs.Contains(Item.Key))
+		{
+			OutReason = FString::Printf(TEXT("缺少食材 ItemID=%d（本关没有对应箱子/植株/采集点）"), Item.Key);
+			return false;
+		}
+	}
+	return true;
+}
+
+bool AOrderSystem::IsMenuMachinePresent(int32 FoodID, const TSet<int32>& AvailableMachineIDs, FString& OutReason) const
+{
+	UBaseGameInstance* GI = GetWorld() ? Cast<UBaseGameInstance>(GetWorld()->GetGameInstance()) : nullptr;
+	UFoodSystem* FS = GI ? GI->foodSystem : nullptr;
+	if (!FS)
+	{
+		OutReason = TEXT("找不到 UFoodSystem");
+		return false;
+	}
+
+	// MachineID=0 表示通用，任何机器都能做
+	const int32 MachineID = FS->GetMenuData(FoodID).MachineID;
+	if (MachineID > 0 && !AvailableMachineIDs.Contains(MachineID))
+	{
+		OutReason = FString::Printf(TEXT("本关没有 MachineID=%d 的加工机器"), MachineID);
+		return false;
+	}
+	return true;
+}
+
+void AOrderSystem::CollectAvailableMachineIDs(TSet<int32>& OutMachineIDs) const
+{
+	OutMachineIDs.Reset();
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+	for (TActorIterator<ACookingMachine> It(World); It; ++It)
+	{
+		if (It->MachineID > 0)
+		{
+			OutMachineIDs.Add(It->MachineID);
+		}
+	}
+}
+
 void AOrderSystem::StartSystem()
 {
 	IsStarted = true;
@@ -394,7 +660,7 @@ int32 AOrderSystem::GetCurrentBusinessDay() const
 	return TS ? TS->Day : 0;
 }
 
-bool AOrderSystem::TryBuildWildOrder(FOrderData& OutOrder) const
+bool AOrderSystem::TryBuildWildOrder(FOrderData& OutOrder, const TSet<int32>& SuppliedItemIDs, const TSet<int32>& AvailableMachineIDs) const
 {
 	UBaseGameInstance* GI = GetWorld() ? Cast<UBaseGameInstance>(GetWorld()->GetGameInstance()) : nullptr;
 	UFoodSystem* FS = GI ? GI->foodSystem : nullptr;
@@ -407,9 +673,20 @@ bool AOrderSystem::TryBuildWildOrder(FOrderData& OutOrder) const
 	for (const int32 FoodID : FS->GetFoodIDsByMachine(0))
 	{
 		const FMenuData Menu = FS->GetMenuData(FoodID);
-		if (Menu.FoodID >= 0 && Menu.bRequiresWildIngredient)
+		if (Menu.FoodID < 0 || !Menu.bRequiresWildIngredient)
+		{
+			continue;
+		}
+		// 野味菜同样要“已解锁 + 食材当季有来源 + 本关有对应机器”，否则限时单也是无解订单
+		FString Reason;
+		if (IsMenuServable(FoodID, SuppliedItemIDs, Reason)
+			&& IsMenuMachinePresent(FoodID, AvailableMachineIDs, Reason))
 		{
 			Candidates.Add(FoodID);
+		}
+		else
+		{
+			UE_LOG(LogTemp, Verbose, TEXT("[OrderSystem] 野味订单跳过菜品 %d：%s"), FoodID, *Reason);
 		}
 	}
 	if (Candidates.Num() == 0)
@@ -464,7 +741,7 @@ UOrderHandle* AOrderSystem::RequestOrderForGuest(AGuestCharacter* Guest)
 	bool bWildOrder = false;
 	if (bEnableWildOrderInPrepWindow && bPrepWindowActive
 		&& WildOrderDailyLimit > 0 && WildOrdersIssuedToday < WildOrderDailyLimit
-		&& TryBuildWildOrder(OrderData))
+		&& TryBuildWildOrder(OrderData, CachedSuppliedItemIDs, CachedAvailableMachineIDs))
 	{
 		bWildOrder = true;
 		WildOrdersIssuedToday++;

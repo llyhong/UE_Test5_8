@@ -36,6 +36,18 @@ USTRUCT(BlueprintType)
 	 *  0 = 通用，任何灶台都能做（因此旧数据不填也不会被卡住） */
 	UPROPERTY(EditAnywhere,BlueprintReadWrite, Category = "Shoot|Data")
 	int32 MachineID = 0;
+
+	/** 需要研究解锁：勾选后（默认不勾）开局不可点单、不可下锅，
+	 *  必须在研究炉研究成功（AResearchStove → UBaseGameInstance::UnlockedRecipeIDs）后才会启用。
+	 *  用“需要研究”而不是“默认解锁”是为了让旧数据表缺这一列时按 false 加载，保持原行为。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Recipe")
+	bool bRequiresResearch = false;
+
+	/** 研究线索：菜谱图鉴里未解锁菜品显示的文字（不直接写出食材配方，只给方向，如"闻起来像鸡肉和蘑菇"）。
+	 *  留空时图鉴显示默认提示，不影响研究本身（研究炉仍按 FResearchRecipe 的 RequiredItems 匹配）。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Recipe")
+	FText ResearchHint;
+
 	UPROPERTY(EditAnywhere,BlueprintReadWrite, Category = "Shoot|Data")
 	float CookingTime;
 	UPROPERTY(EditAnywhere,BlueprintReadWrite, Category = "Shoot|Data")

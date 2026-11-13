@@ -128,24 +128,26 @@ void ACookingMachine::CollectCandidateMenus(TArray<FMenuData>& OutMenus) const
 {
 	OutMenus.Reset();
 
-	// 首选：按 MachineID 从菜品表取本机可做的菜（菜品的 MachineID=0 视为通用，见 GetFoodIDsByMachine）
-	if (MachineID > 0)
+	UBaseGameInstance* GI = nullptr;
+	if (const UWorld* W = GetWorld())
 	{
-		if (const UWorld* W = GetWorld())
+		GI = Cast<UBaseGameInstance>(W->GetGameInstance());
+	}
+
+	// 首选：按 MachineID 从菜品表取本机可做的菜（菜品的 MachineID=0 视为通用，见 GetFoodIDsByMachine）
+	if (MachineID > 0 && GI && GI->foodSystem)
+	{
+		for (int32 FoodID : GI->foodSystem->GetFoodIDsByMachine(MachineID))
 		{
-			if (UBaseGameInstance* GI = Cast<UBaseGameInstance>(W->GetGameInstance()))
+			// 研究炉没解锁的菜谱不下锅：否则“研究解锁”只影响订单，玩家照样能直接做
+			if (!GI->IsRecipeUnlocked(FoodID))
 			{
-				if (GI->foodSystem)
-				{
-					for (int32 FoodID : GI->foodSystem->GetFoodIDsByMachine(MachineID))
-					{
-						FMenuData Data = GI->foodSystem->GetMenuData(FoodID);
-						if (Data.FoodID >= 0)
-						{
-							OutMenus.Add(MoveTemp(Data));
-						}
-					}
-				}
+				continue;
+			}
+			FMenuData Data = GI->foodSystem->GetMenuData(FoodID);
+			if (Data.FoodID >= 0)
+			{
+				OutMenus.Add(MoveTemp(Data));
 			}
 		}
 	}
@@ -171,6 +173,10 @@ void ACookingMachine::CollectCandidateMenus(TArray<FMenuData>& OutMenus) const
 		FMenuData Data = *Row;
 		// 行名约定为 FoodID：以行名为准，行名不是数字时退回行内字段
 		Data.FoodID = Row->ResolveFoodID(Handle.RowName);
+		if (GI && !GI->IsRecipeUnlocked(Data.FoodID))
+		{
+			continue;
+		}
 		OutMenus.Add(MoveTemp(Data));
 	}
 }

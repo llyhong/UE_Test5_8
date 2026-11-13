@@ -30,6 +30,11 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Data")
 	FString ItemDes;
 
+	/** 物品显示名：仅在需要文字反馈时使用（如研究炉"还缺 鸡肉×1"）。
+	 *  留空时界面退回"食材#ItemID"；旧数据表缺这一列按空加载，不影响原有逻辑。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Data")
+	FString DisplayName;
+
 	/** 物品图标：食材 / 物品在 UI 上显示的图标（DT_ItemInfo / DT_FoodID 按行配置）。
 	 *  菜品 / 订单 UI 也按 FMenuData::MenuItems 的 key（食材 ItemID）到这里查同一张图 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Data")

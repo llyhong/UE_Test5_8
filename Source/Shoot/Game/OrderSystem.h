@@ -269,5 +269,32 @@ private:
 	int32 GetCurrentBusinessDay() const;
 
 	/** 从菜品表里挑一道 bRequiresWildIngredient 的菜组成订单；表里没配时返回 false（静默跳过） */
-	bool TryBuildWildOrder(FOrderData& OutOrder) const;
+	bool TryBuildWildOrder(FOrderData& OutOrder, const TSet<int32>& SuppliedItemIDs, const TSet<int32>& AvailableMachineIDs) const;
+
+	/** 收集当前关卡能稳定获得的食材 ItemID（食材箱 / 散布器 / 可采植株 / 猎物掉落，以及这些来源再加工出的物品）。
+	 *  订单只用这里有的食材出单，避免“表里加了菜但没摆食材箱 → 客人点了永远做不出来”。 */
+	void CollectSuppliedItemIDs(TSet<int32>& OutItemIDs) const;
+
+	/** 一道菜能不能进订单池：菜谱已解锁，且全部食材在当前关卡有来源。OutReason 供日志排查 */
+	bool IsMenuServable(int32 FoodID, const TSet<int32>& SuppliedItemIDs, FString& OutReason) const;
+
+	/** 本关是否摆了这道菜需要的机器（FMenuData::MachineID；0 = 通用，不检查）。OutReason 供日志排查 */
+	bool IsMenuMachinePresent(int32 FoodID, const TSet<int32>& AvailableMachineIDs, FString& OutReason) const;
+
+	/** 收集本关所有加工机器的 MachineID（做不出的菜不进订单池） */
+	void CollectAvailableMachineIDs(TSet<int32>& OutMachineIDs) const;
+
+	/** 最近一次 RebuildOrderPool 收集到的食材来源（野味订单按它过滤，避免每次点餐都扫场景） */
+	TSet<int32> CachedSuppliedItemIDs;
+
+	/** 最近一次 RebuildOrderPool 收集到的本关机器 ID */
+	TSet<int32> CachedAvailableMachineIDs;
+
+	/** 研究炉解锁新菜谱：重建订单池，新菜立刻可以点到 */
+	UFUNCTION()
+	void HandleRecipesUnlocked(const TArray<int32>& UnlockedFoodIDs);
+
+	/** 食材解锁：重建订单池，依赖该食材的菜从“做不出来”变成可点 */
+	UFUNCTION()
+	void HandleIngredientsUnlocked(const TArray<int32>& UnlockedIDs);
 };

@@ -13,6 +13,7 @@ class UWidgetComponent;
 class ULocalPlayer;
 class AItemActor;
 class AShootCharacter;
+class UResearchProgressWidget;
 
 /** 一条研究配方：投入指定食材（ItemID-数量）后研究一段时间，完成即解锁对应菜谱（FoodID） */
 USTRUCT(BlueprintType)
@@ -105,6 +106,14 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Research")
 	float ResearchRemainTime = 0.f;
 
+	/** 本次研究总时长（秒）：进度条按 Remain/Total 显示 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Research")
+	float ResearchTotalTime = 0.f;
+
+	/** 研究炉头顶的世界空间进度条（C++ 控件，仅研究期间可见） */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Components")
+	UWidgetComponent* ProgressWidgetComp = nullptr;
+
 	/** 当前正在研究的配方索引（未研究时为 INDEX_NONE） */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Research")
 	int32 ActiveRecipeIndex = INDEX_NONE;
@@ -121,13 +130,21 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Research")
 	void ClearFoods();
 
-	/** 当前投入的食材是否匹配某条配方（返回索引；无匹配返回 INDEX_NONE） */
+	/** 当前投入的食材是否匹配某条配方（返回索引；无匹配返回 INDEX_NONE）。已解锁的配方不再匹配 */
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Research")
 	int32 FindMatchingRecipeIndex() const;
 
-	/** 投入指定食材后是否仍"有可能"凑成某条配方（用于避免玩家把食材白白扔进炉里） */
+	/** 投入指定食材后是否仍"有可能"凑成某条配方（用于避免玩家把食材白白扔进炉里）。
+	 *  已解锁的配方不参与判断，因此"全部研究完成"后恒为 false */
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Research")
 	bool CanAcceptItem(int32 ItemID) const;
+
+	/**
+	 * 按炉内现有食材，找"离达成最近"的一条未解锁配方，并给出还缺的食材数量。
+	 * @return false 表示没有可研究配方（没配配方 / 全部已解锁）
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Research")
+	bool GetMissingItemsForBestRecipe(TMap<int32, int32>& OutMissingItems, int32& OutRecipeIndex) const;
 
 	/** 投入成功通知（蓝图可做特效/音效/UI） */
 	UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|Research")
@@ -162,6 +179,21 @@ protected:
 
 	/** 写入 GameInstance 解锁菜谱并广播 */
 	void UnlockRecipe(int32 FoodID);
+
+	/** 该菜谱是否已解锁（GameInstance 查不到时按未解锁，保持研究炉可用） */
+	bool IsRecipeAlreadyUnlocked(int32 FoodID) const;
+
+	/** 把"还缺 XX×N"拼成一句提示；查不到物品名时用 ItemID 兜底 */
+	FString DescribeMissingItems(const TMap<int32, int32>& MissingItems) const;
+
+	/** 向所有本地玩家弹一张提示卡（多人同屏各自一份） */
+	void NotifyLocalPlayers(const FString& Title, const FString& Body, FLinearColor Accent) const;
+
+	/** 刷新炉顶进度条：研究期间显示并更新，其余时间隐藏 */
+	void UpdateProgressWidget();
+
+	UPROPERTY()
+	TObjectPtr<UResearchProgressWidget> ProgressWidget = nullptr;
 
 	/** 当前占用提示控件的本地玩家（多人分屏隔离用） */
 	UPROPERTY()

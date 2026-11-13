@@ -59,10 +59,18 @@ void AItemActor::ApplyInteractionScale()
 	// ============ 统一交互判定尺度 ============
 	// 组件上的半径/位置可能被蓝图保存过旧值（引擎默认只有 32），这里强制按统一标准重设。
 	// 不这么做的话，每个食材蓝图各写各的半径，玩家就会觉得“有的要贴脸、有的离很远”。
+	// 半径按“世界空间”口径反算：个别成品蓝图（BP_Shala_Fried）把 Sphere 缩到了 0.35，
+	// 直接写 44 时世界半径只剩 15，玩家站在灶台前完全够不到，表现为成品“看得见拿不到”。
+	// 除以组件世界缩放后，不论蓝图里怎么缩放，判定范围都等于 InteractionRadius。
 	if (Sphere)
 	{
-		Sphere->SetSphereRadius(InteractionRadius * InteractionScale::Get(), false);
-		Sphere->SetRelativeLocation(FVector(0.f, 0.f, InteractionCenterHeight));
+		const FVector Scale = Sphere->GetComponentScale();
+		const float MaxScale = FMath::Max3(FMath::Abs(Scale.X), FMath::Abs(Scale.Y), FMath::Abs(Scale.Z));
+		// huanglily: 相对位置只乘父级缩放（不是球自己的缩放），高度要按父级反算
+		const FVector ParentScale = Sphere->GetAttachParent() ? Sphere->GetAttachParent()->GetComponentScale() : FVector(1.f);
+		const float HeightScale = FMath::Max(FMath::Abs(ParentScale.Z), KINDA_SMALL_NUMBER);
+		Sphere->SetSphereRadius(InteractionRadius * InteractionScale::Get() / FMath::Max(MaxScale, KINDA_SMALL_NUMBER), false);
+		Sphere->SetRelativeLocation(FVector(0.f, 0.f, InteractionCenterHeight / HeightScale));
 		Sphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 		Sphere->SetCollisionResponseToAllChannels(ECR_Overlap);
 		Sphere->SetGenerateOverlapEvents(true);
@@ -70,8 +78,12 @@ void AItemActor::ApplyInteractionScale()
 	if (CollectSphere)
 	{
 		// 空碟回收球与拾取球用同一尺度：同一件东西不该出现两套距离
-		CollectSphere->SetSphereRadius(InteractionRadius * InteractionScale::Get(), false);
-		CollectSphere->SetRelativeLocation(FVector(0.f, 0.f, InteractionCenterHeight));
+		const FVector Scale = CollectSphere->GetComponentScale();
+		const float MaxScale = FMath::Max3(FMath::Abs(Scale.X), FMath::Abs(Scale.Y), FMath::Abs(Scale.Z));
+		const FVector ParentScale = CollectSphere->GetAttachParent() ? CollectSphere->GetAttachParent()->GetComponentScale() : FVector(1.f);
+		const float HeightScale = FMath::Max(FMath::Abs(ParentScale.Z), KINDA_SMALL_NUMBER);
+		CollectSphere->SetSphereRadius(InteractionRadius * InteractionScale::Get() / FMath::Max(MaxScale, KINDA_SMALL_NUMBER), false);
+		CollectSphere->SetRelativeLocation(FVector(0.f, 0.f, InteractionCenterHeight / HeightScale));
 	}
 }
 
@@ -124,6 +136,23 @@ void AItemActor::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 	RefreshInteractionHighlightRequests();
+
+	// 根组件就是 ItemMesh：投掷/掉落开启物理后整个 Actor 会翻滚，
+	// 挂在根上的判定球跟着转到地面以下，物品明明在脚边却按不出来。
+	// 只在物理模拟时把球心锁回 Actor 正上方，保持竖直方向的判定高度。
+	if (ItemMesh && ItemMesh->IsSimulatingPhysics())
+	{
+		// huanglily: 物理翻滚后判定球也可能被压到地面下，这里固定世界竖直偏移
+		const FVector Center = GetActorLocation() + FVector(0.f, 0.f, InteractionCenterHeight);
+		if (Sphere)
+		{
+			Sphere->SetWorldLocation(Center, false, nullptr, ETeleportType::TeleportPhysics);
+		}
+		if (CollectSphere)
+		{
+			CollectSphere->SetWorldLocation(Center, false, nullptr, ETeleportType::TeleportPhysics);
+		}
+	}
 
 	// ============ 交互范围调试可视化（控制台 Shoot.DebugInteract 1） ============
 	// 绿=当前拾取目标，灰=可拾取但不在目标位置。手持/烹饪中的物品不画，免得跟着手乱闪。

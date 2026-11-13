@@ -42,6 +42,7 @@
 #include "UI/HUDWidget.h"
 #include "UI/InteractionPromptWidget.h"
 #include "UI/DiscoveryToastWidget.h"
+#include "UI/RecipeBookWidget.h"
 #include "Blueprint/UserWidget.h"
 #include "Components/WidgetComponent.h"
 #include "Components/MeshComponent.h"
@@ -1745,6 +1746,22 @@ void AShootCharacter::BuildInteractionOptions(TArray<FInteractOption, TInlineAll
 				GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Yellow, TEXT("[研究炉] 已清空炉内食材"));
 			}
 			return true;
+		});
+	}
+
+	// 研究炉：空手按 E 查看菜谱图鉴（炉内有残留食材时，同层的"清空研究炉"优先；
+	// 清空后再按一次即可打开图鉴）
+	if (OverlappingResearchStove && !PickingItem)
+	{
+		AResearchStove* Stove = OverlappingResearchStove;
+		AddOption(TierWorld, DistTo(Stove), TEXT("查看菜谱"), Stove, [this]()
+		{
+			if (APlayerController* PC = Cast<APlayerController>(GetController()))
+			{
+				URecipeBookWidget::ToggleForPlayer(PC);
+				return true;
+			}
+			return false;
 		});
 	}
 

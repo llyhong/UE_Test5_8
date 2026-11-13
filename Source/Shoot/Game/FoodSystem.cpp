@@ -123,6 +123,34 @@ UTexture2D* UFoodSystem::GetItemFoodIcon(int32 ItemID)
 	return GetItemIcon(ItemID);
 }
 
+FString UFoodSystem::GetItemDisplayName(int32 ItemID)
+{
+	// 显示名只用于文字反馈（研究炉缺料提示等）：没配就退回 ItemID，不要为此打断流程
+	if (const FItemActorInfo* Row = FindItemRow(ItemID))
+	{
+		if (!Row->DisplayName.IsEmpty())
+		{
+			return Row->DisplayName;
+		}
+	}
+	return FString::Printf(TEXT("食材%d"), ItemID);
+}
+
+TArray<int32> UFoodSystem::GetAllFoodIDs() const
+{
+	TArray<int32> FoodIDs;
+	FoodIDs.Reserve(MenuTables.Num());
+	for (const TPair<int32, FMenuData*>& Pair : MenuTables)
+	{
+		if (Pair.Value)
+		{
+			FoodIDs.Add(Pair.Key);
+		}
+	}
+	FoodIDs.Sort();
+	return FoodIDs;
+}
+
 UTexture2D* UFoodSystem::GetFoodIcon(int32 FoodID)
 {
 	FMenuData** data = MenuTables.Find(FoodID);
@@ -173,6 +201,14 @@ TArray<int32> UFoodSystem::GetFoodIDsByMachine(int32 MachineID) const
 	}
 	return FoodIDs;
 }
+
+bool UFoodSystem::IsRecipeDefaultUnlocked(int32 FoodID) const
+{
+	FMenuData* const* Data = MenuTables.Find(FoodID);
+	// 查不到行时按已解锁处理：数据缺失本身不应该把所有菜锁死
+	return (Data && *Data) ? !(*Data)->bRequiresResearch : true;
+}
+
 ABaseFoodActor* UFoodSystem::CreateFoodActor(int32 FoodID, const FVector& SpawnLocation)
 {
 	UClass* LoadedClass = LoadObject<UClass>(nullptr, *FString::Printf(TEXT("/Game/_Demo/Blueprints/Cooking/Food/BP_Food_%d.BP_Food_%d_C"),FoodID,FoodID));

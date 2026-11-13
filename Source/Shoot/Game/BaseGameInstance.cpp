@@ -12,6 +12,8 @@
 #include "Item/Plant.h"
 #include "Engine/World.h"
 #include "HAL/PlatformTime.h"
+#include "GameFramework/PlayerController.h"
+#include "UI/RecipeBookWidget.h"
 
 /** 控制台命令：切换空碟玩法开关，方便 A/B 对比两种玩法（运行时输入：Game.ToggleDirtyPlateFlow） */
 static FAutoConsoleCommand CmdToggleDirtyPlateFlow(
@@ -45,6 +47,37 @@ static FAutoConsoleCommand CmdToggleDirtyPlateFlow(
 		else
 		{
 			UE_LOG(LogTemp, Warning, TEXT("[Plate] 未找到运行中的 GameInstance，无法切换空碟玩法"));
+		}
+	}));
+
+
+/** 控制台命令：开关菜谱图鉴（没有研究炉的地图也能查看；运行时输入：Game.RecipeBook） */
+static FAutoConsoleCommand CmdToggleRecipeBook(
+	TEXT("Game.RecipeBook"),
+	TEXT("打开/关闭菜谱图鉴。用于测试，或在未摆放研究炉的地图里查看已解锁/未解锁菜谱。"),
+	FConsoleCommandDelegate::CreateLambda([]()
+	{
+		if (!GEngine)
+		{
+			return;
+		}
+		for (const FWorldContext& Ctx : GEngine->GetWorldContexts())
+		{
+			UWorld* W = Ctx.World();
+			if (W && (Ctx.WorldType == EWorldType::PIE || Ctx.WorldType == EWorldType::Game))
+			{
+				for (FConstPlayerControllerIterator It = W->GetPlayerControllerIterator(); It; ++It)
+				{
+					if (APlayerController* PC = It->Get())
+					{
+						if (PC->IsLocalController())
+						{
+							URecipeBookWidget::ToggleForPlayer(PC);
+						}
+					}
+				}
+				break;
+			}
 		}
 	}));
 
@@ -127,9 +160,11 @@ void UBaseGameInstance::NewGameData()
 	SaveData->Money = 0;
 	SaveData->Reputation = 0;
 	SaveData->UnlockedIngredients.Empty();
+	SaveData->UnlockedRecipes.Empty();
 	SaveData->DiscoveredItemKeys.Empty();
 	curSaveGameData = SaveData;
 	UnlockedIngredientIDs.Reset();
+	UnlockedRecipeIDs.Reset();
 	DiscoveredItemKeys.Reset();
 	WildPlantRegrowRemaining.Reset();
 	WildPlantSnapshotTimes.Reset();
@@ -211,6 +246,13 @@ bool UBaseGameInstance::LoadGameData() {
 		for (int32 ID : curSaveGameData->UnlockedIngredients)
 		{
 			UnlockedIngredientIDs.Add(ID);
+		}
+
+		// 同步已解锁菜谱（研究炉成果跨存档保留）
+		UnlockedRecipeIDs.Reset();
+		for (int32 ID : curSaveGameData->UnlockedRecipes)
+		{
+			UnlockedRecipeIDs.Add(ID);
 		}
 
 		// 同步已发现物品（首次发现只触发一次，跨存档保留）
@@ -463,7 +505,12 @@ bool UBaseGameInstance::IsRecipeUnlocked(int32 FoodID) const
 	{
 		return true; // ID<0 表示无需解锁，默认可用
 	}
-	return UnlockedRecipeIDs.Contains(FoodID);
+	if (UnlockedRecipeIDs.Contains(FoodID))
+	{
+		return true;
+	}
+	// 菜品表里没勾“需要研究”的菜，开局就可用（旧数据缺这一列时也是这个行为）
+	return foodSystem ? foodSystem->IsRecipeDefaultUnlocked(FoodID) : true;
 }
 
 void UBaseGameInstance::UnlockRecipes(const TArray<int32>& FoodIDs)
@@ -485,6 +532,15 @@ void UBaseGameInstance::UnlockRecipes(const TArray<int32>& FoodIDs)
 
 	if (NewlyUnlocked.Num() > 0)
 	{
+		// 研究成果跨存档保留：否则读档后研究过的菜又变成没解锁
+		if (curSaveGameData)
+		{
+			for (const int32 FoodID : NewlyUnlocked)
+			{
+				curSaveGameData->UnlockedRecipes.AddUnique(FoodID);
+			}
+			SaveGameData();
+		}
 		OnRecipesUnlocked.Broadcast(NewlyUnlocked);
 	}
 }
