@@ -13,6 +13,9 @@
 #include "Engine/World.h"
 #include "HAL/PlatformTime.h"
 #include "GameFramework/PlayerController.h"
+#include "GameFramework/GameModeBase.h"
+#include "GameFramework/PlayerStart.h"
+#include "Engine/LocalPlayer.h"
 #include "UI/RecipeBookWidget.h"
 
 /** 控制台命令：切换空碟玩法开关，方便 A/B 对比两种玩法（运行时输入：Game.ToggleDirtyPlateFlow） */
@@ -566,3 +569,197 @@ void UBaseGameInstance::SetSpawnerRemaining(const FGuid& SpawnerGuid, int32 Valu
 	}
 	curSaveGameData->SpawnerRemaining.FindOrAdd(SpawnerGuid.ToString()) = Value;
 }
+APlayerController* UBaseGameInstance::EnsureLocalPlayers(int32 DesiredCount)
+{
+	UWorld* World = GetWorld();
+	if (!World || DesiredCount <= 0)
+	{
+		return nullptr;
+	}
+
+	APlayerController* LastCreated = nullptr;
+	while (GetNumLocalPlayers() < DesiredCount)
+	{
+		FString Error;
+		const int32 NextId = GetNumLocalPlayers();
+		if (ULocalPlayer* NewLP = CreateLocalPlayer(NextId, Error, true))
+		{
+			LastCreated = NewLP->GetPlayerController(World);
+			UE_LOG(LogTemp, Log, TEXT("[Coop] 已创建第 %d 个本地玩家"), NextId + 1);
+		}
+		else
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[Coop] CreateLocalPlayer(%d) 失败：%s"), NextId, *Error);
+			break;
+		}
+	}
+
+	// CreateLocalPlayer 只建控制器不生成 pawn：给无 pawn 的本地玩家按 PlayerStart 顺序轮流分配出生点
+	AGameModeBase* GM = World->GetAuthGameMode();
+	if (GM)
+	{
+		TArray<AActor*> Starts;
+		UGameplayStatics::GetAllActorsOfClass(World, APlayerStart::StaticClass(), Starts);
+
+		int32 StartIndex = 0;
+		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+		{
+			APlayerController* PC = It->Get();
+			if (!PC || !PC->IsLocalPlayerController() || PC->GetPawn())
+			{
+				continue;
+			}
+			FActorSpawnParameters Params;
+			Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
+			FTransform SpawnTF = Starts.Num() > 0 ? Starts[StartIndex % Starts.Num()]->GetActorTransform() : FTransform();
+			if (Starts.Num() > 0)
+			{
+				++StartIndex;
+			}
+			if (APawn* NewPawn = World->SpawnActor<APawn>(GM->GetDefaultPawnClassForController(PC), SpawnTF, Params))
+			{
+				PC->Possess(NewPawn);
+				UE_LOG(LogTemp, Log, TEXT("[Coop] 玩家 %s 已生成 pawn：%s"), *PC->GetName(), *NewPawn->GetName());
+			}
+		}
+	}
+	return LastCreated;
+}
+
+AShootAIPartnerController* UBaseGameInstance::SpawnAIPartner()
+{
+	if (AIPartner)
+	{
+		return AIPartner;
+	}
+	UWorld* World = GetWorld();
+	AGameModeBase* GM = World ? World->GetAuthGameMode() : nullptr;
+	if (!World || !GM)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[Coop] SpawnAIPartner：世界/GameMode 未就绪"));
+		return nullptr;
+	}
+
+	FActorSpawnParameters Params;
+	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
+	FTransform SpawnTF = FTransform();
+	TArray<AActor*> Starts;
+	UGameplayStatics::GetAllActorsOfClass(World, APlayerStart::StaticClass(), Starts);
+	if (Starts.Num() > 0)
+	{
+		SpawnTF = Starts[Starts.Num() - 1]->GetActorTransform();
+	}
+
+	APawn* Pawn = World->SpawnActor<APawn>(GM->GetDefaultPawnClassForController(nullptr), SpawnTF, Params);
+	if (!Pawn)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[Coop] SpawnAIPartner：pawn 生成失败"));
+		return nullptr;
+	}
+	AShootAIPartnerController* Controller = World->SpawnActor<AShootAIPartnerController>();
+	if (!Controller)
+	{
+		Pawn->Destroy();
+		UE_LOG(LogTemp, Warning, TEXT("[Coop] SpawnAIPartner：控制器生成失败"));
+		return nullptr;
+	}
+	Controller->Possess(Pawn);
+	AIPartner = Controller;
+	UE_LOG(LogTemp, Log, TEXT("[Coop] AI 搭档已生成：%s（计入双人数值缩放）"), *Pawn->GetName());
+	return Controller;
+}
+
+void UBaseGameInstance::SetAIPartnerMode(EAIPartnerMode NewMode)
+{
+	if (!AIPartner)
+	{
+		SpawnAIPartner();
+	}
+	if (AIPartner)
+	{
+		AIPartner->SetPartnerMode(NewMode);
+	}
+}
+
+void UBaseGameInstance::RemoveAIPartner()
+{
+	if (!AIPartner)
+	{
+		return;
+	}
+	if (APawn* Pawn = AIPartner->GetPawn())
+	{
+		Pawn->Destroy();
+	}
+	AIPartner->Destroy();
+	AIPartner = nullptr;
+	UE_LOG(LogTemp, Log, TEXT("[Coop] AI 搭档已移除"));
+}
+
+/** 控制台命令：coop.AI [follow|forager|helper|off]，无参数时循环切换三种模式，单人测试时随时换搭档职责 */
+static FAutoConsoleCommand CmdCoopAI(
+	TEXT("coop.AI"),
+	TEXT("AI 搭档：coop.AI follow|forager|helper|off；无参数循环切换"),
+	FConsoleCommandWithArgsDelegate::CreateLambda([](const TArray<FString>& Args)
+	{
+		UWorld* World = nullptr;
+		if (GEngine)
+		{
+			for (const FWorldContext& Context : GEngine->GetWorldContexts())
+			{
+				if (Context.WorldType == EWorldType::PIE || Context.WorldType == EWorldType::Game)
+				{
+					World = Context.World();
+					break;
+				}
+			}
+		}
+		UBaseGameInstance* GI = World ? Cast<UBaseGameInstance>(World->GetGameInstance()) : nullptr;
+		if (!GI)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[Coop] coop.AI：找不到游戏实例"));
+			return;
+		}
+		auto ModeName = [](EAIPartnerMode M) -> FString
+		{
+			switch (M)
+			{
+			case EAIPartnerMode::Follow: return TEXT("跟随");
+			case EAIPartnerMode::Forager: return TEXT("外勤采集");
+			case EAIPartnerMode::Helper: return TEXT("帮厨上菜");
+			}
+			return TEXT("?");
+		};
+		if (Args.Num() > 0)
+		{
+			const FString Arg = Args[0].ToLower();
+			if (Arg == TEXT("off"))
+			{
+				GI->RemoveAIPartner();
+				return;
+			}
+			EAIPartnerMode Mode = EAIPartnerMode::Forager;
+			if (Arg == TEXT("follow")) Mode = EAIPartnerMode::Follow;
+			else if (Arg == TEXT("helper")) Mode = EAIPartnerMode::Helper;
+			GI->SetAIPartnerMode(Mode);
+		}
+		else
+		{
+			// 无参数：跟随 → 外勤 → 帮厨 → 移除 → 跟随
+			if (!GI->HasAIPartner())
+			{
+				GI->SetAIPartnerMode(EAIPartnerMode::Follow);
+			}
+			else
+			{
+				const EAIPartnerMode Cur = GI->AIPartner->GetPartnerMode();
+				if (Cur == EAIPartnerMode::Follow) GI->SetAIPartnerMode(EAIPartnerMode::Forager);
+				else if (Cur == EAIPartnerMode::Forager) GI->SetAIPartnerMode(EAIPartnerMode::Helper);
+				else GI->RemoveAIPartner();
+			}
+		}
+		if (GI->HasAIPartner())
+		{
+			UE_LOG(LogTemp, Log, TEXT("[Coop] AI 搭档模式：%s"), *ModeName(GI->AIPartner->GetPartnerMode()));
+		}
+	}));

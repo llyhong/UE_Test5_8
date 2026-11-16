@@ -87,6 +87,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Order")
 	void RefreshOrderStats();
 
+	/** 联机等待时间缩放（1=不变）：由订单系统出单时按本地玩家数下发，InitializePatience 乘进等待时间 */
+	void SetCoopWaitTimeScale(float Scale) { CoopWaitTimeScale = FMath::Clamp(Scale, 0.5f, 1.f); }
+
 private:
 	float NormalWaitTime = 0.f;
 	float LateServeGraceSeconds = 0.f;
@@ -95,6 +98,8 @@ private:
 	float PrepWindowGraceSeconds = 0.f;
 	/** 限时野味订单价格倍率（1=普通单） */
 	float WildPriceMultiplier = 1.f;
+	/** 联机等待时间缩放（1=不变），出单前由订单系统下发 */
+	float CoopWaitTimeScale = 1.f;
 	bool bIsWildOrder = false;
 	TMap<int32, float> MenuWaitTimes;
 
@@ -157,6 +162,11 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Order")
 	void ClearAllOrders();
 
+	/** 打烊结算：把所有在制订单按“超时失败”处理（扣基础价分 + 广播 + 通知客人离场）。
+	 *  与 ClearAllOrders 的静默清空不同，这里会计入失败分；打烊时没做完的单不留到明天。 */
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Order")
+	void FailAllPendingOrders();
+
 	/**
 	 * 供客人点餐调用：优先按关卡订单配置（Level_01_Order 等 ULevelOrderCfg::Orders）的顺序取下一单；
 	 * 未开启顺序出单或配置里没有订单时，才从随机订单池取。绑定到该客人并入队（产生一个等待订单）。
@@ -199,7 +209,22 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Order|Wild", meta = (ClampMin = "0"))
 	int32 WildOrderDailyLimit = 3;
 
-	/** 野味订单价格倍率：只影响收益，订单超时扣分仍按基础价 */
+	/** 本地双人：每多 1 名玩家，每日野味订单上限 +N（默认 +2，即双人 3 → 5）。
+	 *  野味单正是外勤位的核心产出，联机时应更常出现。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Order|Wild|Coop", meta = (ClampMin = "0"))
+	int32 CoopExtraWildOrdersPerPlayer = 2;
+
+	/** 本地双人：每多 1 名玩家，订单等待时间缩短的比例（默认 0.1，即双人 ×0.9；内部下限 0.5 防过激） */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Order|Coop", meta = (ClampMin = "0.0", ClampMax = "0.5"))
+	float CoopWaitTimeReductionPerExtraPlayer = 0.1f;
+
+	/** 生效的每日野味订单上限（基础值 + 联机加成；运行时只读） */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Order|Wild|Coop")
+	int32 GetEffectiveWildOrderDailyLimit() const;
+
+	/** 联机等待时间缩放（1 人 = 1.0；双人默认 0.9）：出单时下发给订单句柄 */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Order|Coop")
+	float GetCoopWaitTimeScale() const;	/** 野味订单价格倍率：只影响收益，订单超时扣分仍按基础价 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Order|Wild", meta = (ClampMin = "1.0"))
 	float WildOrderPriceMultiplier = 2.f;
 

@@ -7,7 +7,10 @@
 #include "Components/WidgetComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Camera/PlayerCameraManager.h"
 #include "Engine/Engine.h"
+#include "Engine/World.h"
+#include "GameFramework/PlayerController.h"
 #include "Interfaces/PickupInterface.h"
 #include "Game/BaseGameInstance.h"
 #include "Game/BaseLevelBP.h"
@@ -17,6 +20,7 @@
 #include "Item/ItemActor.h"
 #include "Kismet/GameplayStatics.h"
 #include "Interaction/InteractionConfig.h"
+#include "UI/ResearchProgressWidget.h"
 #include "DrawDebugHelpers.h"
 
 // Sets default values
@@ -41,6 +45,15 @@ ACookingMachine::ACookingMachine()
 	TipsWidget = CreateDefaultSubobject<UWidgetComponent>(TEXT("TipsWidget"));
 	TipsWidget->SetupAttachment(GetRootComponent());
 	TipsWidget->SetVisibility(false);
+
+	// 烹饪进度卡片：世界空间、朝相机；纯 C++ 控件，不依赖蓝图资产
+	ProgressWidgetComp = CreateDefaultSubobject<UWidgetComponent>(TEXT("ProgressWidget"));
+	ProgressWidgetComp->SetupAttachment(GetRootComponent());
+	ProgressWidgetComp->SetWidgetSpace(EWidgetSpace::World);
+	ProgressWidgetComp->SetDrawSize(FVector2D(220.f, 48.f));
+	ProgressWidgetComp->SetRelativeLocation(FVector(0.f, 0.f, 160.f));
+	ProgressWidgetComp->SetTwoSided(true);
+	ProgressWidgetComp->SetVisibility(false);
 
 	// —— 生成位置标记 ——
 	SpawnPoint = CreateDefaultSubobject<USceneComponent>(TEXT("SpawnPoint"));
@@ -82,6 +95,20 @@ void ACookingMachine::BeginPlay()
 
 	BoxCollision->OnComponentBeginOverlap.AddDynamic(this, &ACookingMachine::OnBoxOverlap);
 	BoxCollision->OnComponentEndOverlap.AddDynamic(this, &ACookingMachine::OnBoxEndOverlap);
+
+	// 运行时创建进度卡片控件：编辑器里不需要预先配 WBP
+	if (ProgressWidgetComp)
+	{
+		ProgressWidget = CreateWidget<UResearchProgressWidget>(GetWorld(), UResearchProgressWidget::StaticClass());
+		if (ProgressWidget)
+		{
+			ProgressWidgetComp->SetWidget(ProgressWidget);
+		}
+		else
+		{
+			ProgressWidgetComp->SetVisibility(false);
+		}
+	}
 }
 
 void ACookingMachine::ResetFoodData()
@@ -101,6 +128,43 @@ void ACookingMachine::ResetFoodData()
 	FoodMaterial.Empty(6);
 	// 新的一锅：复位"没碟子"提示，允许再次提示
 	bNoPlateNotified = false;
+	// 状态复位后卡片立即隐藏，不等下一帧 Tick
+	if (ProgressWidgetComp)
+	{
+		ProgressWidgetComp->SetVisibility(false);
+	}
+}
+
+void ACookingMachine::UpdateProgressWidget()
+{
+	if (!ProgressWidgetComp)
+	{
+		return;
+	}
+
+	const float RequiredTime = GetRequiredCookTime();
+	// 熟了之后（IsFinish，可能还在保温/超时）由取餐提示接管，进度卡片不再显示
+	const bool bShow = IsCooking && !IsFinish && !OnFire && RequiredTime > KINDA_SMALL_NUMBER;
+	ProgressWidgetComp->SetVisibility(bShow);
+	if (!bShow || !ProgressWidget)
+	{
+		return;
+	}
+
+	const float ElapsedTime = CurCookingTime + OverCookTime;
+	ProgressWidget->SetProgress(FMath::Max(0.f, RequiredTime - ElapsedTime), RequiredTime, TEXT("烹饪中"));
+	ProgressWidget->SetIngredientCounts(FoodMaterial);
+	// 带食材图标行时卡片会变高，世界空间控件不会自动跟着长
+	ProgressWidgetComp->SetDrawSize(ProgressWidget->GetCardDrawSize());
+
+	// 游戏相机接近俯视，世界空间控件保持竖直时几乎只剩一条黑边；
+	// 每帧转向相机才能看清进度与食材图标
+	const APlayerController* PC = GetWorld() ? GetWorld()->GetFirstPlayerController() : nullptr;
+	if (PC && PC->PlayerCameraManager)
+	{
+		const FVector ToCamera = PC->PlayerCameraManager->GetCameraLocation() - ProgressWidgetComp->GetComponentLocation();
+		ProgressWidgetComp->SetWorldRotation(ToCamera.Rotation());
+	}
 }
 
 APlateSystem* ACookingMachine::FindPlateSystem() const
@@ -615,6 +679,7 @@ void ACookingMachine::Tick(float DeltaTime)
 		}
 	}
 	UpdateKnifeAnim();
+	UpdateProgressWidget();
 	Super::Tick(DeltaTime);
 
 }

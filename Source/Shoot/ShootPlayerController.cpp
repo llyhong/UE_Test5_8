@@ -45,7 +45,24 @@ void AShootPlayerController::SetupInputComponent()
 		// Add Input Mapping Contexts
 		if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer()))
 		{
-			for (UInputMappingContext* CurrentContext : DefaultMappingContexts)
+			// 双人分屏输入隔离：手柄按键按控制器 ID 只路由给对应玩家，键鼠会广播给所有玩家。
+			// 所以 2P 只挂手柄 IMC——没配 GamepadMappingContexts 时，运行时从 Default IMC
+			// 剥出纯手柄键位自建一份，避免改蓝图资产；1P = 键鼠 IMC + 手柄 IMC（双手柄/单人手柄都能用）
+			const ULocalPlayer* LP = GetLocalPlayer();
+			const bool bExtraPlayer = LP && LP->GetControllerId() > 0;
+			if (!bExtraPlayer)
+			{
+				for (UInputMappingContext* CurrentContext : DefaultMappingContexts)
+				{
+					Subsystem->AddMappingContext(CurrentContext, 0);
+				}
+			}
+			TArray<UInputMappingContext*> PadContexts = GamepadMappingContexts;
+			if (PadContexts.Num() == 0)
+			{
+				PadContexts = BuildGamepadOnlyContexts();
+			}
+			for (UInputMappingContext* CurrentContext : PadContexts)
 			{
 				Subsystem->AddMappingContext(CurrentContext, 0);
 			}
@@ -60,4 +77,34 @@ void AShootPlayerController::SetupInputComponent()
 			}
 		}
 	}
+}
+
+TArray<UInputMappingContext*> AShootPlayerController::BuildGamepadOnlyContexts()
+{
+	if (RuntimeGamepadIMC)
+	{
+		return { RuntimeGamepadIMC };
+	}
+
+	RuntimeGamepadIMC = NewObject<UInputMappingContext>(this);
+	int32 Added = 0;
+	for (UInputMappingContext* Ctx : DefaultMappingContexts)
+	{
+		if (!Ctx)
+		{
+			continue;
+		}
+		for (const FEnhancedActionKeyMapping& Mapping : Ctx->GetMappings())
+		{
+			if (Mapping.Key.IsGamepadKey())
+			{
+				FEnhancedActionKeyMapping& NewMapping = RuntimeGamepadIMC->MapKey(Mapping.Action, Mapping.Key);
+				NewMapping.Modifiers = Mapping.Modifiers;
+				NewMapping.Triggers = Mapping.Triggers;
+				Added++;
+			}
+		}
+	}
+	UE_LOG(LogShoot, Log, TEXT("Built runtime gamepad-only IMC: %d mappings"), Added);
+	return { RuntimeGamepadIMC };
 }

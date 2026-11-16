@@ -7,6 +7,7 @@
 #include "RecipeBookWidget.generated.h"
 
 class APlayerController;
+class UButton;
 class UTextBlock;
 class UScrollBox;
 class USizeBox;
@@ -48,11 +49,18 @@ private:
 	void CloseSelf();
 	void SetUIInputEnabled(bool bEnabled);
 
+	/** 标题行右侧关闭按钮：鼠标点击关闭（E / Esc 仍可用） */
+	UFUNCTION()
+	void HandleCloseButtonClicked();
+
 	UPROPERTY()
 	TObjectPtr<UTextBlock> SummaryText = nullptr;
 
 	UPROPERTY()
 	TObjectPtr<USizeBox> ScrollSize = nullptr;
+
+	UPROPERTY()
+	TObjectPtr<UButton> CloseButton = nullptr;
 
 	UPROPERTY()
 	TObjectPtr<UScrollBox> ScrollBox = nullptr;

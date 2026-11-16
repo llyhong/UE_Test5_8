@@ -5,6 +5,7 @@
 #include "Blueprint/WidgetLayoutLibrary.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
+#include "Components/Button.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Components/HorizontalBox.h"
@@ -143,7 +144,38 @@ TSharedRef<SWidget> URecipeBookWidget::RebuildWidget()
 	Panel->SetContent(Column);
 
 	UTextBlock* Title = MakeText(WidgetTree, TEXT("菜谱图鉴"), 32, AccentGold, true);
-	if (UVerticalBoxSlot* PanelSlot = Column->AddChildToVerticalBox(Title))
+	UHorizontalBox* HeaderRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("HeaderRow"));
+	if (UHorizontalBoxSlot* TitleSlot = HeaderRow->AddChildToHorizontalBox(Title))
+	{
+		TitleSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+		TitleSlot->SetVerticalAlignment(VAlign_Center);
+	}
+
+	USizeBox* CloseSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("CloseSize"));
+	CloseSize->SetWidthOverride(42.f);
+	CloseSize->SetHeightOverride(42.f);
+
+	CloseButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("CloseButton"));
+	CloseButton->SetBackgroundColor(FLinearColor(0.22f, 0.19f, 0.12f, 1.f));
+	CloseButton->SetToolTipText(FText::FromString(TEXT("关闭图鉴（Esc）")));
+	CloseButton->OnClicked.AddDynamic(this, &URecipeBookWidget::HandleCloseButtonClicked);
+
+	UTextBlock* CloseLabel = MakeText(WidgetTree, TEXT("×"), 26, AccentGold, true);
+	CloseLabel->SetJustification(ETextJustify::Center);
+	UBorder* CloseBox = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("CloseBox"));
+	// 透明底：让按钮自身底色透出来，避免默认白底盖住
+	CloseBox->SetBrushColor(FLinearColor(0.f, 0.f, 0.f, 0.f));
+	CloseBox->SetContent(CloseLabel);
+	CloseButton->SetContent(CloseBox);
+	CloseSize->SetContent(CloseButton);
+
+	if (UHorizontalBoxSlot* CloseSlot = HeaderRow->AddChildToHorizontalBox(CloseSize))
+	{
+		CloseSlot->SetVerticalAlignment(VAlign_Center);
+		CloseSlot->SetHorizontalAlignment(HAlign_Right);
+	}
+
+	if (UVerticalBoxSlot* PanelSlot = Column->AddChildToVerticalBox(HeaderRow))
 	{
 		PanelSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
 	}
@@ -170,7 +202,7 @@ TSharedRef<SWidget> URecipeBookWidget::RebuildWidget()
 	CardList = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("CardList"));
 	ScrollBox->AddChild(CardList);
 
-	FooterText = MakeText(WidgetTree, TEXT("滚轮 / ↑↓ 翻看 · E 或 Esc 关闭"), 12, TextMuted);
+	FooterText = MakeText(WidgetTree, TEXT("滚轮 / ↑↓ 翻看 · 点右上角 × 或按 E / Esc 关闭"), 12, TextMuted);
 	Column->AddChildToVerticalBox(FooterText);
 
 	return Super::RebuildWidget();
@@ -414,6 +446,11 @@ FReply URecipeBookWidget::NativeOnKeyDown(const FGeometry& InGeometry, const FKe
 	}
 
 	return Super::NativeOnKeyDown(InGeometry, InKeyEvent);
+}
+
+void URecipeBookWidget::HandleCloseButtonClicked()
+{
+	CloseSelf();
 }
 
 void URecipeBookWidget::CloseSelf()

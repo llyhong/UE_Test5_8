@@ -146,6 +146,7 @@ void AOrderSystem::Tick(float DeltaTime)
 						orderHandle->OrderData = *data;
 						orderHandle->waitTime = 0;
 						orderHandle->RefreshOrderStats();
+						orderHandle->SetCoopWaitTimeScale(GetCoopWaitTimeScale());
 						orderHandle->InitializePatience(orderCfg);
 						waitList.Add(orderHandle);
 						OnStartOrder.Broadcast(orderHandle, orderHandle->OrderData);
@@ -556,6 +557,35 @@ void AOrderSystem::ClearAllOrders()
 	waitList.Empty();
 }
 
+void AOrderSystem::FailAllPendingOrders()
+{
+	if (waitList.Num() == 0)
+	{
+		return;
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("[OrderSystem] 打烊：%d 个未完成订单按超时失败结算"), waitList.Num());
+	GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red,
+		FString::Printf(TEXT("打烊：%d 个未完成订单计为失败"), waitList.Num()));
+
+	// 与 Tick 中超时同款结算：按基础价扣分、广播失败、让绑定客人离场
+	for (int32 i = waitList.Num() - 1; i >= 0; --i)
+	{
+		UOrderHandle* orderHandle = waitList[i];
+		if (!orderHandle)
+		{
+			continue;
+		}
+		ABaseLevelBP::AddScore(this, -orderHandle->GetBaseOrderPrice());
+		OnFailOrder.Broadcast(orderHandle, orderHandle->OrderData);
+		if (AGuestCharacter* OrderedGuest = orderHandle->Guest)
+		{
+			OrderedGuest->OnOrderFailed();
+		}
+	}
+	waitList.Empty();
+}
+
 FOrderData* AOrderSystem::GetRandomOrder()
 {
 	// 池为空时兜底重建一次（例如菜单表比订单系统晚初始化）
@@ -660,6 +690,21 @@ int32 AOrderSystem::GetCurrentBusinessDay() const
 	return TS ? TS->Day : 0;
 }
 
+int32 AOrderSystem::GetEffectiveWildOrderDailyLimit() const
+{
+	const UBaseGameInstance* GI = GetWorld() ? Cast<UBaseGameInstance>(GetWorld()->GetGameInstance()) : nullptr;
+	const int32 Players = GI ? FMath::Max(GI->GetCoopActorCount(), 1) : 1;
+	return WildOrderDailyLimit + CoopExtraWildOrdersPerPlayer * (Players - 1);
+}
+
+float AOrderSystem::GetCoopWaitTimeScale() const
+{
+	const UBaseGameInstance* GI = GetWorld() ? Cast<UBaseGameInstance>(GetWorld()->GetGameInstance()) : nullptr;
+	const int32 Players = GI ? FMath::Max(GI->GetCoopActorCount(), 1) : 1;
+	// 每多 1 人等待 ×(1 - Reduction)；下限 0.5 防止多玩家时订单苛刻到无解
+	return FMath::Max(1.f - CoopWaitTimeReductionPerExtraPlayer * (Players - 1), 0.5f);
+}
+
 bool AOrderSystem::TryBuildWildOrder(FOrderData& OutOrder, const TSet<int32>& SuppliedItemIDs, const TSet<int32>& AvailableMachineIDs) const
 {
 	UBaseGameInstance* GI = GetWorld() ? Cast<UBaseGameInstance>(GetWorld()->GetGameInstance()) : nullptr;
@@ -740,7 +785,7 @@ UOrderHandle* AOrderSystem::RequestOrderForGuest(AGuestCharacter* Guest)
 	FOrderData OrderData;
 	bool bWildOrder = false;
 	if (bEnableWildOrderInPrepWindow && bPrepWindowActive
-		&& WildOrderDailyLimit > 0 && WildOrdersIssuedToday < WildOrderDailyLimit
+		&& WildOrderDailyLimit > 0 && WildOrdersIssuedToday < GetEffectiveWildOrderDailyLimit()
 		&& TryBuildWildOrder(OrderData, CachedSuppliedItemIDs, CachedAvailableMachineIDs))
 	{
 		bWildOrder = true;
@@ -778,6 +823,7 @@ UOrderHandle* AOrderSystem::RequestOrderForGuest(AGuestCharacter* Guest)
 		orderHandle->SetWildOrder(WildOrderPriceMultiplier);
 	}
 	orderHandle->RefreshOrderStats();
+	orderHandle->SetCoopWaitTimeScale(GetCoopWaitTimeScale());
 	orderHandle->InitializePatience(orderCfg);
 
 	waitList.Add(orderHandle);
@@ -794,7 +840,7 @@ UOrderHandle* AOrderSystem::RequestOrderForGuest(AGuestCharacter* Guest)
 					*orderHandle->GetOrderDisplayName(), WildOrderPriceMultiplier));
 		}
 		UE_LOG(LogTemp, Log, TEXT("[OrderSystem] 备料窗口野味订单 %d/%d：%s"),
-			WildOrdersIssuedToday, WildOrderDailyLimit, *orderHandle->GetOrderDisplayName());
+			WildOrdersIssuedToday, GetEffectiveWildOrderDailyLimit(), *orderHandle->GetOrderDisplayName());
 	}
 
 	// 屏幕提示由客人侧（AGuestCharacter::PlaceOrder）统一打印，这里只留日志避免重复刷屏
@@ -1089,13 +1135,13 @@ void UOrderHandle::InitializePatience(const ULevelOrderCfg* Config)
 	LateServeGraceSeconds = Config ? FMath::Max(0.f, Config->LateServeGraceSeconds) : 0.f;
 	LateServePriceMultiplier = Config ? FMath::Clamp(Config->LateServePriceMultiplier, 0.f, 1.f) : 1.f;
 	EnsureStatsCached();
-	NormalWaitTime = CachedMaxWaitTime * Multiplier;
+	NormalWaitTime = CachedMaxWaitTime * Multiplier * CoopWaitTimeScale;
 	MenuWaitTimes.Reset();
 	if (UFoodSystem* FS = GetFoodSystemForHandle(this))
 	{
 		for (const int32 FoodID : OrderData.FoodIDs)
 		{
-			MenuWaitTimes.Add(FoodID, FS->GetMenuData(FoodID).MaxWaitTime * Multiplier);
+			MenuWaitTimes.Add(FoodID, FS->GetMenuData(FoodID).MaxWaitTime * Multiplier * CoopWaitTimeScale);
 		}
 	}
 }

@@ -40,8 +40,9 @@ struct FResearchRecipe
 
 /**
  * 研究炉：专门负责研究新菜谱。
- * 玩家手持食材靠近按 E 投入炉中；当投入的食材组合与某条研究配方完全匹配时自动开始研究，
- * 研究计时结束后解锁该配方对应的菜谱（FoodID，写入 UBaseGameInstance::UnlockedRecipeIDs 并广播）。
+ * 玩家手持食材靠近按 E 投入炉中；食材组合凑齐某条研究配方后，需要玩家空手在炉前按 E 手动开始研究
+ * （不再是自动开始），研究计时结束后解锁该配方对应的菜谱（FoodID，写入 UBaseGameInstance::UnlockedRecipeIDs 并广播），
+ * 同时播放"首次发现"演出：角色面朝镜头举手，成品模型在双手之间旋转 3 秒。
  *
  * 在关卡中摆放此 Actor 并在 Recipes 里配置配方即可；靠近时由重叠球把自身注册到玩家
  * （AShootCharacter::OverlappingResearchStove）。
@@ -110,7 +111,7 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Research")
 	float ResearchTotalTime = 0.f;
 
-	/** 研究炉头顶的世界空间进度条（C++ 控件，仅研究期间可见） */
+	/** 研究炉头顶的世界空间进度条（C++ 控件）：炉内有食材或正在研究时可见 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Components")
 	UWidgetComponent* ProgressWidgetComp = nullptr;
 
@@ -120,11 +121,16 @@ public:
 
 	/**
 	 * 玩家投入一个食材到炉中（食材被消耗销毁）。
-	 * 投入后若与某条配方完全匹配则自动开始研究。
+	 * 配方凑齐后不会自动开始研究，需要玩家在炉前按 E（TryStartMatchingResearch）。
 	 * @return true 表示投入成功；false 表示失败（无效食材/研究中/无 ItemID）
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Research")
 	bool AddFood(AItemActor* Food);
+
+	/** 玩家确认开始研究：炉内食材正好匹配某条未解锁配方时才启动计时。
+	 *  @return false 表示配方没凑齐 / 正在研究 */
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Research")
+	bool TryStartMatchingResearch();
 
 	/** 清空炉内食材（正在研究则同时取消研究） */
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Research")
@@ -171,7 +177,7 @@ public:
 		UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
 
 protected:
-	/** 匹配成功后开始研究 */
+	/** 玩家确认后开始研究 */
 	void StartResearch(int32 RecipeIndex);
 
 	/** 研究计时结束：解锁菜谱 */

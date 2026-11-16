@@ -177,12 +177,26 @@ void AGuestManager::TickSpawn()
 		return;
 	}
 
-	AGuestCharacter* Guest = SpawnGuest();
+	AGuestCharacter* Guest = nullptr;
+	if (IsAdmissionStopped())
+	{
+		// 距打烊太近：停止进新客（PauseSpawning 同时收掉波峰横幅与节奏定时器），已进场客人继续接待
+		UE_LOG(LogTemp, Log, TEXT("[GuestManager] 距打烊不足 %.1f 小时，停止进新客"), StopAdmissionHoursBeforeClose);
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 4.f, FColor::Yellow,
+				FString::Printf(TEXT("[Manager] 即将打烊，停止进新客（还剩 %.1f 小时）"), StopAdmissionHoursBeforeClose));
+		}
+		PauseSpawning();
+		return;
+	}
+	Guest = SpawnGuest();
 	if (bCustomerPacingStarted)
 	{
 		// 备料窗口内放慢来客（GetEffectiveSpawnInterval 只放宽不收紧）
-		const float Interval = bInCustomerRush ? FMath::Max(RushSpawnInterval, 0.1f) : GetEffectiveSpawnInterval();
-		ScheduleNextSpawn(Guest ? Interval : FMath::Max(SpawnRetryDelay, 0.1f));
+		const float PressureScale = GetCoopPressureScale();
+		const float Interval = (bInCustomerRush ? FMath::Max(RushSpawnInterval, 0.1f) : GetEffectiveSpawnInterval()) / PressureScale;
+		ScheduleNextSpawn(Guest ? Interval : FMath::Max(SpawnRetryDelay, 0.1f) / PressureScale);
 	}
 }
 
@@ -229,7 +243,7 @@ void AGuestManager::AdvanceRushPhase()
 		}
 	}
 
-	ScheduleNextSpawn(bInCustomerRush ? FMath::Max(RushSpawnInterval, 0.1f) : GetEffectiveSpawnInterval());
+	ScheduleNextSpawn((bInCustomerRush ? FMath::Max(RushSpawnInterval, 0.1f) : GetEffectiveSpawnInterval()) / GetCoopPressureScale());
 	World->GetTimerManager().SetTimer(RushPhaseTimerHandle,
 		this, &AGuestManager::AdvanceRushPhase, PhaseDelay, false);
 }
@@ -310,6 +324,30 @@ float AGuestManager::GetEffectiveSpawnInterval() const
 {
 	// 只放宽不收紧：配置里把 PrepWindowSpawnInterval 调小也不会让来客变快
 	return bInPrepWindow ? FMath::Max(SpawnInterval, PrepWindowSpawnInterval) : SpawnInterval;
+}
+
+bool AGuestManager::IsAdmissionStopped() const
+{
+	if (!bStopAdmissionBeforeClose)
+	{
+		return false;
+	}
+	const UTimeSystem* TS = BoundTimeSystem.Get();
+	if (!TS || !TS->IsBusinessOpen())
+	{
+		return false;
+	}
+	// 距打烊不足配置的经营小时：新客点了单也做不完，干脆不进客
+	return TS->CloseHour - TS->GetCurrentHour() <= StopAdmissionHoursBeforeClose;
+}
+
+float AGuestManager::GetCoopPressureScale() const
+{
+	const UWorld* World = GetWorld();
+	const UBaseGameInstance* GI = World ? Cast<UBaseGameInstance>(World->GetGameInstance()) : nullptr;
+	// 本地玩家数 + AI 搭档（单人带搭档测试也按双人压力算）
+	const int32 Players = GI ? FMath::Max(GI->GetCoopActorCount(), 1) : 1;
+	return 1.f + CoopPressurePerExtraPlayer * (Players - 1);
 }
 
 void AGuestManager::OpenPrepWindow(float Seconds)
@@ -633,6 +671,16 @@ AGuestCharacter* AGuestManager::SpawnGuest()
 		ResumeSpawning();
 	}
 
+	// 打烊前停止进客：招揽台爆发生成等手动入口也一并拦住（在制客人不受影响）
+	if (IsAdmissionStopped())
+	{
+		if (bShowDebugInfo)
+		{
+			UE_LOG(LogTemp, Log, TEXT("[GuestManager] SpawnGuest 跳过：距打烊不足 %.1f 小时，已停止进客"), StopAdmissionHoursBeforeClose);
+		}
+		return nullptr;
+	}
+
 	// 每个失败分支都给出明确原因，避免"静默不生成"
 	if (!GuestClass)
 	{
@@ -768,6 +816,8 @@ int32 AGuestManager::GetEffectiveMaxGuests() const
 			}
 		}
 	}
+	// 本地双人：按玩家数放大容量（与来客频率同倍率），最后仍受硬上限约束
+	Base = FMath::RoundToInt(Base * GetCoopPressureScale());
 	return FMath::Clamp(Base, 0, MaxGuestsHardCap);
 }
 
@@ -1104,6 +1154,19 @@ void AGuestManager::OnBusinessOpenChanged(bool bOpen)
 
 	// 打烊：先停止生成新客人（不再有新客进场）
 	PauseSpawning();
+
+	// 打烊时没做完的单按失败结算（扣分并让客人离场），不留到明天、也不静默吞掉
+	if (UWorld* World = GetWorld())
+	{
+		if (UBaseGameInstance* GI = Cast<UBaseGameInstance>(World->GetGameInstance()))
+		{
+			AOrderSystem* OS = GI->curLevelBP ? GI->curLevelBP->orderSystem : nullptr;
+			if (IsValid(OS))
+			{
+				OS->FailAllPendingOrders();
+			}
+		}
+	}
 
 	// 保留"已点菜"的客人：等玩家把菜上完，或客人等待超时离场，才真正打烊结束这一天
 	if (bKeepOrderedGuestsOnClose)

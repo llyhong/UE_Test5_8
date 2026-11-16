@@ -13,6 +13,7 @@ class UBoxComponent;
 class AItemActor;
 class USceneComponent;
 class APlateSystem;
+class UResearchProgressWidget;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FNoParmaEvent);
 
@@ -143,6 +144,10 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Machine")
 	UWidgetComponent* TipsWidget;
 
+	/** 烹饪进度卡片：世界空间，锅上方，仅在烹饪中/完成前可见；纯 C++ 控件（与研究炉同款） */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Machine")
+	UWidgetComponent* ProgressWidgetComp;
+
 	// ========== 烹饪完成后生成成品 ==========
 
 	/** 开关：烹饪完成后是否自动生成成品 Actor */
@@ -205,6 +210,9 @@ protected:
 	void ApplyInteractionScale();
 
 	void ResetFoodData();
+
+	/** 刷新锅顶进度卡片：烹饪中显示"烹饪中 · 剩余秒数"+ 投入食材图标，其余状态隐藏 */
+	void UpdateProgressWidget();
 	/** 收集本机可做的菜品行：MachineID>0 时按菜品表的 MachineID 过滤（菜品 MachineID=0 视为通用）；
 	 *  MachineID<=0 或菜品表未就绪时退回手填的 MenuIDsArray */
 	void CollectCandidateMenus(TArray<FMenuData>& OutMenus) const;
@@ -222,7 +230,10 @@ protected:
 
 private:
 	ULocalPlayer* LocalPlayer;
-	
+
+	UPROPERTY()
+	TObjectPtr<UResearchProgressWidget> ProgressWidget = nullptr;
+
 public:	
 	TArray<AItemActor*> FoodActors; //存锅里的食物，煮饭删掉
 };

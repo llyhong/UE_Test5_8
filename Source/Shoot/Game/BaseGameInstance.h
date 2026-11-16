@@ -16,10 +16,12 @@
 #include "MySaveGame.h"
 #include "Data/DiscoveryInfo.h"
 #include "Data/ItemActorInfo.h"
+#include "AI/ShootAIPartnerController.h"
 #include "BaseGameInstance.generated.h"
 
 class AItemActor;
 class AStorageWarehouse;
+class APlayerController;
 
 /**
  * 
@@ -53,6 +55,36 @@ public:
 	bool LoadGameData();
 	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Gameplay")
 	TObjectPtr<UMySaveGame> curSaveGameData;
+
+	/** 本地联机（分屏）：确保本地玩家数达到 DesiredCount。
+	 *  新增玩家立即获得 pawn（按 PlayerStart 顺序轮流分配出生点，避免叠在一起）。
+	 *  可在主菜单「双人开始」里于进关卡前调用，也可在关卡内随时补人。返回最后创建的玩家控制器（无新建时返回 nullptr）。 */
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Coop")
+	APlayerController* EnsureLocalPlayers(int32 DesiredCount);
+
+	// ========== AI 搭档（单人测试的"第二个玩家"） ==========
+	/** 生成 AI 搭档：一个由 AShootAIPartnerController 操控的 ShootCharacter pawn（独立于本地玩家，不占分屏）。
+	 *  重复调用返回已存在的搭档。搭档计入双人数值缩放，用来单人验证双人平衡。 */
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Coop")
+	class AShootAIPartnerController* SpawnAIPartner();
+
+	/** 切换 AI 搭档行为模式（0=跟随 1=外勤采集 2=帮厨上菜）；没有搭档时先自动创建 */
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Coop")
+	void SetAIPartnerMode(EAIPartnerMode NewMode);
+
+	/** 移除 AI 搭档（pawn 一并销毁） */
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Coop")
+	void RemoveAIPartner();
+
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Coop")
+	bool HasAIPartner() const { return AIPartner != nullptr; }
+
+	/** 联机人数：本地玩家数 + AI 搭档（1 人 + 搭档 = 2，按双人压力缩放） */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Coop")
+	int32 GetCoopActorCount() const { return GetNumLocalPlayers() + (AIPartner ? 1 : 0); }
+
+	UPROPERTY(Transient, BlueprintReadOnly, Category = "Shoot|Coop")
+	TObjectPtr<class AShootAIPartnerController> AIPartner;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Gameplay")
 	TObjectPtr<UDataTable> MenueDataTable;

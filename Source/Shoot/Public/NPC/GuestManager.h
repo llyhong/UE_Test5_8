@@ -225,6 +225,28 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GuestManager|Closing", meta = (ClampMin = "0.0"))
 	float ClosingMaxWaitTime = 120.f;
 
+	/** 打烊前停止进客：距打烊不足 StopAdmissionHoursBeforeClose 个经营小时时不再生成新客人，
+	 *  避免新客点了单却做不完，打烊被计为失败。已进场的客人不受影响。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GuestManager|Closing")
+	bool bStopAdmissionBeforeClose = true;
+
+	/** 距打烊提前多少“经营小时”停止进新客（默认 2 小时；0 = 到打烊点才停） */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GuestManager|Closing", meta = (ClampMin = "0.0"))
+	float StopAdmissionHoursBeforeClose = 2.0f;
+
+	/** 当前是否已停止进新客（营业中且距打烊不足配置时长；运行时只读） */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|GuestManager|Closing")
+	bool IsAdmissionStopped() const;
+
+	/** 本地双人分屏压力缩放：每多 1 名玩家，容量与来客频率乘以 (1 + CoopPressurePerExtraPlayer)。
+	 *  只放大经营压力，不动备料窗口时长（外勤位必须赶得回来）。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GuestManager|Coop", meta = (ClampMin = "0.0"))
+	float CoopPressurePerExtraPlayer = 0.7f;
+
+	/** 当前联机压力倍率（1 名玩家 = 1.0；运行时只读） */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|GuestManager|Coop")
+	float GetCoopPressureScale() const;
+
 	/** 调试球半径（cm） */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GuestManager|Debug", meta = (ClampMin = "1.0"))
 	float QueueDebugSphereRadius = 30.0f;

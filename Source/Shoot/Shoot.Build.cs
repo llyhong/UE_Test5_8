@@ -30,6 +30,8 @@ public class Shoot : ModuleRules
 
 		PublicIncludePaths.AddRange(new string[] {
 			"Shoot",
+			"Shoot/Public",
+			"Shoot/Public/NPC",
 			"Shoot/Variant_Platforming",
 			"Shoot/Variant_Platforming/Animation",
 			"Shoot/Variant_Combat",
@@ -42,8 +44,7 @@ public class Shoot : ModuleRules
 			"Shoot/Variant_SideScrolling/AI",
 			"Shoot/Variant_SideScrolling/Gameplay",
 			"Shoot/Variant_SideScrolling/Interfaces",
-			"Shoot/Variant_SideScrolling/UI",
-			"Shoot/Public/NPC"
+			"Shoot/Variant_SideScrolling/UI"
 		});
 
 		// Uncomment if you are using Slate UI

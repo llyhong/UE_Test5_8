@@ -445,6 +445,16 @@ public:
 	// 从候选集中选出距离最近的物品作为 OverlappingItem（同步描边与 HUD）
 	void RefreshBestOverlappingItem();
 
+	// ============ AI 搭档接口 ============
+	// AI 搭档不吃玩家输入，靠这几个访问器复用玩家的完整交互分发
+	/** 执行一次与按 E 相同的交互分发（拾取/上菜/取餐/收碟走同一套优先级链） */
+	UFUNCTION(BlueprintCallable, Category = "Shoot|AIPartner")
+	void AIPartnerDoInteract();
+
+	/** 脚边可交互物品数：>0 时 AI 才交互，避免空按触发"放下手上物品"的兜底 */
+	UFUNCTION(BlueprintPure, Category = "Shoot|AIPartner")
+	int32 GetOverlappingItemCount() const { return OverlappingItems.Num(); }
+
 	// ============ 灶台候选集 ============
 	// 进入/离开时由 ACookingMachine 调用；CookingMachine 始终指向候选里最近的一台
 	UFUNCTION(BlueprintCallable, Category = "Shoot|PickupInterface")

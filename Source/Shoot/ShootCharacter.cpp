@@ -1733,36 +1733,42 @@ void AShootCharacter::BuildInteractionOptions(TArray<FInteractOption, TInlineAll
 		});
 	}
 
-	// 研究炉：空手 + 炉内有残留食材 + 未在研究 → 清空炉内食材（防止投错食材卡住）
-	if (OverlappingResearchStove && !PickingItem
-		&& !OverlappingResearchStove->bResearching && OverlappingResearchStove->StoredItemIDs.Num() > 0)
-	{
-		AResearchStove* Stove = OverlappingResearchStove;
-		AddOption(TierWorld, DistTo(Stove), TEXT("清空研究炉"), Stove, [Stove]()
-		{
-			Stove->ClearFoods();
-			if (GEngine)
-			{
-				GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Yellow, TEXT("[研究炉] 已清空炉内食材"));
-			}
-			return true;
-		});
-	}
-
-	// 研究炉：空手按 E 查看菜谱图鉴（炉内有残留食材时，同层的"清空研究炉"优先；
-	// 清空后再按一次即可打开图鉴）
+	// 研究炉（空手）：配方凑齐 → 手动开始研究；炉内有残留食材 → 清空；空炉 → 查看菜谱。
+	// 三种状态互斥：同层同目标的选项排序不稳定，同时挂多个会导致按 E 行为随机
 	if (OverlappingResearchStove && !PickingItem)
 	{
 		AResearchStove* Stove = OverlappingResearchStove;
-		AddOption(TierWorld, DistTo(Stove), TEXT("查看菜谱"), Stove, [this]()
+		if (!Stove->bResearching && Stove->FindMatchingRecipeIndex() != INDEX_NONE)
 		{
-			if (APlayerController* PC = Cast<APlayerController>(GetController()))
+			AddOption(TierWorld, DistTo(Stove), TEXT("开始研究"), Stove, [Stove]()
 			{
-				URecipeBookWidget::ToggleForPlayer(PC);
+				return Stove->TryStartMatchingResearch();
+			});
+		}
+		else if (!Stove->bResearching && Stove->StoredItemIDs.Num() > 0)
+		{
+			AddOption(TierWorld, DistTo(Stove), TEXT("清空研究炉"), Stove, [Stove]()
+			{
+				Stove->ClearFoods();
+				if (GEngine)
+				{
+					GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Yellow, TEXT("[研究炉] 已清空炉内食材"));
+				}
 				return true;
-			}
-			return false;
-		});
+			});
+		}
+		else
+		{
+			AddOption(TierWorld, DistTo(Stove), TEXT("查看菜谱"), Stove, [this]()
+			{
+				if (APlayerController* PC = Cast<APlayerController>(GetController()))
+				{
+					URecipeBookWidget::ToggleForPlayer(PC);
+					return true;
+				}
+				return false;
+			});
+		}
 	}
 
 	// 灶台/锅：煮好了 → 出锅（切菜生成物需要先放下手上的东西）
@@ -3714,3 +3720,10 @@ void AShootCharacter::DoRepairEnd()
  	// 在这里添加倒计时结束后的代码
  	// 例如：开始游戏、释放技能、播放特效等
  }
+
+void AShootCharacter::AIPartnerDoInteract()
+{
+	// Pick 内部不使用 Value，传默认值即可：AI 借玩家的完整交互分发
+	// （拾取/上菜/取餐/收碟共用一套优先级链），不需要自己重写交互判断
+	Pick(FInputActionValue());
+}

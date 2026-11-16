@@ -5,6 +5,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "Components/WidgetComponent.h"
 #include "GameFramework/Pawn.h"
+#include "GameFramework/Character.h"
 #include "GameFramework/PlayerController.h"
 #include "Camera/PlayerCameraManager.h"
 #include "Engine/LocalPlayer.h"
@@ -15,6 +16,7 @@
 #include "Interaction/InteractionConfig.h"
 #include "Game/BaseGameInstance.h"
 #include "Game/FoodSystem.h"
+#include "Machine/FirstDiscoveryCelebration.h"
 #include "UI/DiscoveryToastWidget.h"
 #include "UI/ResearchProgressWidget.h"
 
@@ -104,6 +106,11 @@ void AResearchStove::Tick(float DeltaTime)
 
 	if (!bResearching)
 	{
+		// 备料阶段卡片也在显示，玩家走位后要跟着转，否则只剩一条边
+		if (StoredItemIDs.Num() > 0)
+		{
+			UpdateProgressWidget();
+		}
 		return;
 	}
 
@@ -169,7 +176,9 @@ bool AResearchStove::AddFood(AItemActor* Food)
 			NotifyLocalPlayers(TEXT("研究炉"),
 				FString::Printf(TEXT("这个食材配不上炉里的组合。最近的配方「%s」%s"),
 					*RecipeName,
-					MissingText.IsEmpty() ? TEXT("已经凑齐了，再投入一次即可开始研究") : *FString::Printf(TEXT("还缺：%s"), *MissingText)),
+					MissingText.IsEmpty()
+						? TEXT("已经凑齐了，空手在炉前按 E 开始研究")
+						: *FString::Printf(TEXT("还缺：%s"), *MissingText)),
 				FLinearColor(0.95f, 0.78f, 0.35f, 1.f));
 		}
 		else
@@ -195,13 +204,26 @@ bool AResearchStove::AddFood(AItemActor* Food)
 	UE_LOG(LogTemp, Log, TEXT("[ResearchStove] 投入食材 ItemID=%d，炉内共 %d 份"), ItemID, StoredItemIDs.Num());
 	OnFoodAdded(ItemID, StoredItemIDs.Num());
 
-	// 与某条配方完全匹配则自动开始研究
-	const int32 MatchIndex = FindMatchingRecipeIndex();
-	if (MatchIndex != INDEX_NONE)
+	// 备料阶段（配方未凑齐）也要立刻把图标显示出来，不等研究开始
+	UpdateProgressWidget();
+
+	return true;
+}
+
+bool AResearchStove::TryStartMatchingResearch()
+{
+	if (bResearching)
 	{
-		StartResearch(MatchIndex);
+		return false;
 	}
 
+	const int32 MatchIndex = FindMatchingRecipeIndex();
+	if (MatchIndex == INDEX_NONE)
+	{
+		return false;
+	}
+
+	StartResearch(MatchIndex);
 	return true;
 }
 
@@ -409,6 +431,7 @@ void AResearchStove::FinishResearch()
 
 	// 研究完成反馈：菜名 + "已加入菜单"，让玩家知道接下来客人会点这道菜
 	FString FoodName = FString::Printf(TEXT("菜品 %d"), UnlockFoodID);
+	TSubclassOf<AActor> DishClass = nullptr;
 	if (const UBaseGameInstance* GI = GetWorld() ? Cast<UBaseGameInstance>(GetWorld()->GetGameInstance()) : nullptr)
 	{
 		if (GI->foodSystem)
@@ -418,10 +441,27 @@ void AResearchStove::FinishResearch()
 			{
 				FoodName = Menu.FoodName;
 			}
+			DishClass = Menu.CookedActorClass;
 		}
 	}
 	NotifyLocalPlayers(FString::Printf(TEXT("新菜谱 · %s"), *FoodName),
 		TEXT("已加入菜单：客人现在可能点这道菜，灶台也能做了。"), FLinearColor(0.55f, 0.9f, 0.6f, 1.f));
+
+	// 首次发现演出：本地玩家各自举起成品模型展示 3 秒（多人分屏互不影响）
+	if (DishClass && GetWorld())
+	{
+		for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+		{
+			APlayerController* PC = It->Get();
+			if (PC && PC->IsLocalController())
+			{
+				if (ACharacter* PlayerChar = Cast<ACharacter>(PC->GetPawn()))
+				{
+					AFirstDiscoveryCelebration::SpawnForPlayer(PlayerChar, DishClass, 3.f);
+				}
+			}
+		}
+	}
 
 	// 研究完成后清空炉内食材
 	if (bClearAfterResearch)
@@ -510,7 +550,10 @@ void AResearchStove::UpdateProgressWidget()
 		return;
 	}
 
-	const bool bShow = bResearching && ResearchTotalTime > 0.f;
+	const bool bRunning = bResearching && ResearchTotalTime > 0.f;
+	// 配方没凑齐时也显示卡片：玩家要先看到自己往里放了什么
+	const bool bWaiting = !bResearching && StoredItemIDs.Num() > 0;
+	const bool bShow = bRunning || bWaiting;
 	ProgressWidgetComp->SetVisibility(bShow);
 	if (!bShow)
 	{
@@ -519,7 +562,19 @@ void AResearchStove::UpdateProgressWidget()
 
 	if (ProgressWidget)
 	{
-		ProgressWidget->SetProgress(ResearchRemainTime, ResearchTotalTime);
+		if (bRunning)
+		{
+			ProgressWidget->SetProgress(ResearchRemainTime, ResearchTotalTime);
+		}
+		else
+		{
+			// 配方已凑齐时提醒玩家手动确认，避免玩家以为还会自动开始
+			const bool bReady = FindMatchingRecipeIndex() != INDEX_NONE;
+			ProgressWidget->SetPending(StoredItemIDs.Num(), bReady ? TEXT("按 E 开始研究") : TEXT("凑齐后开始研究"));
+		}
+		ProgressWidget->SetIngredientList(StoredItemIDs);
+		// 带食材图标行时卡片会变高，世界空间控件不会自动跟着长
+		ProgressWidgetComp->SetDrawSize(ProgressWidget->GetCardDrawSize());
 	}
 
 	// 游戏相机接近俯视，世界空间控件保持竖直时几乎是侧对屏幕，只剩一条黑边；
