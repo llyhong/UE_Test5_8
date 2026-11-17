@@ -6,6 +6,7 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/SphereComponent.h"
 #include "Engine/StaticMesh.h"
+#include "Engine/World.h"
 #include "UObject/ConstructorHelpers.h"
 
 AOutdoorBasket::AOutdoorBasket()
@@ -279,6 +280,40 @@ void AOutdoorBasket::PlaceBesideWarehouse(AActor* Warehouse, const FVector& Play
 		ItemMesh->SetSimulatePhysics(false);
 		ItemMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	}
+	SetActorHiddenInGame(false);
+	SetActorEnableCollision(true);
+	SetItemState(EItemState::EIS_Idle);
+}
+
+void AOutdoorBasket::SettleOnGround(AActor* IgnoreActor)
+{
+	if (!ItemMesh)
+	{
+		return;
+	}
+	// huanglily：篮子网格没有物理碰撞，角色松手时蓝图会给物品开物理（食物靠它落地），
+	// 篮子一开模拟就会穿过田地一路下坠。放下时按“摆放”处理：关物理，从手的高度往下贴地。
+	ItemMesh->SetSimulatePhysics(false);
+	ItemMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
+	FVector Target = GetActorLocation();
+	if (UWorld* World = GetWorld())
+	{
+		FHitResult Hit;
+		FCollisionQueryParams Params(SCENE_QUERY_STAT(BasketDropGround), false, this);
+		if (IgnoreActor)
+		{
+			Params.AddIgnoredActor(IgnoreActor); // 手正下方就是角色胶囊，不能把地面判断打在自己身上
+		}
+		const FVector Start = Target + FVector(0.f, 0.f, 100.f);
+		const FVector End = Target - FVector(0.f, 0.f, 2000.f);
+		if (World->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, Params))
+		{
+			// 枢轴在提手顶部：按网格最低点反算，否则半截篮子会埋进地面
+			Target.Z = Hit.ImpactPoint.Z + 2.f - GetMeshBottomLocalZ();
+		}
+	}
+	SetActorLocation(Target);
 	SetActorHiddenInGame(false);
 	SetActorEnableCollision(true);
 	SetItemState(EItemState::EIS_Idle);
