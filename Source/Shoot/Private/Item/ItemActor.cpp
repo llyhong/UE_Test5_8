@@ -330,6 +330,19 @@ UTexture2D* AItemActor::GetItemIcon() const
 	return nullptr;
 }
 
+FString AItemActor::GetItemDisplayName() const
+{
+	if (const FItemActorInfo* Row = ItemInfoRow.GetRow<FItemActorInfo>(TEXT("ItemActor::GetItemDisplayName")))
+	{
+		const FString& Name = Row->DisplayName.IsEmpty() ? Row->ItemDes : Row->DisplayName;
+		if (!Name.IsEmpty())
+		{
+			return Name;
+		}
+	}
+	return GetActorNameOrLabel();
+}
+
 void AItemActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	// 安全兜底：若空碟在未被玩家收走的情况下被销毁（如关卡卸载），

@@ -588,7 +588,8 @@ void AGuestCharacter::SetSeatedPinned(bool bPinned)
 			Mov->bEnablePhysicsInteraction = true;
 		}
 
-		SetActorTickEnabled(false);
+		// 慌乱期间仍需 Tick 抖动；平时关闭避免空跑
+		SetActorTickEnabled(PanicRemainingSeconds > 0.f);
 	}
 }
 
@@ -598,6 +599,8 @@ void AGuestCharacter::Tick(float DeltaSeconds)
 
 	// 等餐剩余时间在不停减少：每帧按状态 + 剩余时间刷新头顶气泡（内部仅在显隐变化时才改组件）
 	RefreshStatusWidgetVisibility();
+
+	UpdatePanicVisuals(DeltaSeconds);
 
 	if (!bSeatedPinned)
 	{
@@ -991,6 +994,116 @@ void AGuestCharacter::ScareAway()
 		UE_LOG(LogTemp, Warning, TEXT("[GuestCharacter] %s 被突发事件吓走，离场并取消未完成订单"), *GetName());
 	}
 	StartLeaving();
+}
+
+void AGuestCharacter::Panic(float Seconds)
+{
+	if (Seconds <= 0.f || GuestState == EGuestState::Dead)
+	{
+		return;
+	}
+
+	const bool bWasPanicking = PanicRemainingSeconds > 0.f;
+	PanicRemainingSeconds = FMath::Max(PanicRemainingSeconds, Seconds);
+	SetActorTickEnabled(true);
+
+	if (!bWasPanicking)
+	{
+		PanicElapsedSeconds = 0.f;
+		BP_OnGuestPanicked();
+	}
+}
+
+void AGuestCharacter::StopPanic()
+{
+	PanicRemainingSeconds = 0.f;
+	PanicElapsedSeconds = 0.f;
+
+	if (bPanicBaseMeshCaptured)
+	{
+		if (USkeletalMeshComponent* MeshComp = GetMesh())
+		{
+			MeshComp->SetRelativeRotation(PanicBaseMeshRotation);
+		}
+	}
+
+	if (!bSeatedPinned)
+	{
+		SetActorTickEnabled(false);
+	}
+}
+
+void AGuestCharacter::UpdatePanicVisuals(float DeltaSeconds)
+{
+	if (PanicRemainingSeconds <= 0.f)
+	{
+		return;
+	}
+
+	PanicRemainingSeconds -= DeltaSeconds;
+	PanicElapsedSeconds += DeltaSeconds;
+
+	if (USkeletalMeshComponent* MeshComp = GetMesh())
+	{
+		if (!bPanicBaseMeshCaptured)
+		{
+			PanicBaseMeshRotation = MeshComp->GetRelativeRotation();
+			bPanicBaseMeshCaptured = true;
+		}
+		// 原地小幅抖动：坐着的客人也会“被吓一跳”，走动中的客人不影响寻路
+		const float Shake = FMath::Sin(PanicElapsedSeconds * 24.f) * PanicShakeDegrees;
+		MeshComp->SetRelativeRotation(PanicBaseMeshRotation + FRotator(Shake * 0.4f, Shake, Shake * 0.3f));
+	}
+
+	if (PanicRemainingSeconds <= 0.f)
+	{
+		StopPanic();
+	}
+}
+
+void AGuestCharacter::ApplySatisfactionPenalty(float WaitPenaltySeconds)
+{
+	if (GuestState == EGuestState::Leaving || GuestState == EGuestState::Dead)
+	{
+		return;
+	}
+
+	// 没有独立的“满意度”数值时，用“订单耐心被压缩”来表达不满：
+	// 脏乱越久，等餐中的客人越早超时离开。
+	if (CurrentOrder && WaitPenaltySeconds > 0.f)
+	{
+		CurrentOrder->waitTime += WaitPenaltySeconds;
+	}
+
+	BP_OnSatisfactionDropped(WaitPenaltySeconds);
+}
+
+void AGuestCharacter::ReactToSlip(float FallSeconds)
+{
+	if (GuestState == EGuestState::Leaving || GuestState == EGuestState::Dead)
+	{
+		return;
+	}
+
+	// 同一客人摔倒后短时间不再判定，避免在垃圾上反复“摔倒”
+	SlipImmuneUntilWorldTime = GetWorld() ? GetWorld()->GetTimeSeconds() + 8.f : 8.f;
+
+	BP_OnGuestSlipped();
+	Panic(FMath::Max(0.5f, FallSeconds));
+}
+
+bool AGuestCharacter::CanSlip() const
+{
+	// 只让正在走动 / 排队的人摔：坐着吃饭的客人不会“踩到”脚下垃圾
+	if (GuestState != EGuestState::WalkingIn && GuestState != EGuestState::Waiting)
+	{
+		return false;
+	}
+	if (GetWorld() && GetWorld()->GetTimeSeconds() < SlipImmuneUntilWorldTime)
+	{
+		return false;
+	}
+	return true;
 }
 
 void AGuestCharacter::StartLeaving()

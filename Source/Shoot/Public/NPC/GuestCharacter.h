@@ -187,6 +187,24 @@ public:
 	/** 是否已用餐：离场时据此区分“吃饱了”与“等不及走了”的台词 */
 	bool bHasEaten = false;
 
+	// ==================== 慌乱 / 摔倒 ====================
+	/** 慌乱剩余时间（秒）：>0 时 Tick 做原地抖动，蓝图另有 BP_OnGuestPanicked */
+	float PanicRemainingSeconds = 0.f;
+
+	/** 慌乱抖动幅度（度）与已抖时长 */
+	float PanicShakeDegrees = 9.f;
+	float PanicElapsedSeconds = 0.f;
+
+	/** 第一次慌乱前记录的网格相对旋转：慌乱结束后恢复，避免污染蓝图摆好的姿态 */
+	FRotator PanicBaseMeshRotation = FRotator::ZeroRotator;
+	bool bPanicBaseMeshCaptured = false;
+
+	/** 摔倒后的免踩期截止时间（世界秒）：防止同一客人每 0.5 秒连续摔 */
+	float SlipImmuneUntilWorldTime = 0.f;
+
+	/** 每帧推进慌乱抖动；与坐姿 Tick 开关解耦，走路时慌乱也能表现 */
+	void UpdatePanicVisuals(float DeltaSeconds);
+
 	/** 状态变化时刷新头顶气泡显隐，并广播 OnGuestStatusUpdated（传出状态 + 是否已吃饱），由 GuestStatusWidget 从配置表随机抽取显示 */
 	void UpdateStatusWidget(EGuestState NewState);
 
@@ -268,6 +286,30 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Guest")
 	void ScareAway();
 
+	// ==================== 就餐区卫生 / 突发事件表现 ====================
+	/** 慌乱一段时间（老鼠出没等）：原地抖动，蓝图用 BP_OnGuestPanicked 播动画 / 音效 */
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Guest|Reaction")
+	void Panic(float Seconds);
+
+	/** 立即结束慌乱（事件被解决时调用，避免抖动残留） */
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Guest|Reaction")
+	void StopPanic();
+
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Guest|Reaction")
+	bool IsPanicking() const { return PanicRemainingSeconds > 0.f; }
+
+	/** 就餐区脏乱导致满意度下降：直接缩短当前订单的剩余耐心（没有订单时只播表现） */
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Guest|Reaction")
+	void ApplySatisfactionPenalty(float WaitPenaltySeconds);
+
+	/** 踩到垃圾 / 积水摔倒：播放摔倒表现并短暂慌乱，不强制离场 */
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Guest|Reaction")
+	void ReactToSlip(float FallSeconds);
+
+	/** 当前是否可能踩到散落物（只在走动 / 排队且不在摔倒冷却期时成立） */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Guest|Reaction")
+	bool CanSlip() const;
+
 	/** 到达离场点后的回调：销毁 */
 	UFUNCTION()
 	void OnReachLeavePoint();
@@ -284,6 +326,18 @@ protected:
 	 *  仅在 GuestType == Special 的上菜成功路径触发。 */
 	UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|Guest")
 	void OnSpecialGuestServed();
+
+	/** 遇到老鼠等突发事件开始慌乱（播惊吓动画 / 音效 / 头顶感叹号） */
+	UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|Guest|Reaction")
+	void BP_OnGuestPanicked();
+
+	/** 踩到垃圾 / 积水摔倒（播摔倒动画 / 音效） */
+	UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|Guest|Reaction")
+	void BP_OnGuestSlipped();
+
+	/** 就餐区太脏导致满意度下降（头顶冒不满气泡 / 皱眉） */
+	UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|Guest|Reaction")
+	void BP_OnSatisfactionDropped(float WaitPenaltySeconds);
 
 	/** 设置状态并广播变化 */
 	void SetGuestState(EGuestState NewState);

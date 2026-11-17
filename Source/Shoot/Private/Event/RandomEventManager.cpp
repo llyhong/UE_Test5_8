@@ -6,6 +6,7 @@
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
+#include "Components/SceneComponent.h"
 #include "Event/PestActor.h"
 #include "Game/BaseGameInstance.h"
 #include "NPC/GuestCharacter.h"
@@ -13,6 +14,9 @@
 ARandomEventManager::ARandomEventManager()
 {
 	PrimaryActorTick.bCanEverTick = true;
+
+	// 给管理器一个根组件：否则 Actor 没有 Transform，关卡里摆的位置（SpawnAreas 找不到区域时的兜底圆心）存不住
+	RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
 }
 
 void ARandomEventManager::BeginPlay()
@@ -297,17 +301,24 @@ bool ARandomEventManager::StartEventByName(FName EventID)
 
 	OnEventProgress.Broadcast(ActiveEventInfo, ActiveClearedCount, ActiveTotalCount);
 	OnEventStarted.Broadcast(ActiveEventInfo);
+
+	// 老鼠窜进就餐区等事件：开场先让所有在场客人慌乱一阵
+	if (Info->bPanicGuestsOnStart)
+	{
+		PanicAllGuests(Info->PanicDurationSeconds);
+	}
 	return true;
 }
 
 void ARandomEventManager::SpawnEventPests(const FRandomEventInfo& Info)
 {
-	if (Info.SpawnCount <= 0 || Info.PestClass.IsNull() || !GetWorld())
+	if (Info.SpawnCount <= 0 || !GetWorld())
 	{
 		return;
 	}
 
-	UClass* PestClass = Info.PestClass.LoadSynchronous();
+	// 没配生成物蓝图时退回原生 APestActor（自带白模方块），方便先用白模跑通事件
+	UClass* PestClass = Info.PestClass.IsNull() ? APestActor::StaticClass() : Info.PestClass.LoadSynchronous();
 	if (!PestClass)
 	{
 		ShowDebug(FString::Printf(TEXT("[突发事件] 生成物蓝图加载失败：%s"), *Info.PestClass.ToString()), FLinearColor::Red);
@@ -400,6 +411,9 @@ void ARandomEventManager::ResolveActiveEvent(bool bSuccess)
 
 	const FRandomEventInfo Info = ActiveEventInfo;
 
+	// 事件结束（无论成败）：先收掉慌乱表现，失败时后续再按配置吓走客人
+	StopAllGuestPanic();
+
 	// 清场：剩余害虫直接销毁（失败时相当于“跑掉了”）
 	for (APestActor* Pest : ActivePests)
 	{
@@ -453,6 +467,8 @@ void ARandomEventManager::CancelActiveEvent()
 		return;
 	}
 
+	StopAllGuestPanic();
+
 	for (APestActor* Pest : ActivePests)
 	{
 		if (IsValid(Pest))
@@ -496,6 +512,43 @@ void ARandomEventManager::ScareAllGuests()
 	for (AGuestCharacter* Guest : Guests)
 	{
 		Guest->ScareAway();
+	}
+}
+
+void ARandomEventManager::PanicAllGuests(float Seconds)
+{
+	UWorld* World = GetWorld();
+	if (!World || Seconds <= 0.f)
+	{
+		return;
+	}
+
+	for (TActorIterator<AGuestCharacter> It(World); It; ++It)
+	{
+		if (AGuestCharacter* Guest = *It)
+		{
+			if (Guest->GuestState != EGuestState::Leaving)
+			{
+				Guest->Panic(Seconds);
+			}
+		}
+	}
+}
+
+void ARandomEventManager::StopAllGuestPanic()
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	for (TActorIterator<AGuestCharacter> It(World); It; ++It)
+	{
+		if (AGuestCharacter* Guest = *It)
+		{
+			Guest->StopPanic();
+		}
 	}
 }
 

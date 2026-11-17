@@ -39,6 +39,7 @@
 #include "Game/BaseLevelBP.h"
 #include "Machine/StorageWarehouse.h"
 #include "Event/PestActor.h"
+#include "Dining/DiningMessActor.h"
 #include "Environment/FireflyAreaVolume.h"
 #include "UI/HUDWidget.h"
 #include "UI/InteractionPromptWidget.h"
@@ -1170,6 +1171,11 @@ void AShootCharacter::SetOverlappingPest(APestActor* Pest)
 	OverlappingPest = Pest;
 }
 
+void AShootCharacter::SetOverlappingMess(ADiningMessActor* Mess)
+{
+	OverlappingMess = Mess;
+}
+
 void AShootCharacter::InteractWithPlant()
 {
 	if (!OverlappingPlant)
@@ -1671,9 +1677,27 @@ void AShootCharacter::BuildInteractionOptions(TArray<FInteractOption, TInlineAll
 	if (IsValid(OverlappingPlant) && (OverlappingPlant->CanHarvest()
 		|| (!OverlappingPlant->UsesWildHarvest() && (OverlappingPlant->HasPest() || OverlappingPlant->NeedsWater()))))
 	{
-		AddOption(TierWorld, DistTo(OverlappingPlant), TEXT("植物"), OverlappingPlant, [this]()
+		// 背着篮子且该果实不能入篮（如生菜）：提示文字提前说明只能手持采摘
+		const bool bHarvestNeedsFreeHand = GetEquippedBasket() != nullptr
+			&& OverlappingPlant->UsesWildHarvest() && OverlappingPlant->CanHarvest()
+			&& !OverlappingPlant->CanHarvestFruitStoreInBasket();
+		AddOption(TierWorld, DistTo(OverlappingPlant),
+			bHarvestNeedsFreeHand ? TEXT("采摘（该食材只能手持）") : TEXT("植物"), OverlappingPlant, [this]()
 		{
 			InteractWithPlant();
+			return true;
+		});
+	}
+
+	// 就餐区散落物：按 E 清理垃圾 / 积水（同层与其他环境交互按距离决胜）
+	if (IsValid(OverlappingMess))
+	{
+		AddOption(TierWorld, DistTo(OverlappingMess), TEXT("清理"), OverlappingMess, [this]()
+		{
+			if (IsValid(OverlappingMess))
+			{
+				OverlappingMess->TryClean(this);
+			}
 			return true;
 		});
 	}

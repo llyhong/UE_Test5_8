@@ -19,7 +19,7 @@
 
 namespace
 {
-	constexpr float CardWidth = 220.f;
+	constexpr float ResearchCardWidth = 220.f;
 	constexpr float CardHeightBase = 48.f;
 	constexpr float IconRowHeight = 26.f;
 	constexpr float IconSize = 22.f;
@@ -37,7 +37,7 @@ TSharedRef<SWidget> UResearchProgressWidget::RebuildWidget()
 	SetVisibility(ESlateVisibility::HitTestInvisible);
 
 	Root = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("Root"));
-	Root->SetWidthOverride(CardWidth);
+	Root->SetWidthOverride(ResearchCardWidth);
 	Root->SetHeightOverride(CardHeightBase);
 	WidgetTree->RootWidget = Root;
 
@@ -155,7 +155,7 @@ void UResearchProgressWidget::SetIngredientCounts(const TMap<int32, int32>& Coun
 
 FVector2D UResearchProgressWidget::GetCardDrawSize() const
 {
-	return FVector2D(CardWidth, bHasIcons ? CardHeightBase + IconRowHeight : CardHeightBase);
+	return FVector2D(ResearchCardWidth, bHasIcons ? CardHeightBase + IconRowHeight : CardHeightBase);
 }
 
 void UResearchProgressWidget::ApplyIngredientEntries(const TArray<TPair<int32, int32>>& Entries)

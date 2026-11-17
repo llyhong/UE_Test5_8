@@ -202,6 +202,15 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Item")
 	bool bPickable = true;
 
+	/** 能否装入外出背包（AOutdoorBasket）：false 表示这种食材只能手持携带、必须去野外现摘
+	 *  （如生菜），背着篮子采摘会被拒绝并提示。默认 true。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Item")
+	bool bCanStoreInBasket = true;
+
+	/** 物品显示名（优先数据表 DisplayName，其次 ItemDes，最后 Actor 名），用于文字反馈 */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Item")
+	FString GetItemDisplayName() const;
+
 	// ========== 成品腐烂（未被玩家持有一段时间后自动销毁） ==========
 	/** 是否启用腐烂：被启用后，若成品未被玩家拾取（不在手上），累计超过 DecayTime 则自动销毁。
 	 *  玩家"拾取起来"时计时【暂停】（保留已累计时长，不清零）；"放下"后从原值【继续累计】。 */

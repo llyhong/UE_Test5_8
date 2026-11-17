@@ -214,6 +214,10 @@ private:
 	UPROPERTY(VisibleInstanceOnly, Category = "Shoot|Character")
 	TObjectPtr<class APestActor> OverlappingPest;
 
+	// 当前可清理的就餐区散落物（垃圾 / 积水；靠近时由散落物交互球注册）
+	UPROPERTY(VisibleInstanceOnly, Category = "Shoot|Character")
+	TObjectPtr<class ADiningMessActor> OverlappingMess;
+
 	// ============ 背包系统 ============
 	// 背包槽位：只记录物体的类型/信息，入包后世界中的物体会被销毁，取出时按类型重新生成
 	UPROPERTY(VisibleInstanceOnly, Category = "Shoot|Inventory")
@@ -670,6 +674,13 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Character")
 	FORCEINLINE APestActor* GetOverlappingPest() const { return OverlappingPest; }
+
+	// 就餐区散落物交互：靠近时由 ADiningMessActor 的交互球注册/反注册（用于 E 键清理）
+	UFUNCTION(BlueprintCallable, Category = "Shoot|DiningMess")
+	void SetOverlappingMess(ADiningMessActor* Mess);
+
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Character")
+	FORCEINLINE ADiningMessActor* GetOverlappingMess() const { return OverlappingMess; }
 
 	// 通用对话交互：靠近时由 UInteractionDialogueComponent 注册/反注册（用于 E 键对话）
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Dialogue")

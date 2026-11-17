@@ -111,6 +111,14 @@ struct SHOOT_API FRandomEventInfo : public FTableRowBase
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Resolve")
 	bool bCancelOnBusinessStateChange = true;
 
+	/** 事件开始时让所有在场客人慌乱一段时间（老鼠窜进就餐区的“尖叫逃散”表现）。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Resolve")
+	bool bPanicGuestsOnStart = false;
+
+	/** 慌乱持续时间（秒）：事件被解决 / 失败后会立即停止 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Resolve", meta = (EditCondition = "bPanicGuestsOnStart", ClampMin = "0.0"))
+	float PanicDurationSeconds = 6.f;
+
 	// ==================== 生成物（老鼠等） ====================
 	/** 事件生成物蓝图类（需继承 APestActor，如 BP_Mouse）；留空表示该事件不生成实物 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Spawn")

@@ -77,6 +77,11 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Shoot|Plant|WildHarvest")
 	float GetWildRegrowRemaining() const;
 
+	/** 这株植物的果实能否装入外出背包（取自果实类的 bCanStoreInBasket）。
+	 *  false 表示只能手持、必须放下篮子再采；交互提示可据此提前标注。 */
+	UFUNCTION(BlueprintPure, Category = "Shoot|Plant|WildHarvest")
+	bool CanHarvestFruitStoreInBasket() const;
+
 	/** 留空使用去 PIE 前缀的地图名|Actor FName；重命名或运行时生成点可指定完整稳定 Key。 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Plant|Save")
 	FName PlantKeyOverride = NAME_None;

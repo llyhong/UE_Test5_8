@@ -175,6 +175,17 @@ bool AOutdoorBasket::TryAddItem(AItemActor* Item, int32 Quantity)
 		return false;
 	}
 
+	// 帐篷之外的食材（如生菜）明确不允许入篮，避免通过其它路径绕过采摘时的限制
+	if (!Item->bCanStoreInBasket)
+	{
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 2.5f, FColor::Yellow,
+				FString::Printf(TEXT("[背包] %s 只能手持携带，不能放入外出背包"), *Item->GetItemDisplayName()));
+		}
+		return false;
+	}
+
 	const int32 ExistingIndex = BasketItems.IndexOfByPredicate([Item](const FInventorySlot& Slot)
 	{
 		return Slot.ItemClass == Item->GetClass();

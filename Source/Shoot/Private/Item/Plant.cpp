@@ -206,6 +206,17 @@ bool APlant::UsesWildHarvest() const
 	return Info && Info->bWildHarvest;
 }
 
+bool APlant::CanHarvestFruitStoreInBasket() const
+{
+	const FPlantInfo* Info = GetPlantInfo();
+	if (!Info || !Info->FruitClass)
+	{
+		return true;
+	}
+	const AItemActor* FruitCDO = Info->FruitClass->GetDefaultObject<AItemActor>();
+	return !FruitCDO || FruitCDO->bCanStoreInBasket;
+}
+
 bool APlant::CanHarvest() const
 {
 	const FPlantInfo* Info = GetPlantInfo();
@@ -424,6 +435,17 @@ bool APlant::HarvestForCharacter(AShootCharacter* Character)
 	// 否则离手后没有任何地面接触，会直接穿过锅和地板一直下坠。打烊入包只是隐藏的数据载体，才关碰撞。
 	// 手上拿着外出背包：野外采摘默认先装进背包，不再占用/覆盖手上的其它物品
 	const bool bToBasket = Character->GetEquippedBasket() != nullptr;
+	// 该食材不能入篮（如生菜）：保持植株可采，只提示玩家放下篮子改用手持
+	if (bToBasket && !Fruit->bCanStoreInBasket)
+	{
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 2.5f, FColor::Yellow,
+				FString::Printf(TEXT("[采摘] %s 只能手持携带，不能放入外出背包，请先放下篮子再采"), *Fruit->GetItemDisplayName()));
+		}
+		Fruit->Destroy();
+		return false;
+	}
 	Fruit->SetActorEnableCollision(bBusinessOpen && !bToBasket);
 	Fruit->ConfigureAndStartRipening(false, 0.f, 0.f);
 	Fruit->SetIngredientQuality(EIngredientQuality::Normal);

@@ -4,11 +4,13 @@
 
 #include "Components/SphereComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "Kismet/GameplayStatics.h"
 #include "NPC/GuestCharacter.h"
 #include "ShootCharacter.h"
+#include "UObject/ConstructorHelpers.h"
 
 APestActor::APestActor()
 {
@@ -19,6 +21,14 @@ APestActor::APestActor()
 	SetRootComponent(MeshComp);
 	MeshComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	MeshComp->SetGenerateOverlapEvents(false);
+
+	// 白模：没有配置蓝图外观时也能看见一只“老鼠”（细长方块），方便直接引用本类做突发事件
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> WhiteboxMesh(TEXT("/Engine/BasicShapes/Cube.Cube"));
+	if (WhiteboxMesh.Succeeded())
+	{
+		MeshComp->SetStaticMesh(WhiteboxMesh.Object);
+	}
+	MeshComp->SetRelativeScale3D(FVector(0.45f, 0.18f, 0.16f));
 
 	// 交互球：只与 Pawn 重叠，用于朝玩家注册“按 E 抓取”
 	InteractionSphere = CreateDefaultSubobject<USphereComponent>(TEXT("InteractionSphere"));

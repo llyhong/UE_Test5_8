@@ -146,6 +146,14 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Shoot|RandomEvent")
 	void CancelActiveEvent();
 
+	/** 让所有在场客人慌乱一段时间（老鼠等事件的惊吓表现） */
+	UFUNCTION(BlueprintCallable, Category = "Shoot|RandomEvent")
+	void PanicAllGuests(float Seconds);
+
+	/** 立即结束所有客人的慌乱（事件解决 / 取消时调用） */
+	UFUNCTION(BlueprintCallable, Category = "Shoot|RandomEvent")
+	void StopAllGuestPanic();
+
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|RandomEvent")
 	bool HasActiveEvent() const { return ActiveEventID != NAME_None; }
 
