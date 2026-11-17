@@ -51,6 +51,11 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Item")
 	virtual void DeAttachMeshToSocket();
 
+	/** 挂到插槽时保持挂接前的世界缩放：角色骨架手部插槽通常带 2.25 骨骼缩放，
+	 *  SnapToTarget 会把食物一起放大（煎蛋变巨无霸）。武器等需要跟随插槽缩放的物品可关掉。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Item")
+	bool bPreserveWorldScaleOnAttach = true;
+
 	/**
 	 * 开启物理下落（投掷 / 松手掉落）。
 	 *
@@ -91,6 +96,10 @@ private:
 
 	/** 是否在树上结果中（由植物生成果实时开启，采摘/离树时关闭），控制熟度计时是否推进 */
 	bool bTrackRipening = false;
+
+	/** 插槽挂接前的世界缩放，摘下时还原，避免手部骨骼缩放残留到落地物品上 */
+	FVector AttachWorldScaleBefore = FVector::OneVector;
+	bool bAttachScaleCompensated = false;
 
 	/** 当前熟度子阶段：0=未成熟, 1=成熟, 2=熟过头（仅用于广播去重，避免每帧重复） */
 	int32 CurrentRipenessStage = 0;

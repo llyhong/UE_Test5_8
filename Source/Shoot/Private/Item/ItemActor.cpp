@@ -541,8 +541,29 @@ void AItemActor::AttachMeshToSocket(USceneComponent* InParent, const FName& InSo
 	ItemMesh->SetSimulatePhysics(false);
 	ItemMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
+	// huanglily：SnapToTarget 会连插槽缩放一起继承；角色 RetargetMesh 的手部插槽带 2.25 骨骼缩放，
+	// 食物一拿起就变大。先记下当前世界缩放，挂接后按插槽世界缩放反算，保持物品原本大小。
+	bAttachScaleCompensated = false;
+	if (bPreserveWorldScaleOnAttach && InParent)
+	{
+		AttachWorldScaleBefore = ItemMesh->GetComponentScale();
+		bAttachScaleCompensated = true;
+	}
+
 	FAttachmentTransformRules TransformRules(EAttachmentRule::SnapToTarget, true);
 	ItemMesh->AttachToComponent(InParent, TransformRules, InSocketName);
+
+	if (bAttachScaleCompensated)
+	{
+		const FVector SocketScale = (!InSocketName.IsNone() && InParent->DoesSocketExist(InSocketName))
+			? InParent->GetSocketTransform(InSocketName, ERelativeTransformSpace::RTS_World).GetScale3D()
+			: InParent->GetComponentTransform().GetScale3D();
+		auto SafeScale = [](float S) { return FMath::Max(FMath::Abs(S), KINDA_SMALL_NUMBER); };
+		ItemMesh->SetRelativeScale3D(FVector(
+			AttachWorldScaleBefore.X / SafeScale(SocketScale.X),
+			AttachWorldScaleBefore.Y / SafeScale(SocketScale.Y),
+			AttachWorldScaleBefore.Z / SafeScale(SocketScale.Z)));
+	}
 }
 
 void AItemActor::EnablePhysicsDrop()
@@ -588,6 +609,13 @@ void AItemActor::DeAttachMeshToSocket()
 {
 	//FAttachmentTransformRules TransformRules(EAttachmentRule::SnapToTarget, true);
 	ItemMesh->DetachFromComponent(FDetachmentTransformRules::KeepWorldTransform);
+
+	// 挂接时做过缩放补偿的物品，摘下后还原成挂接前的世界大小（否则会把插槽缩放一起带走）
+	if (bAttachScaleCompensated)
+	{
+		ItemMesh->SetWorldScale3D(AttachWorldScaleBefore);
+		bAttachScaleCompensated = false;
+	}
 }
 
 void AItemActor::OnCollectOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,

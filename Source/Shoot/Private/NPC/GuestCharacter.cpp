@@ -20,12 +20,23 @@
 #include "Game/BaseGameInstance.h"
 #include "Game/BaseLevelBP.h"
 #include "Game/OrderSystem.h"
+#include "NiagaraComponent.h"
+#include "NiagaraFunctionLibrary.h"
+#include "NiagaraSystem.h"
+#include "UObject/ConstructorHelpers.h"
 
 AGuestCharacter::AGuestCharacter()
 {
 	// Tick 只在“钉住座位”期间需要（坐下后校正位置），默认关闭以免空跑
 	PrimaryActorTick.bCanEverTick = true;
 	PrimaryActorTick.bStartWithTickEnabled = false;
+
+	// 上菜成功默认播放工程自带的彩带爆发特效；美术可在蓝图里替换成爱心 / 星星
+	static ConstructorHelpers::FObjectFinder<UNiagaraSystem> HappyFx(TEXT("/Game/StackOBot/FX/Confetti/NS_Confetti.NS_Confetti"));
+	if (HappyFx.Succeeded())
+	{
+		HappyEffectSystem = HappyFx.Object;
+	}
 
 	// 由 AI 控制器自动接管
 	AIControllerClass = AGuestAIController::StaticClass();
@@ -850,6 +861,31 @@ void AGuestCharacter::StartEating()
 	// 设置动画状态标记，由 ShootAnimInstance 驱动进食动画
 	bIsEating = true;
 	bIsSitting = true;
+
+	// 上菜成功：先给蓝图一个开心表现入口，再生成默认 1~3 秒的彩带特效
+	BP_OnGuestHappy();
+	if (HappyEffectSystem && GetMesh() && GetWorld())
+	{
+		if (UNiagaraComponent* OldEffect = HappyEffectComponent.Get())
+		{
+			OldEffect->Deactivate();
+			OldEffect->DestroyComponent();
+		}
+		if (UNiagaraComponent* Effect = UNiagaraFunctionLibrary::SpawnSystemAttached(
+			HappyEffectSystem, GetMesh(), NAME_None, FVector(0.f, 0.f, 90.f), FRotator::ZeroRotator,
+			EAttachLocation::KeepRelativeOffset, false))
+		{
+			HappyEffectComponent = Effect;
+			// 持续时间到点后停止发射（已有粒子自然消散），默认 2 秒
+			GetWorld()->GetTimerManager().SetTimer(HappyEffectTimerHandle, FTimerDelegate::CreateWeakLambda(this, [this]()
+			{
+				if (UNiagaraComponent* Current = HappyEffectComponent.Get())
+				{
+					Current->Deactivate();
+				}
+			}), FMath::Clamp(HappyEffectDuration, 0.5f, 5.f), false);
+		}
+	}
 
 	// 进食结束后：方案B 把桌上菜品转为空碟占据座位，再离座
 	GetWorld()->GetTimerManager().SetTimerForNextTick([this]()

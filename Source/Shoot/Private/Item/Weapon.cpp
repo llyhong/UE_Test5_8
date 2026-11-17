@@ -11,6 +11,9 @@
 
 AWeapon::AWeapon()
 {
+	// 武器一直按手部插槽缩放呈现，不做 ItemActor 的食物缩放补偿，避免改变现有持械手感
+	bPreserveWorldScaleOnAttach = false;
+
 	WeaponBox = CreateDefaultSubobject<UBoxComponent>(TEXT("Weapon Box"));
 	WeaponBox->SetupAttachment(GetRootComponent());
 	WeaponBox->SetCollisionEnabled(ECollisionEnabled::NoCollision);

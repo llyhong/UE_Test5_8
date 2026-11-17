@@ -81,6 +81,7 @@ void AOrderSystem::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	OnStartOrder.Clear();
 	OnFinishOrder.Clear();
 	OnFailOrder.Clear();
+	OnOrderCanceled.Clear();
 	Super::EndPlay(EndPlayReason);
 }
 
@@ -863,6 +864,9 @@ bool AOrderSystem::CancelOrderForGuest(AGuestCharacter* Guest)
 		if (handle && handle->Guest == Guest)
 		{
 			waitList.RemoveAt(i);
+			// huanglily：以前这里只改 waitList，订单 UI 的增量缓存收不到移除通知，
+			// 客人被老鼠吓跑后订单条会一直挂着。用独立的静默取消事件通知 UI，不计失败不扣分。
+			OnOrderCanceled.Broadcast(handle, handle->OrderData);
 			return true;
 		}
 	}
