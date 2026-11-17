@@ -55,6 +55,21 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|AIPartner", meta = (ClampMin = "0.2"))
 	float PickTryInterval = 0.8f;
 
+	/** 空闲（没菜可取、没客人要送、非备料窗口）时在驻守点附近小范围溜达，避免长时间杵在原地像根柱子 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|AIPartner|Idle")
+	bool bIdleWander = true;
+
+	/** 溜达半径（cm）：在驻守点周围随机取可达点，太大容易走到玩家操作区里碍事 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|AIPartner|Idle", meta = (ClampMin = "0.0"))
+	float IdleWanderRadius = 220.f;
+
+	/** 到点后的随机停顿区间（秒） */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|AIPartner|Idle", meta = (ClampMin = "0.0"))
+	float IdleWanderPauseMin = 2.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|AIPartner|Idle", meta = (ClampMin = "0.0"))
+	float IdleWanderPauseMax = 4.5f;
+
 	virtual void Tick(float DeltaSeconds) override;
 
 	UFUNCTION(BlueprintCallable, Category = "Shoot|AIPartner")
@@ -74,9 +89,16 @@ private:
 	void TickForager();
 	void TickHelper();
 
+	/** 在 Center 附近小范围溜达（到达后随机停几秒再换点）；Center 为零向量或未开启时退回原地待命 */
+	void TickIdleWander(const FVector& Center);
+
 	float PickCooldown = 0.f;
 	FVector PendingDestination = FVector::ZeroVector;
 	bool bHasPendingDestination = false;
+	/** 空闲溜达：当前目标点、是否已有目标、到点后的剩余停顿时间 */
+	FVector IdleWanderTarget = FVector::ZeroVector;
+	bool bHasIdleWanderTarget = false;
+	float IdleWanderPauseLeft = 0.f;
 	/** 上一次发寻路以来的冷却：寻路中断（路径尽头/目标出导航网）后据此节流重试，避免每帧重发 */
 	float MoveRetryTimer = 0.f;
 	/** 收割失败计数：同株连续失败 N 次就暂时拉黑，防止卡在不可达的采集点上 */

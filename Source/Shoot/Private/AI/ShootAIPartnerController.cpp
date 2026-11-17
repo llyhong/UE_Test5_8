@@ -26,6 +26,9 @@ void AShootAIPartnerController::SetPartnerMode(EAIPartnerMode NewMode)
 	{
 		Mode = NewMode;
 		bHasPendingDestination = false;
+		// 切模式时把溜达状态一并清掉，避免带着旧目标点先跑去别处
+		bHasIdleWanderTarget = false;
+		IdleWanderPauseLeft = 0.f;
 		StopMovement();
 		UE_LOG(LogAIPartner, Log, TEXT("[AIPartner] 切换模式：%d"), static_cast<int32>(NewMode));
 	}
@@ -101,12 +104,80 @@ void AShootAIPartnerController::DoPick()
 	}
 }
 
+void AShootAIPartnerController::TickIdleWander(const FVector& Center)
+{
+	AShootCharacter* Char = GetPartnerChar();
+	if (!Char)
+	{
+		return;
+	}
+	if (!bIdleWander || Center.IsNearlyZero())
+	{
+		// 未开启 / 没配驻守点：保留旧的原地待命行为，零向量直接不动
+		if (!Center.IsNearlyZero())
+		{
+			if (MoveWithinRange(Center, 100.f))
+			{
+				bHasPendingDestination = false;
+			}
+		}
+		return;
+	}
+
+	if (IdleWanderPauseLeft > 0.f)
+	{
+		return; // 原地歇一会儿再走，避免来回抽动
+	}
+
+	if (!bHasIdleWanderTarget)
+	{
+		// 离驻守点太远（刚生成 / 采完从野外回来）：先直接回点，避免随机点又把路绕长
+		if (FVector::Dist2D(Char->GetActorLocation(), Center) > IdleWanderRadius * 2.5f)
+		{
+			IdleWanderTarget = Center;
+			bHasIdleWanderTarget = true;
+		}
+		else
+		{
+			FNavLocation WanderPoint;
+			UNavigationSystemV1* NavSys = UNavigationSystemV1::GetCurrent(GetWorld());
+			if (NavSys && NavSys->GetRandomReachablePointInRadius(Center, IdleWanderRadius, WanderPoint))
+			{
+				IdleWanderTarget = WanderPoint.Location;
+				bHasIdleWanderTarget = true;
+			}
+			// huanglily：驻守点可能落在导航网外（锚点摆得偏），此时以搭档自身位置为圆心再取一次，
+			// 让它至少在身子周围动起来，而不是彻底站死。
+			else if (NavSys && NavSys->GetRandomReachablePointInRadius(Char->GetActorLocation(), IdleWanderRadius, WanderPoint))
+			{
+				IdleWanderTarget = WanderPoint.Location;
+				bHasIdleWanderTarget = true;
+			}
+			else
+			{
+				// 随机点取不到（导航未覆盖驻守点）：退回站定，不影响正常任务
+				return;
+			}
+		}
+	}
+
+	if (MoveWithinRange(IdleWanderTarget, 45.f))
+	{
+		bHasIdleWanderTarget = false;
+		bHasPendingDestination = false;
+		const float MinPause = FMath::Max(0.f, FMath::Min(IdleWanderPauseMin, IdleWanderPauseMax));
+		const float MaxPause = FMath::Max(MinPause, IdleWanderPauseMax);
+		IdleWanderPauseLeft = FMath::FRandRange(MinPause, MaxPause);
+	}
+}
+
 void AShootAIPartnerController::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 
 	PickCooldown = FMath::Max(0.f, PickCooldown - DeltaSeconds);
 	MoveRetryTimer = FMath::Max(0.f, MoveRetryTimer - DeltaSeconds);
+	IdleWanderPauseLeft = FMath::Max(0.f, IdleWanderPauseLeft - DeltaSeconds);
 	// 拉黑到期后清除失败计数，下次窗口可以重新尝试那株
 	const float Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
 	if (HarvestFailCount >= 3 && Now >= HarvestBlacklistUntil)
@@ -166,16 +237,10 @@ void AShootAIPartnerController::TickForager()
 	}
 	const AGuestManager* GM = FindGuestManager();
 
-	// 非备料窗口：回驻守点待命（不抢玩家的店内交互）
+	// 非备料窗口：回驻守点附近待命（不抢玩家的店内交互）
 	if (!GM || !GM->bInPrepWindow)
 	{
-		if (!IdlePostLocation.IsNearlyZero())
-		{
-			if (MoveWithinRange(IdlePostLocation, 100.f))
-			{
-				bHasPendingDestination = false;
-			}
-		}
+		TickIdleWander(IdlePostLocation);
 		return;
 	}
 
@@ -204,11 +269,8 @@ void AShootAIPartnerController::TickForager()
 
 	if (!Best)
 	{
-		// 能采的都采完了：回驻守点等窗口结束
-		if (!IdlePostLocation.IsNearlyZero())
-		{
-			MoveWithinRange(IdlePostLocation, 100.f);
-		}
+		// 能采的都采完了：回驻守点附近溜达着等窗口结束
+		TickIdleWander(IdlePostLocation);
 		return;
 	}
 
@@ -272,7 +334,7 @@ void AShootAIPartnerController::TickHelper()
 		}
 		else if (!IdlePostLocation.IsNearlyZero())
 		{
-			MoveWithinRange(IdlePostLocation, 100.f);
+			TickIdleWander(IdlePostLocation);
 		}
 		return;
 	}
@@ -312,6 +374,6 @@ void AShootAIPartnerController::TickHelper()
 	}
 	else if (!IdlePostLocation.IsNearlyZero())
 	{
-		MoveWithinRange(IdlePostLocation, 100.f);
+		TickIdleWander(IdlePostLocation);
 	}
 }
