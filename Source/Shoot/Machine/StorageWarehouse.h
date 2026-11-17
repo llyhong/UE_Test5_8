@@ -75,6 +75,17 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Warehouse")
 	bool RetrieveToInventory(AShootCharacter* Player, int32 SlotIndex);
 
+	/** 把外出背包里的食材全部转入仓库（容量不足的留在背包里）。返回实际存入件数。
+	 *  非「仓库驱动」模式下，同时把对应生成箱的剩余数量补上，玩家才能从箱子里取到这些食材。 */
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Warehouse")
+	int32 DepositBasket(class AOutdoorBasket* Basket);
+
+	/** 通用批量存入：同类堆叠，容量放不下的槽位留在 InOutSlots；返回实际存入件数 */
+	int32 DepositSlots(TArray<FInventorySlot>& InOutSlots);
+
+	/** 生成箱补货：非仓库驱动模式下，把 Quantity 加进所有产出 ItemClass 的生成箱 */
+	void RestockSpawnersFor(TSubclassOf<AItemActor> ItemClass, int32 Quantity);
+
 	/** 仓库当前种类数（槽位数） */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Warehouse")
 	int32 GetStoredCount() const { return StoredItems.Num(); }

@@ -781,6 +781,21 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Shoot|Inventory")
 	FOnInventoryChanged OnInventoryChanged;
 
+	// ========== 外出背包（菜篮子） ==========
+	/** 当前拿在手上的外出背包（没有则 nullptr） */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Inventory|Basket")
+	class AOutdoorBasket* GetEquippedBasket() const;
+
+	/** 采摘入篮：手上拿着外出背包时，果实直接进背包（不占用/不覆盖手上的其它物品）。
+	 *  背包满了返回 false，由调用方保持植株可采。 */
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Inventory|Basket")
+	bool StoreHarvestInBasket(AItemActor* Fruit, int32 Quantity);
+
+	/** 拿着外出背包与仓库交互：背包内容存入仓库，背包脱手放在仓库旁边。
+	 *  返回 true 表示这次按键被消费（仓库锁定 / 背包还有东西没放下也都算处理过）。 */
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Inventory|Basket")
+	bool DepositBasketToWarehouse(class AStorageWarehouse* Warehouse);
+
 
 	virtual void SetCookMachineItem(ACookingMachine* Item) override;
 	

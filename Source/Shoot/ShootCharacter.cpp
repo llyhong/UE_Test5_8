@@ -18,6 +18,7 @@
 #include "Item/Dish.h"
 #include "Item/Desk.h"
 #include "Item/FoodSpawnOther.h"
+#include "Item/OutdoorBasket.h"
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/BoxComponent.h"
@@ -1655,6 +1656,15 @@ void AShootCharacter::BuildInteractionOptions(TArray<FInteractOption, TInlineAll
 		}
 	}
 
+	// 手上拿着外出背包：与仓库交互 = 背包入库 + 背包脱手放在仓库旁边
+	if (OverlappingWarehouse && Cast<AOutdoorBasket>(PickingItem))
+	{
+		AddOption(TierHandover, DistTo(OverlappingWarehouse), TEXT("存入仓库（背包）"), OverlappingWarehouse, [this]()
+		{
+			return DepositBasketToWarehouse(OverlappingWarehouse);
+		});
+	}
+
 	// ---------------- Tier 2：环境交互（同层按距离决胜） ----------------
 
 	// 植物：浇水 / 驱虫 / 收获
@@ -2178,8 +2188,8 @@ AItemActor* AShootCharacter::FindNearestRangePickItem() const
 		{
 			continue;
 		}
-		// 空碟/脏碟走各自的交互流程，不能当散落物吸走
-		if (!Item->bPickable || Item->bIsEmptyPlate || Item->bIsDirtyPlate || Cast<AFoodSpawner>(Item))
+		// 空碟/脏碟走各自的交互流程，不能当散落物吸走；外出背包是容器，只能按 E 拿到手上
+		if (!Item->bPickable || Item->bIsEmptyPlate || Item->bIsDirtyPlate || Cast<AFoodSpawner>(Item) || Cast<AOutdoorBasket>(Item))
 		{
 			continue;
 		}
@@ -2560,7 +2570,7 @@ void AShootCharacter::DoPick()
 		const bool bBusinessOpen = (GI->businessSimulation && GI->businessSimulation->TimeSystem)
 			? GI->businessSimulation->TimeSystem->IsBusinessOpen()
 			: true;
-		if (!bBusinessOpen && GI->bAutoStoreToBackpackWhileClosed)
+		if (!bBusinessOpen && GI->bAutoStoreToBackpackWhileClosed && !Cast<AOutdoorBasket>(OverlappingItem))
 		{
 			AddItemToInventory(OverlappingItem); // 内部销毁世界物体并记入背包
 			PlayGatheringMontage(); // 收进背包时播放采集动画（此时动作状态为空闲，可正常播放）
@@ -2593,7 +2603,15 @@ void AShootCharacter::DoPick()
 		{
 			//如果不是番茄树的情况
 			SetPickingItemStatus();//这一个放在他的蓝图里处理
-			PlayPickMontage( FName("Pick0"));
+			if (Cast<AOutdoorBasket>(OverlappingItem))
+			{
+				// 外出背包是“挂”在手上的，拾取时播放采集动画（AM_Gathering）而不是普通拾取动作
+				PlayGatheringMontage();
+			}
+			else
+			{
+				PlayPickMontage( FName("Pick0"));
+			}
 		}
 	}
 
@@ -2923,6 +2941,64 @@ bool AShootCharacter::AddSlotToInventory(const FInventorySlot& Slot)
 	OnInventoryChanged.Broadcast();
 	UE_LOG(LogShoot, Log, TEXT("[%s] 物品 %s 已放回背包，当前槽位数 %d"),
 		*GetName(), *Slot.DisplayName, InventoryItems.Num());
+	return true;
+}
+
+// ============ 外出背包（菜篮子） ============
+AOutdoorBasket* AShootCharacter::GetEquippedBasket() const
+{
+	return Cast<AOutdoorBasket>(PickingItem);
+}
+
+bool AShootCharacter::StoreHarvestInBasket(AItemActor* Fruit, int32 Quantity)
+{
+	AOutdoorBasket* Basket = GetEquippedBasket();
+	if (!Basket || !IsValid(Fruit))
+	{
+		return false;
+	}
+
+	if (!Basket->TryAddItem(Fruit, Quantity))
+	{
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Yellow,
+				FString::Printf(TEXT("[背包] 已满（%d/%d），先回仓库放下再采"), Basket->GetUsedCount(), Basket->BasketCapacity));
+		}
+		return false;
+	}
+	return true;
+}
+
+bool AShootCharacter::DepositBasketToWarehouse(AStorageWarehouse* Warehouse)
+{
+	AOutdoorBasket* Basket = GetEquippedBasket();
+	if (!Basket || !Warehouse)
+	{
+		return false;
+	}
+
+	// huanglily：篮子补给在营业中也放行，存入逻辑统一走 DepositBasket（其内部不再做营业锁定）
+	Warehouse->DepositBasket(Basket);
+	if (Basket->BasketItems.Num() > 0)
+	{
+		// 仓库槽位满/锁定：背包留在手上，玩家可以先去清库存
+		return true;
+	}
+
+	// 背包腾空：脱手放在仓库旁边，玩家可以立刻再拿起来
+	Basket->DeAttachMeshToSocket();
+	OnReleasePickEvent();
+	const UCapsuleComponent* Capsule = GetCapsuleComponent();
+	const FVector FeetLocation = GetActorLocation() - FVector(0.f, 0.f, Capsule ? Capsule->GetScaledCapsuleHalfHeight() : 0.f);
+	Basket->PlaceBesideWarehouse(Warehouse, FeetLocation);
+
+	SetPickingItem(nullptr);
+	CharacterActionState = ECharacterActionState::EAS_Unoccupied;
+	CharacterState = ECharacterState::ECS_Idle;
+	FBIK_Alpha = 0;
+	HandIK_LPoint = nullptr;
+	HandIK_RPoint = nullptr;
 	return true;
 }
 

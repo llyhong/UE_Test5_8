@@ -422,13 +422,27 @@ bool APlant::HarvestForCharacter(AShootCharacter* Character)
 	Fruit->bPickable = false;
 	// 营业中手采物会离手参与物理（投锅 / 抛掷）：Actor 级碰撞必须保留，
 	// 否则离手后没有任何地面接触，会直接穿过锅和地板一直下坠。打烊入包只是隐藏的数据载体，才关碰撞。
-	Fruit->SetActorEnableCollision(bBusinessOpen);
+	// 手上拿着外出背包：野外采摘默认先装进背包，不再占用/覆盖手上的其它物品
+	const bool bToBasket = Character->GetEquippedBasket() != nullptr;
+	Fruit->SetActorEnableCollision(bBusinessOpen && !bToBasket);
 	Fruit->ConfigureAndStartRipening(false, 0.f, 0.f);
 	Fruit->SetIngredientQuality(EIngredientQuality::Normal);
-	// 挂手必须可见；打烊走入包载体，保持隐藏
-	Fruit->SetActorHiddenInGame(!bBusinessOpen);
+	// 挂手必须可见；入包（打烊 / 背包）载体保持隐藏
+	Fruit->SetActorHiddenInGame(!bBusinessOpen || bToBasket);
 
-	if (bBusinessOpen)
+	if (bToBasket)
+	{
+		// 背包满：本次采摘不生效，植株保持可采
+		if (!Character->StoreHarvestInBasket(Fruit, Quantity))
+		{
+			if (IsValid(Fruit))
+			{
+				Fruit->Destroy();
+			}
+			return false;
+		}
+	}
+	else if (bBusinessOpen)
 	{
 		// 手上已有物品：本次采摘不生效（植株保持可采），既不覆盖手上原物品，也不产生背包囤积
 		if (Character->GetPickingItem() != nullptr)

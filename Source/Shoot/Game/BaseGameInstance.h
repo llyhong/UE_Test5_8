@@ -139,6 +139,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Gameplay|Spawner")
 	bool ConsumeWarehouseItem(TSubclassOf<AItemActor> ItemClass);
 
+	/** 生成箱低库存提醒阈值：某类食材可用数量低于该值时，HUD 提醒玩家外出采摘补充 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Gameplay|Spawner", meta = (ClampMin = "0"))
+	int32 SpawnerLowStockThreshold = 3;
+
 	/** 经营模拟类（DefaultGame.ini 的 [/Script/Shoot.BaseGameInstance] 段可配），留空则用原生 UBusinessSimulation。
 	 *  在 Init 时直接创建正确类，避免进关后再替换实例（替换后旧时钟仍会推进，且已绑定旧时钟的灯饰接不到开门事件）。 */
 	UPROPERTY(Config)

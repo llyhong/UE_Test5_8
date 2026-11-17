@@ -10,6 +10,7 @@
 #include "Widgets/Input/SVirtualJoystick.h"
 #include "Game/BaseGameInstance.h"
 #include "Game/BaseLevelBP.h"
+#include "UI/SupplyWarningWidget.h"
 
 void AShootPlayerController::BeginPlay()
 {
@@ -32,6 +33,12 @@ void AShootPlayerController::BeginPlay()
 
 		}
 
+	}
+
+	// 每本地玩家一份低库存提醒（分屏时不会共享同一份控件）
+	if (IsLocalPlayerController())
+	{
+		USupplyWarningWidget::EnsureForPlayer(this);
 	}
 }
 

@@ -42,6 +42,11 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Spawn")
 	void ConsumeOne();
 
+	/** 补货：把 Quantity 加进有限模式的剩余数量并写回存档（无限模式不变）。
+	 *  由仓库在玩家背包入库后调用，让箱子里的食材和仓库库存对应上。 */
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Spawn")
+	void AddStock(int32 Quantity);
+
 	/** 关卡加载时从存档恢复剩余数量（首次则写入初始默认值） */
 	virtual void BeginPlay() override;
 

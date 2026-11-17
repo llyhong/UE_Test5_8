@@ -5,8 +5,11 @@
 #include "Components/StaticMeshComponent.h"
 #include "Components/WidgetComponent.h"
 #include "Engine/Engine.h"
+#include "EngineUtils.h"
 #include "Interaction/InteractionConfig.h"
 #include "Game/BaseGameInstance.h"
+#include "Item/FoodSpawner.h"
+#include "Item/OutdoorBasket.h"
 
 bool AStorageWarehouse::IsLockedWhileOpen() const
 {
@@ -217,6 +220,89 @@ bool AStorageWarehouse::RetrieveToInventory(AShootCharacter* Player, int32 SlotI
 			FString::Printf(TEXT("[仓库] 已取回 %s，仓库剩余 %d 种"), *Slot.DisplayName, StoredItems.Num()));
 	}
 	return true;
+}
+
+int32 AStorageWarehouse::DepositBasket(AOutdoorBasket* Basket)
+{
+	if (!Basket)
+	{
+		return 0;
+	}
+	// huanglily：篮子补给不受营业锁定限制——营业中食材见底时玩家正需要外出采集补货，
+	// 只允许“往里补”不构成“打烊囤货、营业取回”的绕过（取回仍走 RetrieveToInventory 的锁定）。
+	const int32 Moved = DepositSlots(Basket->GetItemsMutable());
+	if (Moved > 0 && GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Green,
+			FString::Printf(TEXT("[仓库] 从背包存入 %d 件，仓库共 %d 种"), Moved, StoredItems.Num()));
+	}
+	return Moved;
+}
+
+int32 AStorageWarehouse::DepositSlots(TArray<FInventorySlot>& InOutSlots)
+{
+	UBaseGameInstance* GI = GetWorld() ? Cast<UBaseGameInstance>(GetWorld()->GetGameInstance()) : nullptr;
+	const bool bWarehouseDriven = GI && GI->bLinkSpawnerToWarehouse;
+
+	int32 Deposited = 0;
+	for (int32 Index = InOutSlots.Num() - 1; Index >= 0; --Index)
+	{
+		FInventorySlot& Slot = InOutSlots[Index];
+		if (Slot.Quantity <= 0)
+		{
+			InOutSlots.RemoveAt(Index);
+			continue;
+		}
+
+		FInventorySlot* Existing = StoredItems.FindByPredicate([&Slot](const FInventorySlot& Item)
+		{
+			return Item.ItemClass == Slot.ItemClass;
+		});
+		if (!Existing && StorageCapacity > 0 && StoredItems.Num() >= StorageCapacity)
+		{
+			continue; // 仓库槽位已满：留在背包里
+		}
+
+		if (Existing)
+		{
+			Existing->Quantity += Slot.Quantity;
+		}
+		else
+		{
+			StoredItems.Add(Slot);
+		}
+
+		// 仓库驱动模式：箱子读的就是仓库库存，入库即补货；独立模式下显式给箱子加数量
+		if (!bWarehouseDriven)
+		{
+			RestockSpawnersFor(Slot.ItemClass, Slot.Quantity);
+		}
+
+		Deposited += Slot.Quantity;
+		InOutSlots.RemoveAt(Index);
+	}
+
+	if (Deposited > 0)
+	{
+		OnWarehouseChanged.Broadcast();
+		OnPlayerNearby(true);
+	}
+	return Deposited;
+}
+
+void AStorageWarehouse::RestockSpawnersFor(TSubclassOf<AItemActor> ItemClass, int32 Quantity)
+{
+	if (!ItemClass || Quantity <= 0 || !GetWorld())
+	{
+		return;
+	}
+	for (TActorIterator<AFoodSpawner> It(GetWorld()); It; ++It)
+	{
+		if (It->SpawnItemActorClass == ItemClass)
+		{
+			It->AddStock(Quantity);
+		}
+	}
 }
 
 FString AStorageWarehouse::GetStoredDisplayName(int32 SlotIndex) const

@@ -46,10 +46,10 @@ public:
 	AItemActor();
 
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Item")
-	void AttachMeshToSocket(USceneComponent* InParent, const FName& InSocketName);
+	virtual void AttachMeshToSocket(USceneComponent* InParent, const FName& InSocketName);
 
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Item")
-	void DeAttachMeshToSocket();
+	virtual void DeAttachMeshToSocket();
 
 	/**
 	 * 开启物理下落（投掷 / 松手掉落）。

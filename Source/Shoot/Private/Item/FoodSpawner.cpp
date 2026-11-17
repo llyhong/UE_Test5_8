@@ -149,6 +149,21 @@ void AFoodSpawner::ConsumeOne()
 	}
 }
 
+void AFoodSpawner::AddStock(int32 Quantity)
+{
+	// 无限箱不受库存限制，补货没有意义
+	if (Quantity <= 0 || RemainingCount < 0)
+	{
+		return;
+	}
+
+	RemainingCount += Quantity;
+	if (UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetWorld()->GetGameInstance()))
+	{
+		GI->SetSpawnerRemaining(GetSpawnerSaveGuid(), RemainingCount);
+	}
+}
+
 void AFoodSpawner::OnSpawnActorEvent()
 {
 	OnSpawnActor.Broadcast();
