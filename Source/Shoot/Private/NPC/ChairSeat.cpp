@@ -354,7 +354,9 @@ bool AChairSeat::PlacePlateOnSocket(AItemActor* Plate)
 	// 先把物品网格从手上 / 其它挂点摘下，再把整个碟子吸附到本座位的挂点：
 	// 之后碟子跟随餐桌移动，摆放位置与朝向完全由蓝图里的 PlateSocket 决定。
 	Plate->DeAttachMeshToSocket();
-	Plate->AttachToComponent(PlateSocket, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+	// huanglily：手部插槽 ItemSocket 的世界缩放是 2.25（适配手骨大小），上菜时必须连缩放一起吸附到
+	// PlateSocket（缩放 1），否则"保留世界缩放"会让桌上的菜突然放大 2.25 倍。
+	Plate->AttachToComponent(PlateSocket, FAttachmentTransformRules(EAttachmentRule::SnapToTarget, true));
 
 	// 桌上的碟子不参与拾取与腐烂（空碟走 CollectSphere 的回收交互，见 SetDirtyPlate）
 	Plate->bPickable = false;

@@ -223,6 +223,18 @@ void UTimeSystem::SetWeatherSunModifiers(float InIntensityScale, FLinearColor In
 	WeatherSunColorTint = InColorTint;
 }
 
+float UTimeSystem::GetVisualHour() const
+{
+	const float Hour = GetCurrentHour();
+	if (!bAlwaysDaylight)
+	{
+		return Hour;
+	}
+	// huanglily：常亮白天把视觉时间钳在白天段内，营业时钟照常推进只用于经营/UI
+	const float DayLen = FMath::Max(0.001f, SunsetHour - SunriseHour);
+	return SunriseHour + DayLen * FMath::Clamp(AlwaysDaylightTimeOfDay, 0.f, 1.f);
+}
+
 void UTimeSystem::UpdateSun()
 {
 	if (!bDriveSun || IsValid(StylizedSkyActor) || !SunLight)
@@ -243,7 +255,8 @@ void UTimeSystem::UpdateSun()
 		DLC->SetMobility(EComponentMobility::Movable);
 	}
 
-	const float Hour = GetCurrentHour();
+	// 常亮白天时 GetVisualHour 返回固定的上午时刻，太阳角度/颜色/强度也随之固定
+	const float Hour = GetVisualHour();
 	const bool bIsDay = Hour > SunriseHour && Hour < SunsetHour;
 
 	// 太阳高度系数：白天为 sin 曲线（0 在地平线，1 在正午），夜晚 < 0（在地平线下）

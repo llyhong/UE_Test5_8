@@ -148,9 +148,17 @@ void UStylizedSkyBridge::UpdateVisuals(const UTimeSystem& Time, float DeltaTime)
 	const double HourSinceSunrise = FMath::Fmod(Time.GetCurrentHour() - Time.SunriseHour + 24.0, 24.0);
 	if (Time.bDriveSun)
 	{
-		VisualSkyTime = HourSinceSunrise < DayHours
-			? HourSinceSunrise / DayHours * DayLength
-			: DayLength + (HourSinceSunrise - DayHours) / (24.0 - DayHours) * NightLength;
+		if (Time.bAlwaysDaylight)
+		{
+			// huanglily：常亮白天——天空/太阳/雾固定采样同一天的上午，不再随经营时钟走到夜里
+			VisualSkyTime = DayLength * FMath::Clamp(Time.AlwaysDaylightTimeOfDay, 0.0, 1.0);
+		}
+		else
+		{
+			VisualSkyTime = HourSinceSunrise < DayHours
+				? HourSinceSunrise / DayHours * DayLength
+				: DayLength + (HourSinceSunrise - DayHours) / (24.0 - DayHours) * NightLength;
+		}
 	}
 	const float Rain = WeatherBlend.RainStrength;
 	WriteNumber(Owner, TEXT("Overcast Amount"), LightingWeatherBlend.CloudCoverage);

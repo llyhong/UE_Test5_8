@@ -132,6 +132,19 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Time|Lighting")
 	bool bStabilizeBusinessLighting = true;
 
+	/** huanglily：常亮白天——营业时钟照常推进，但天空 / 太阳 / 雾永远停在明媚的上午，
+	 *  避免夜间农田等室外区域全黑影响辨识（开罗式常亮白天）。关掉恢复真实昼夜变化。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Time|Lighting")
+	bool bAlwaysDaylight = true;
+
+	/** 常亮白天时在白天段里采样的一天中位置（0=日出，1=日落），默认 0.35≈上午十点 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Time|Lighting", meta = (EditCondition = "bAlwaysDaylight", ClampMin = "0.0", ClampMax = "1.0"))
+	float AlwaysDaylightTimeOfDay = 0.35f;
+
+	/** 常亮白天时用于视觉的"一天中小时"：白天段均分采样，不随经营时钟变化 */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Time|Lighting")
+	float GetVisualHour() const;
+
 	/** 稳光开启且正在营业或任意 GuestManager 尚在收尾；不依赖 UObject 默认 GetWorld。 */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Time|Lighting")
 	bool IsBusinessVisualFocusActive() const;

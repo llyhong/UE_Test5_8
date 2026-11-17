@@ -24,11 +24,13 @@ void ABusinessLight::BeginPlay()
 {
 	Super::BeginPlay();
 
-	// 默认熄灭：关卡加载瞬间一定为暗，避免“一进游戏营业就亮灯”。
-	// 之后由 OnBusinessOpenChanged 事件（玩家到大门按 E 开门，或 bAutoOpenBusiness 自动开门）点亮。
+	// 先按"熄灭"初始化，绑定委托后再同步一次当前营业状态：
+	// huanglily：关卡加载时若已处于营业中（自动开门早于灯 BeginPlay），补一次点亮，避免整店白天黑灯
 	SetLit(false);
-
-	BindTimeSystem(); // 仅绑定营业状态委托，不在此按当前状态强制亮灯
+	if (UTimeSystem* TS = BindTimeSystem())
+	{
+		SetLit(TS->bIsBusinessOpen);
+	}
 }
 
 UTimeSystem* ABusinessLight::BindTimeSystem()

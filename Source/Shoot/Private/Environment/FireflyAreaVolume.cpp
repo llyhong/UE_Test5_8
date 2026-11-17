@@ -56,7 +56,8 @@ void AFireflyAreaVolume::RefreshNightState()
 		TimeSystem = GI->businessSimulation ? GI->businessSimulation->TimeSystem : nullptr;
 	}
 	const UTimeSystem* Time = TimeSystem.Get();
-	bNightActive = bEnabled && Time &&
+	// huanglily：常亮白天没有夜戏，萤火虫不再按经营时钟点亮（否则白天会出现一团发光点）
+	bNightActive = bEnabled && Time && !Time->bAlwaysDaylight &&
 		(Time->GetCurrentHour() >= Time->SunsetHour || Time->GetCurrentHour() < Time->SunriseHour);
 	if (!bNightActive)
 	{
