@@ -16,6 +16,8 @@
 #include "GameFramework/GameModeBase.h"
 #include "GameFramework/PlayerStart.h"
 #include "Engine/LocalPlayer.h"
+#include "Engine/GameViewportClient.h"
+#include "TimerManager.h"
 #include "UI/RecipeBookWidget.h"
 
 /** 控制台命令：切换空碟玩法开关，方便 A/B 对比两种玩法（运行时输入：Game.ToggleDirtyPlateFlow） */
@@ -679,8 +681,107 @@ AShootAIPartnerController* UBaseGameInstance::SpawnAIPartnerAt(const FTransform&
 	Controller->IdlePostLocation = IdlePost;
 	Controller->Mode = InitialMode;
 	AIPartner = Controller;
+
+	// huanglily：若配置了分屏，生成搭档后立刻为其创建第二个本地玩家视角
+	if (bSplitScreenWithAIPartner)
+	{
+		EnablePartnerSplitScreen();
+	}
+
 	UE_LOG(LogTemp, Log, TEXT("[Coop] AI 搭档已生成：%s（计入双人数值缩放）"), *Pawn->GetName());
 	return Controller;
+}
+
+void UBaseGameInstance::EnablePartnerSplitScreen()
+{
+	if (PartnerViewerLocalPlayer || !AIPartner)
+	{
+		return;
+	}
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	// 最多只需两个本地玩家；如果已经存在玩家 2（真正的本地双人），直接复用它
+	if (GetNumLocalPlayers() < 2)
+	{
+		FString Error;
+		PartnerViewerLocalPlayer = CreateLocalPlayer(1, Error, true);
+		if (!PartnerViewerLocalPlayer)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[Coop] AI 搭档分屏：创建第二个本地玩家失败：%s"), *Error);
+			return;
+		}
+	}
+	else
+	{
+		PartnerViewerLocalPlayer = GetLocalPlayerByIndex(1);
+	}
+
+	PartnerViewerPC = PartnerViewerLocalPlayer ? PartnerViewerLocalPlayer->GetPlayerController(World) : nullptr;
+	if (!PartnerViewerPC)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[Coop] AI 搭档分屏：拿不到第二个本地玩家的 PlayerController"));
+		return;
+	}
+
+	// 第二玩家不响应输入，也不自动把 possessed pawn 当镜头目标（避免 GameMode/RestartPlayer 覆盖视角）
+	PartnerViewerPC->SetIgnoreMoveInput(true);
+	PartnerViewerPC->SetIgnoreLookInput(true);
+	PartnerViewerPC->bAutoManageActiveCameraTarget = false;
+
+	// CreateLocalPlayer 可能给玩家 2 也生成了一个 pawn；不需要它，销毁即可
+	if (APawn* ViewerPawn = PartnerViewerPC->GetPawn())
+	{
+		PartnerViewerPC->UnPossess();
+		ViewerPawn->Destroy();
+	}
+
+	if (UGameViewportClient* GVC = GetGameViewportClient())
+	{
+		GVC->SetForceDisableSplitscreen(false);
+		GVC->UpdateActiveSplitscreenType();
+	}
+
+	// huanglily：PC 初始化（BeginPlay/RestartPlayer）可能晚于我们的设置，等一帧再绑定视角，确保不被覆盖
+	FTimerHandle Handle;
+	FTimerDelegate Delegate;
+	Delegate.BindWeakLambda(this, [this]()
+	{
+		if (PartnerViewerPC && AIPartner)
+		{
+			if (APawn* PartnerPawn = AIPartner->GetPawn())
+			{
+				PartnerViewerPC->SetViewTargetWithBlend(PartnerPawn, 0.0f);
+				UE_LOG(LogTemp, Log, TEXT("[Coop] AI 搭档分屏：玩家 1 视角已锁定 %s"), *PartnerPawn->GetName());
+			}
+		}
+	});
+	World->GetTimerManager().SetTimer(Handle, Delegate, 0.2f, false);
+
+	UE_LOG(LogTemp, Log, TEXT("[Coop] AI 搭档分屏已开启"));
+}
+
+void UBaseGameInstance::DisablePartnerSplitScreen()
+{
+	if (!PartnerViewerLocalPlayer)
+	{
+		return;
+	}
+	if (PartnerViewerPC)
+	{
+		if (APawn* ViewerPawn = PartnerViewerPC->GetPawn())
+		{
+			PartnerViewerPC->UnPossess();
+			ViewerPawn->Destroy();
+		}
+	}
+	RemoveLocalPlayer(PartnerViewerLocalPlayer);
+	PartnerViewerLocalPlayer = nullptr;
+	PartnerViewerPC = nullptr;
+	UE_LOG(LogTemp, Log, TEXT("[Coop] AI 搭档分屏已关闭"));
 }
 
 void UBaseGameInstance::SetAIPartnerMode(EAIPartnerMode NewMode)
@@ -701,6 +802,8 @@ void UBaseGameInstance::RemoveAIPartner()
 	{
 		return;
 	}
+	// huanglily：先关掉分屏再销毁搭档，避免第二个本地玩家盯着空目标
+	DisablePartnerSplitScreen();
 	if (APawn* Pawn = AIPartner->GetPawn())
 	{
 		Pawn->Destroy();

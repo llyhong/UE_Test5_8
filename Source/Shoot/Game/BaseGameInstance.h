@@ -83,12 +83,27 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Coop")
 	bool HasAIPartner() const { return AIPartner != nullptr; }
 
+	/** AI 搭档生成后是否自动开启上下/左右分屏，一半显示玩家、一半显示搭档视角。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Coop|AI Partner")
+	bool bSplitScreenWithAIPartner = true;
+
 	/** 联机人数：本地玩家数 + AI 搭档（1 人 + 搭档 = 2，按双人压力缩放） */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Coop")
 	int32 GetCoopActorCount() const { return GetNumLocalPlayers() + (AIPartner ? 1 : 0); }
 
 	UPROPERTY(Transient, BlueprintReadOnly, Category = "Shoot|Coop")
 	TObjectPtr<class AShootAIPartnerController> AIPartner;
+
+protected:
+	/** 用来渲染 AI 搭档视角的第二个本地玩家（不输入、不吃 pawn，只盯搭档） */
+	TObjectPtr<class ULocalPlayer> PartnerViewerLocalPlayer = nullptr;
+	TObjectPtr<class APlayerController> PartnerViewerPC = nullptr;
+
+	/** 创建第二个本地玩家并把视角绑定到 AI 搭档 pawn；搭档移除时自动清理。 */
+	void EnablePartnerSplitScreen();
+	void DisablePartnerSplitScreen();
+
+public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Gameplay")
 	TObjectPtr<UDataTable> MenueDataTable;
