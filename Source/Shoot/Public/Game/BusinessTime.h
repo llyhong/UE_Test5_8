@@ -35,6 +35,9 @@ public:
 	/** 营业状态变化委托（true=开门营业，false=打烊）：须在 OnBusinessOpenChanged 属性前声明 */
 	DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBusinessOpenChanged, bool, bOpen);
 
+	/** 当日营业真正结束（到点自动打烊）：时钟暂停，等待玩家点“进入下一天” */
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnBusinessDayEnded);
+
 	/** 起始日期 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Time")
 	int32 StartYear = 1;
@@ -110,6 +113,22 @@ public:
 	/** 营业状态变化广播（true=开门营业，false=打烊），供灯饰 / 客人系统 / UI 监听 */
 	UPROPERTY(BlueprintAssignable, Category = "Shoot|Time|Business")
 	FOnBusinessOpenChanged OnBusinessOpenChanged;
+
+	/** 当日营业结束广播（自动打烊、时钟已暂停）：经营结算与日结卡在这里触发 */
+	UPROPERTY(BlueprintAssignable, Category = "Shoot|Time|Business")
+	FOnBusinessDayEnded OnBusinessDayEnded;
+
+	/** 是否已到当日营业结束（等待玩家确认进入下一天） */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Time|Business")
+	bool IsEndOfDayReached() const { return bEndOfDayReached; }
+
+	/** 打烊后场景是否强制切到夜晚视觉（常亮白天模式下也会变暗） */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Time|Lighting")
+	bool IsNightVisualsForced() const { return bNightVisualsForced; }
+
+	/** 玩家点“进入下一天”：还原白天光照、推进日期并恢复走时（不会重复日结算） */
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Time|Business")
+	void BeginNextBusinessDay();
 
 	/** 当前日期（只读） */
 	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Time")
@@ -257,4 +276,8 @@ private:
 	double Accum = 0.0;
 	bool bPausedState = false;
 	bool bBusinessClosedForDay = false;
+	/** 当日营业已到打烊点：暂停时钟，直到玩家点“进入下一天” */
+	bool bEndOfDayReached = false;
+	/** 打烊后强制夜晚视觉（覆盖常亮白天） */
+	bool bNightVisualsForced = false;
 };

@@ -7,6 +7,7 @@
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "Game/BaseGameInstance.h"
+#include "Game/BusinessSimulation.h"
 #include "NPC/GuestManager.h"
 
 ESeason UTimeSystem::SeasonFromMonth(int32 InMonth, int32 InMonthsPerSeason)
@@ -40,6 +41,8 @@ void UTimeSystem::Init()
 	// Init 仍保持打烊，首个 Tick 经 OpenBusiness 广播，不能跳过 UI / 客流的开门通知。
 	bIsBusinessOpen = false;
 	bBusinessClosedForDay = false;
+	bEndOfDayReached = false;
+	bNightVisualsForced = false;
 	UpdateSun();
 }
 
@@ -122,6 +125,12 @@ void UTimeSystem::Tick(float DeltaTime)
 			DayProgress = static_cast<float>(FMath::Clamp(Accum / DaySeconds, 0.0, 1.0));
 			UpdateBusinessState();
 
+			// 到点打烊会暂停时钟并等待玩家确认：本帧不再把剩余时间推进到跨天
+			if (bEndOfDayReached)
+			{
+				break;
+			}
+
 			if (Accum >= DaySeconds)
 			{
 				AdvanceOneDay(true);
@@ -146,6 +155,16 @@ void UTimeSystem::UpdateBusinessState()
 	{
 		CloseBusiness();
 	}
+
+	// 玩家提前手动打烊：到了正常打烊点也进入日结流程，避免当天结算拖到午夜
+	if (!bEndOfDayReached && bBusinessClosedForDay && !bIsBusinessOpen && GetCurrentHour() >= CloseHour - 0.01f)
+	{
+		bEndOfDayReached = true;
+		bNightVisualsForced = true;
+		bPausedState = true;
+		OnBusinessDayEnded.Broadcast();
+	}
+
 	if (bAutoOpenBusiness && !bIsBusinessOpen && !bBusinessClosedForDay
 		&& IsWithinBusinessHours() && !HasPendingClosingGuests())
 	{
@@ -199,6 +218,7 @@ bool UTimeSystem::OpenBusiness()
 	}
 	bBusinessClosedForDay = false;
 	bIsBusinessOpen = true;
+	bNightVisualsForced = false;
 	UE_LOG(LogTemp, Warning, TEXT("[TimeSystem] >>> 开门营业！当前小时=%.2f（调用来源可能是玩家按 E 或蓝图）"), GetCurrentHour());
 	OnBusinessOpenChanged.Broadcast(true);
 	return true;
@@ -213,8 +233,48 @@ void UTimeSystem::CloseBusiness()
 		return;
 	}
 	bIsBusinessOpen = false;
-	UE_LOG(LogTemp, Warning, TEXT("[TimeSystem] <<< 打烊（CloseBusiness）"));
+
+	// huanglily：到点打烊后暂停时钟并广播“营业日结束”，让经营模拟在此刻结算、
+	// 日结卡停留到玩家点“进入下一天”，而不是午夜自动跳天。
+	bEndOfDayReached = (GetCurrentHour() >= CloseHour - 0.01f);
+	bNightVisualsForced = true;
+	if (bEndOfDayReached)
+	{
+		bPausedState = true;
+	}
+
+	UE_LOG(LogTemp, Warning, TEXT("[TimeSystem] <<< 打烊（CloseBusiness）%s"), bEndOfDayReached ? TEXT("，今日营业结束") : TEXT(""));
 	OnBusinessOpenChanged.Broadcast(false);
+
+	if (bEndOfDayReached)
+	{
+		OnBusinessDayEnded.Broadcast();
+	}
+}
+
+void UTimeSystem::BeginNextBusinessDay()
+{
+	if (!bEndOfDayReached)
+	{
+		return;
+	}
+
+	bEndOfDayReached = false;
+	bNightVisualsForced = false;
+	bPausedState = false;
+
+	// 日结算已在打烊时完成：本次日期推进只换日 / 广播 OnDayChanged，不再重复结算
+	if (UBaseGameInstance* GI = GetTypedOuter<UBaseGameInstance>())
+	{
+		if (GI->businessSimulation)
+		{
+			GI->businessSimulation->SkipNextDaySettlement();
+		}
+	}
+
+	AdvanceOneDay(true);
+	UpdateBusinessState();
+	UpdateSun();
 }
 
 void UTimeSystem::SetWeatherSunModifiers(float InIntensityScale, FLinearColor InColorTint)
@@ -225,6 +285,12 @@ void UTimeSystem::SetWeatherSunModifiers(float InIntensityScale, FLinearColor In
 
 float UTimeSystem::GetVisualHour() const
 {
+	// 打烊后强制夜色：即使常亮白天，也让整张场景暗下来，和“营业结束”状态一致
+	if (bNightVisualsForced)
+	{
+		return 23.f;
+	}
+
 	const float Hour = GetCurrentHour();
 	if (!bAlwaysDaylight)
 	{

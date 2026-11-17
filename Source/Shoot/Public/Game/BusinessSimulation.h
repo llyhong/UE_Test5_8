@@ -142,10 +142,24 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Business")
 	void Load();
 
+	/** “进入下一天”按钮：本次日期推进已在打烊时结算过，跳过 OnDay 里的重复结算 */
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Business|Day")
+	void SkipNextDaySettlement() { bSkipNextDaySettlement = true; }
+
 private:
 	/** 经济金钱变化：按正负自动计入收入 / 支出账本（含被动收支与玩家消费） */
 	UFUNCTION()
 	void HandleMoneyChanged(int32 NewValue, int32 Delta, EMoneySource Source);
+
+	/** 到点打烊：结算当日被动收支 / 日报 / 赛季评级，并暂停等待玩家进入下一天 */
+	UFUNCTION()
+	void HandleBusinessDayEnded();
+
+	/** 当日租金 / 维护 / 工资：打烊结算与正常跨天共用 */
+	void ApplyDailyPassiveCash();
+
+	/** 日账本清零（赛季与报表读取之后） */
+	void ResetDailyLedger();
 
 	/** 日结算：产生当日被动收支 → 广播日报表 → 重置日账本 → 重算星级 */
 	UFUNCTION()
@@ -162,4 +176,9 @@ private:
 
 	/** 组装一份当前账本快照 */
 	FBusinessReport MakeReport(int32 Y, int32 M, int32 D) const;
+
+	/** 打烊时已完成日结算，下一次 OnDayChanged 只换日不重复结算 */
+	bool bSkipNextDaySettlement = false;
+	/** 当天是否已在打烊时结算过（避免重复触发） */
+	bool bDaySettledAtClose = false;
 };

@@ -148,7 +148,12 @@ void UStylizedSkyBridge::UpdateVisuals(const UTimeSystem& Time, float DeltaTime)
 	const double HourSinceSunrise = FMath::Fmod(Time.GetCurrentHour() - Time.SunriseHour + 24.0, 24.0);
 	if (Time.bDriveSun)
 	{
-		if (Time.bAlwaysDaylight)
+		if (Time.IsNightVisualsForced())
+		{
+			// huanglily：打烊后整场切到深夜（常亮白天也覆盖），让玩家一眼看出今天已结束
+			VisualSkyTime = DayLength + NightLength * 0.5;
+		}
+		else if (Time.bAlwaysDaylight)
 		{
 			// huanglily：常亮白天——天空/太阳/雾固定采样同一天的上午，不再随经营时钟走到夜里
 			VisualSkyTime = DayLength * FMath::Clamp(Time.AlwaysDaylightTimeOfDay, 0.0, 1.0);
