@@ -68,6 +68,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Coop")
 	class AShootAIPartnerController* SpawnAIPartner();
 
+	/** 在指定位置生成 AI 搭档并设置初始职责与驻守点（关卡里的 AAIPartnerAnchor 用）。
+	 *  huanglily：驻守点必须是导航可达的地面点，否则 Forager/Helper 无事可做时会一直卡在寻路失败重试。 */
+	class AShootAIPartnerController* SpawnAIPartnerAt(const FTransform& SpawnTransform, const FVector& IdlePost, EAIPartnerMode InitialMode);
+
 	/** 切换 AI 搭档行为模式（0=跟随 1=外勤采集 2=帮厨上菜）；没有搭档时先自动创建 */
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Coop")
 	void SetAIPartnerMode(EAIPartnerMode NewMode);

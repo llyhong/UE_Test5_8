@@ -633,6 +633,26 @@ AShootAIPartnerController* UBaseGameInstance::SpawnAIPartner()
 		return AIPartner;
 	}
 	UWorld* World = GetWorld();
+	FTransform SpawnTF = FTransform();
+	TArray<AActor*> Starts;
+	if (World)
+	{
+		UGameplayStatics::GetAllActorsOfClass(World, APlayerStart::StaticClass(), Starts);
+	}
+	if (Starts.Num() > 0)
+	{
+		SpawnTF = Starts[Starts.Num() - 1]->GetActorTransform();
+	}
+	return SpawnAIPartnerAt(SpawnTF, SpawnTF.GetLocation(), EAIPartnerMode::Forager);
+}
+
+AShootAIPartnerController* UBaseGameInstance::SpawnAIPartnerAt(const FTransform& SpawnTransform, const FVector& IdlePost, EAIPartnerMode InitialMode)
+{
+	if (AIPartner)
+	{
+		return AIPartner;
+	}
+	UWorld* World = GetWorld();
 	AGameModeBase* GM = World ? World->GetAuthGameMode() : nullptr;
 	if (!World || !GM)
 	{
@@ -642,15 +662,7 @@ AShootAIPartnerController* UBaseGameInstance::SpawnAIPartner()
 
 	FActorSpawnParameters Params;
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
-	FTransform SpawnTF = FTransform();
-	TArray<AActor*> Starts;
-	UGameplayStatics::GetAllActorsOfClass(World, APlayerStart::StaticClass(), Starts);
-	if (Starts.Num() > 0)
-	{
-		SpawnTF = Starts[Starts.Num() - 1]->GetActorTransform();
-	}
-
-	APawn* Pawn = World->SpawnActor<APawn>(GM->GetDefaultPawnClassForController(nullptr), SpawnTF, Params);
+	APawn* Pawn = World->SpawnActor<APawn>(GM->GetDefaultPawnClassForController(nullptr), SpawnTransform, Params);
 	if (!Pawn)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("[Coop] SpawnAIPartner：pawn 生成失败"));
@@ -664,6 +676,8 @@ AShootAIPartnerController* UBaseGameInstance::SpawnAIPartner()
 		return nullptr;
 	}
 	Controller->Possess(Pawn);
+	Controller->IdlePostLocation = IdlePost;
+	Controller->Mode = InitialMode;
 	AIPartner = Controller;
 	UE_LOG(LogTemp, Log, TEXT("[Coop] AI 搭档已生成：%s（计入双人数值缩放）"), *Pawn->GetName());
 	return Controller;
