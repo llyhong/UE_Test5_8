@@ -18,6 +18,7 @@
 #include "Engine/LocalPlayer.h"
 #include "Engine/GameViewportClient.h"
 #include "TimerManager.h"
+#include "NavigationSystem.h"
 #include "UI/RecipeBookWidget.h"
 
 /** 控制台命令：切换空碟玩法开关，方便 A/B 对比两种玩法（运行时输入：Game.ToggleDirtyPlateFlow） */
@@ -677,8 +678,43 @@ AShootAIPartnerController* UBaseGameInstance::SpawnAIPartnerAt(const FTransform&
 		UE_LOG(LogTemp, Warning, TEXT("[Coop] SpawnAIPartner：控制器生成失败"));
 		return nullptr;
 	}
+
+	// huanglily：锚点可能摆在导航网外（例如农田边），那样寻路永远失败、搭档只能钉在原地。
+	// 生成时把出生点与驻守点一起投影到最近的导航面；连锚点附近都没有导航数据就退到玩家旁边。
+	FVector FinalSpawn = SpawnTransform.GetLocation();
+	FVector FinalIdlePost = IdlePost;
+	if (UNavigationSystemV1* NavSys = UNavigationSystemV1::GetCurrent(World))
+	{
+		const FVector QueryExtent(1500.f, 1500.f, 3000.f);
+		FNavLocation NavLoc;
+		if (NavSys->ProjectPointToNavigation(FinalSpawn, NavLoc, QueryExtent))
+		{
+			FinalSpawn = NavLoc.Location + FVector(0.f, 0.f, Pawn->GetSimpleCollisionHalfHeight());
+			// 驻守点也贴导航面，避免溜达/回位目标悬在空中取不到随机可达点
+			FinalIdlePost = NavSys->ProjectPointToNavigation(IdlePost, NavLoc, QueryExtent)
+				? NavLoc.Location : FinalSpawn;
+		}
+		else
+		{
+			const APlayerController* PC = World->GetFirstPlayerController();
+			const APawn* PlayerPawn = PC ? PC->GetPawn() : nullptr;
+			if (PlayerPawn
+				&& NavSys->ProjectPointToNavigation(PlayerPawn->GetActorLocation() + FVector(150.f, 0.f, 0.f), NavLoc, QueryExtent))
+			{
+				FinalSpawn = NavLoc.Location + FVector(0.f, 0.f, Pawn->GetSimpleCollisionHalfHeight());
+				FinalIdlePost = FinalSpawn;
+				UE_LOG(LogTemp, Warning, TEXT("[Coop] AI 搭档锚点周边无导航数据，已改在玩家附近生成：%s"), *FinalSpawn.ToString());
+			}
+			else
+			{
+				UE_LOG(LogTemp, Warning, TEXT("[Coop] AI 搭档出生点不在导航网上，且找不到可用的替代点（搭档将无法移动）"));
+			}
+		}
+		Pawn->SetActorLocation(FinalSpawn, false, nullptr, ETeleportType::TeleportPhysics);
+	}
+
 	Controller->Possess(Pawn);
-	Controller->IdlePostLocation = IdlePost;
+	Controller->IdlePostLocation = FinalIdlePost;
 	Controller->Mode = InitialMode;
 	AIPartner = Controller;
 

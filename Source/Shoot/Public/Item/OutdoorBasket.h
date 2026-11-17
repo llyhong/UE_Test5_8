@@ -87,6 +87,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Basket")
 	void PlaceBesideWarehouse(AActor* Warehouse, const FVector& PlayerFeetLocation);
 
+	/** 从手上放下时调用：关掉物理并贴地摆放（篮子网格无物理碰撞，开物理会穿过地面无限下坠） */
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Basket")
+	void SettleOnGround(AActor* IgnoreActor = nullptr);
+
 	/** 收纳内容变化广播（UI 显示 3/10 等） */
 	UPROPERTY(BlueprintAssignable, Category = "Shoot|Basket")
 	FOnBasketChanged OnBasketChanged;

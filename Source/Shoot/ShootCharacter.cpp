@@ -2708,6 +2708,11 @@ void AShootCharacter::DoPick()
 
  	OnReleasePickEvent();
  	PickingItem->SetItemState(EItemState::EIS_Hovering);//临时简单处理，为了可以放下食物可以马上拾取
+ 	// huanglily：篮子网格没有物理碰撞，OnReleasePickEvent 开的物理会让它穿地无限下坠，放下时改为贴地摆放
+ 	if (AOutdoorBasket* DroppedBasket = Cast<AOutdoorBasket>(PickingItem))
+ 	{
+ 		DroppedBasket->SettleOnGround(this);
+ 	}
  	//放下的物品重新进入候选集（其交互球仍与角色重叠，不会再触发 BeginOverlap，需手动注册）
  	LastDroppedItem = PickingItem; // 记录重拾锁定（DropRePickLockTime 秒内不可再拾）
  	LastDropTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
