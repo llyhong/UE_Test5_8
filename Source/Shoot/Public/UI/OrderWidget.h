@@ -122,6 +122,9 @@ protected:
 	UFUNCTION()
 	void HandleOrderFailed(const UOrderHandle* Handle, const FOrderData& Order);
 
+	UFUNCTION()
+	void HandleOrderCanceled(const UOrderHandle* Handle, const FOrderData& Order);
+
 	UPROPERTY()
 	TObjectPtr<AOrderSystem> OrderSystem;
 

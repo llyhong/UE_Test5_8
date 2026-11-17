@@ -29,6 +29,7 @@ void UBusinessSimulation::Init(UEconomySystem* InEconomy)
 	TimeSystem->OnDayChanged.AddDynamic(this, &UBusinessSimulation::OnDay);
 	TimeSystem->OnMonthChanged.AddDynamic(this, &UBusinessSimulation::OnMonth);
 	TimeSystem->OnYearChanged.AddDynamic(this, &UBusinessSimulation::OnYear);
+	TimeSystem->OnBusinessDayEnded.AddDynamic(this, &UBusinessSimulation::HandleBusinessDayEnded);
 
 	// 监听金钱变化，自动分桶到收入 / 支出账本
 	if (Economy)
@@ -56,6 +57,7 @@ void UBusinessSimulation::Shutdown()
 		TimeSystem->OnYearChanged.Clear();
 		TimeSystem->OnSeasonChanged.Clear();
 		TimeSystem->OnBusinessOpenChanged.Clear();
+		TimeSystem->OnBusinessDayEnded.Clear();
 	}
 	if (Economy)
 	{
@@ -96,31 +98,76 @@ FBusinessReport UBusinessSimulation::MakeReport(int32 Y, int32 M, int32 D) const
 	return R;
 }
 
-void UBusinessSimulation::OnDay(int32 Y, int32 M, int32 D)
+void UBusinessSimulation::ApplyDailyPassiveCash()
 {
-	// —— 当日被动收支（属于刚结束的这一天） ——
-	if (Economy)
+	if (!Economy)
 	{
-		// 租金 / 设施收入
-		Economy->AddMoney(DailyRentIncome, EMoneySource::DailyIncome);
+		return;
+	}
 
-		// 维护支出：受经理"管理"属性减免；付不出时记一笔未付账单（钱的下限是 0，不能用负数判破产）
-		const int32 Maint = FMath::Max(0, DailyMaintenance - (StaffSystem ? StaffSystem->GetManagementBonus() : 0));
-		if (!Economy->SpendMoney(Maint, EMoneySource::Maintenance))
-		{
-			Economy->AddUnpaidBill(Maint);
-		}
+	// 租金 / 设施收入
+	Economy->AddMoney(DailyRentIncome, EMoneySource::DailyIncome);
 
-		// 员工工资按日计提（月薪 / 30），月末不再重复发薪
-		if (bAccrueWagesDaily && StaffSystem)
+	// 维护支出：受经理"管理"属性减免；付不出时记一笔未付账单（钱的下限是 0，不能用负数判破产）
+	const int32 Maint = FMath::Max(0, DailyMaintenance - (StaffSystem ? StaffSystem->GetManagementBonus() : 0));
+	if (!Economy->SpendMoney(Maint, EMoneySource::Maintenance))
+	{
+		Economy->AddUnpaidBill(Maint);
+	}
+
+	// 员工工资按日计提（月薪 / 30），月末不再重复发薪
+	if (bAccrueWagesDaily && StaffSystem)
+	{
+		const int32 DailyWage = StaffSystem->GetTotalMonthlyWages() / 30;
+		if (DailyWage > 0 && !Economy->SpendMoney(DailyWage, EMoneySource::Wages))
 		{
-			const int32 DailyWage = StaffSystem->GetTotalMonthlyWages() / 30;
-			if (DailyWage > 0 && !Economy->SpendMoney(DailyWage, EMoneySource::Wages))
-			{
-				Economy->AddUnpaidBill(DailyWage);
-			}
+			Economy->AddUnpaidBill(DailyWage);
 		}
 	}
+}
+
+void UBusinessSimulation::ResetDailyLedger()
+{
+	TodayIncome = 0;
+	TodayExpense = 0;
+}
+
+void UBusinessSimulation::HandleBusinessDayEnded()
+{
+	// huanglily：到点打烊即当日营业结束，日结卡应在此时出现；
+	// 时钟已由 UTimeSystem 暂停，等玩家点“进入下一天”再推进日期。
+	if (bDaySettledAtClose || !TimeSystem)
+	{
+		return;
+	}
+	bDaySettledAtClose = true;
+
+	ApplyDailyPassiveCash();
+	RecomputeStars();
+
+	const FBusinessReport R = MakeReport(TimeSystem->Year, TimeSystem->Month, TimeSystem->Day);
+	OnDailyReport.Broadcast(R);
+
+	if (SeasonSystem)
+	{
+		SeasonSystem->EvaluateDay(R.Net, R.Money, R.Reputation, RestaurantStars);
+	}
+
+	ResetDailyLedger();
+	Save();
+}
+
+void UBusinessSimulation::OnDay(int32 Y, int32 M, int32 D)
+{
+	// 打烊时已经结算过：这次只是“进入下一天”的日期推进，不能再扣一次被动收支 / 评级
+	if (bSkipNextDaySettlement)
+	{
+		bSkipNextDaySettlement = false;
+		bDaySettledAtClose = false;
+		return;
+	}
+
+	ApplyDailyPassiveCash();
 
 	RecomputeStars();
 
@@ -135,8 +182,7 @@ void UBusinessSimulation::OnDay(int32 Y, int32 M, int32 D)
 	}
 
 	// 重置日账本
-	TodayIncome = 0;
-	TodayExpense = 0;
+	ResetDailyLedger();
 
 	// 日结算后自动持久化（每游戏日一次，最多丢失一天进度）
 	Save();

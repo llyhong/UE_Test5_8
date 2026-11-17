@@ -275,6 +275,10 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Shoot|Events")
 	FOrderEvent2 OnFailOrder;
 
+	/** 订单被静默取消（客人被吓跑 / 提前离场）：只通知 UI 移除，不计失败、不扣分 */
+	UPROPERTY(BlueprintAssignable, Category = "Shoot|Events")
+	FOrderEvent2 OnOrderCanceled;
+
 	/** 最近一次 PushFoods 成功时实际服务的客人（供上菜台把成品送到客人位置；调用后立即读取，非持久状态） */
 	AGuestCharacter* LastServedGuest = nullptr;
 

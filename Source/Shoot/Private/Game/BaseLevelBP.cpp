@@ -15,6 +15,7 @@
 #include "UI/SeasonWarningWidget.h"
 #include "UI/SeasonEndingWidget.h"
 #include "Game/BusinessTime.h"
+#include "Game/BusinessSimulation.h"
 #include "Engine/DirectionalLight.h"
 #include "EngineUtils.h"
 #include "Kismet/GameplayStatics.h"
@@ -947,13 +948,17 @@ void ABaseLevelBP::HandleSeasonDailyGrade(ESeasonGrade Grade, int32 GradeScore, 
 	UE_LOG(LogTemp, Log, TEXT("[SeasonUI] 日结卡：评级 %s（%d 分，服务 %d / 失败 %d）"),
 		*GI->seasonSystem->GetGradeName(Grade), GradeScore, Served, Failed);
 
+	// 营业结束触发的日结卡要停留等“进入下一天”；其它来源仍按原样自动淡出
+	const bool bAwaitNextDay = GI->businessSimulation && GI->businessSimulation->TimeSystem
+		&& GI->businessSimulation->TimeSystem->IsEndOfDayReached();
+
 	for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
 	{
 		if (APlayerController* PC = It->Get())
 		{
 			if (PC->IsLocalController())
 			{
-				USeasonDailyCardWidget::ShowForPlayer(PC, GI->seasonSystem);
+				USeasonDailyCardWidget::ShowForPlayer(PC, GI->seasonSystem, bAwaitNextDay);
 			}
 		}
 	}

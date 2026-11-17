@@ -88,6 +88,7 @@ void UOrderWidget::BindOrderSystem(AOrderSystem* InOrderSystem)
 		OrderSystem->OnStartOrder.AddDynamic(this, &UOrderWidget::HandleOrderStarted);
 		OrderSystem->OnFinishOrder.AddDynamic(this, &UOrderWidget::HandleOrderFinished);
 		OrderSystem->OnFailOrder.AddDynamic(this, &UOrderWidget::HandleOrderFailed);
+		OrderSystem->OnOrderCanceled.AddDynamic(this, &UOrderWidget::HandleOrderCanceled);
 	}
 
 	RebuildWaitingOrders();
@@ -100,6 +101,7 @@ void UOrderWidget::UnbindOrderSystem()
 		OrderSystem->OnStartOrder.RemoveDynamic(this, &UOrderWidget::HandleOrderStarted);
 		OrderSystem->OnFinishOrder.RemoveDynamic(this, &UOrderWidget::HandleOrderFinished);
 		OrderSystem->OnFailOrder.RemoveDynamic(this, &UOrderWidget::HandleOrderFailed);
+		OrderSystem->OnOrderCanceled.RemoveDynamic(this, &UOrderWidget::HandleOrderCanceled);
 	}
 
 	OrderSystem = nullptr;
@@ -190,4 +192,10 @@ void UOrderWidget::HandleOrderFailed(const UOrderHandle* Handle, const FOrderDat
 
 	// 增量：仅通知移除，不再整表重建
 	OnOrderFailed(Handle, Order);
+}
+
+void UOrderWidget::HandleOrderCanceled(const UOrderHandle* Handle, const FOrderData& Order)
+{
+	// 静默取消复用"订单失败"的移除事件，蓝图 UI 无需新增一套删除逻辑
+	HandleOrderFailed(Handle, Order);
 }

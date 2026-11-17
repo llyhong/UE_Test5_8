@@ -4,6 +4,7 @@
 
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
+#include "Components/Button.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Components/HorizontalBox.h"
@@ -11,7 +12,10 @@
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
+#include "Game/BaseGameInstance.h"
 #include "Game/BaseLevelBP.h"
+#include "Game/BusinessSimulation.h"
+#include "Game/BusinessTime.h"
 #include "GameFramework/PlayerController.h"
 #include "Styling/CoreStyle.h"
 
@@ -49,7 +53,7 @@ namespace
 	}
 }
 
-void USeasonDailyCardWidget::ShowForPlayer(APlayerController* PC, const USeasonSystem* Season)
+void USeasonDailyCardWidget::ShowForPlayer(APlayerController* PC, const USeasonSystem* Season, bool bAwaitNextDay)
 {
 	if (!PC || !Season)
 	{
@@ -74,14 +78,85 @@ void USeasonDailyCardWidget::ShowForPlayer(APlayerController* PC, const USeasonS
 		ActiveCards.Add(TWeakObjectPtr<APlayerController>(PC), Card);
 	}
 
+	Card->bInteractive = bAwaitNextDay;
 	Card->Apply(Season);
 	Card->Elapsed = 0.f;
 	Card->bShowing = true;
+
+	// 营业结束卡停留等待按钮；其它日结卡仍在 7 秒后自动淡出
+	Card->SetVisibility(bAwaitNextDay ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::HitTestInvisible);
+	Card->SetUIInputEnabled(bAwaitNextDay);
+	if (Card->NextDayButton)
+	{
+		Card->NextDayButton->SetVisibility(bAwaitNextDay ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+	}
 	if (Card->CardBorder)
 	{
-		Card->CardBorder->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+		Card->CardBorder->SetVisibility(bAwaitNextDay ? ESlateVisibility::Visible : ESlateVisibility::SelfHitTestInvisible);
 		Card->CardBorder->SetRenderOpacity(0.f);
 		Card->CardBorder->SetRenderTranslation(FVector2D(36.f, 0.f));
+	}
+}
+
+void USeasonDailyCardWidget::DismissAll()
+{
+	for (const TPair<TWeakObjectPtr<APlayerController>, TWeakObjectPtr<USeasonDailyCardWidget>>& Pair : ActiveCards)
+	{
+		if (USeasonDailyCardWidget* Card = Pair.Value.Get())
+		{
+			Card->Dismiss();
+		}
+	}
+}
+
+void USeasonDailyCardWidget::Dismiss()
+{
+	bShowing = false;
+	bInteractive = false;
+	Elapsed = 0.f;
+	SetUIInputEnabled(false);
+	SetVisibility(ESlateVisibility::HitTestInvisible);
+	if (CardBorder)
+	{
+		CardBorder->SetVisibility(ESlateVisibility::Collapsed);
+	}
+}
+
+void USeasonDailyCardWidget::HandleNextDayClicked()
+{
+	if (APlayerController* PC = OwnerController.Get())
+	{
+		if (UBaseGameInstance* GI = Cast<UBaseGameInstance>(PC->GetGameInstance()))
+		{
+			if (GI->businessSimulation && GI->businessSimulation->TimeSystem)
+			{
+				GI->businessSimulation->TimeSystem->BeginNextBusinessDay();
+			}
+		}
+	}
+	DismissAll();
+}
+
+void USeasonDailyCardWidget::SetUIInputEnabled(bool bEnabled)
+{
+	APlayerController* PC = OwnerController.Get();
+	if (!PC)
+	{
+		return;
+	}
+
+	if (bEnabled)
+	{
+		FInputModeUIOnly Mode;
+		Mode.SetWidgetToFocus(TakeWidget());
+		Mode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+		PC->SetInputMode(Mode);
+		PC->bShowMouseCursor = true;
+	}
+	else
+	{
+		PC->SetInputMode(FInputModeGameOnly());
+		PC->bShowMouseCursor = false;
 	}
 }
 
@@ -92,7 +167,7 @@ TSharedRef<SWidget> USeasonDailyCardWidget::RebuildWidget()
 		return Super::RebuildWidget();
 	}
 
-	SetIsFocusable(false);
+	SetIsFocusable(true);
 	SetVisibility(ESlateVisibility::HitTestInvisible);
 
 	UCanvasPanel* Root = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("Root"));
@@ -193,7 +268,29 @@ TSharedRef<SWidget> USeasonDailyCardWidget::RebuildWidget()
 	HintText->SetColorAndOpacity(FSlateColor(FLinearColor(0.95f, 0.78f, 0.35f, 1.f)));
 	HintText->SetAutoWrapText(true);
 	HintText->SetWrapTextAt(330.f);
-	Column->AddChildToVerticalBox(HintText);
+	if (UVerticalBoxSlot* PanelSlot = Column->AddChildToVerticalBox(HintText))
+	{
+		PanelSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
+	}
+
+	// 营业结束后的日结卡：停留到玩家点这个按钮才进入下一天
+	NextDayButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("NextDayButton"));
+	NextDayButton->SetBackgroundColor(FLinearColor(0.18f, 0.42f, 0.68f, 1.f));
+	NextDayButton->SetVisibility(ESlateVisibility::Collapsed);
+	NextDayButton->OnClicked.AddDynamic(this, &USeasonDailyCardWidget::HandleNextDayClicked);
+
+	NextDayButtonText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("NextDayLabel"));
+	NextDayButtonText->SetText(FText::FromString(TEXT("进入下一天")));
+	NextDayButtonText->SetFont(FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 15));
+	NextDayButtonText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+	NextDayButtonText->SetJustification(ETextJustify::Center);
+	NextDayButton->AddChild(NextDayButtonText);
+
+	if (UVerticalBoxSlot* PanelSlot = Column->AddChildToVerticalBox(NextDayButton))
+	{
+		PanelSlot->SetPadding(FMargin(0.f, 8.f, 0.f, 0.f));
+		PanelSlot->SetHorizontalAlignment(HAlign_Fill);
+	}
 
 	CardBorder->SetVisibility(ESlateVisibility::Collapsed);
 
@@ -282,7 +379,7 @@ void USeasonDailyCardWidget::NativeTick(const FGeometry& MyGeometry, float InDel
 	{
 		Alpha = Elapsed / CardFadeInSeconds;
 	}
-	else if (Elapsed > CardHoldSeconds)
+	else if (!bInteractive && Elapsed > CardHoldSeconds)
 	{
 		Alpha = 1.f - (Elapsed - CardHoldSeconds) / CardFadeOutSeconds;
 	}
@@ -291,7 +388,8 @@ void USeasonDailyCardWidget::NativeTick(const FGeometry& MyGeometry, float InDel
 	CardBorder->SetRenderOpacity(Alpha);
 	CardBorder->SetRenderTranslation(FVector2D((1.f - Alpha) * 36.f, 0.f));
 
-	if (Elapsed >= CardHoldSeconds + CardFadeOutSeconds)
+	// 营业结束卡不自动消失，必须等玩家点“进入下一天”
+	if (!bInteractive && Elapsed >= CardHoldSeconds + CardFadeOutSeconds)
 	{
 		bShowing = false;
 		CardBorder->SetVisibility(ESlateVisibility::Collapsed);
@@ -300,6 +398,10 @@ void USeasonDailyCardWidget::NativeTick(const FGeometry& MyGeometry, float InDel
 
 void USeasonDailyCardWidget::NativeDestruct()
 {
+	if (bInteractive)
+	{
+		SetUIInputEnabled(false);
+	}
 	if (APlayerController* PC = OwnerController.Get())
 	{
 		ActiveCards.Remove(TWeakObjectPtr<APlayerController>(PC));
