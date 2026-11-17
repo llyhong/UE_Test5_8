@@ -29,9 +29,8 @@ class AAnimalCharacter;
 class UShootAnimInstance;
 class APlant;
 class AAttractCounter;
-class AGuestCharacter;
-class ADishwasher;
 class AChairSeat;
+class ADishwasher;
 class APestActor;
 class UInteractionDialogueComponent;
 class UNiagaraSystem;
@@ -168,14 +167,7 @@ private:
 	UPROPERTY(VisibleInstanceOnly, Category = "Shoot|Character")
 	TObjectPtr<class AGateCounter> OverlappingGate;
 
-	// 客人候选集
-	UPROPERTY(VisibleInstanceOnly, Category = "Shoot|Character")
-	TArray<TObjectPtr<class AGuestCharacter>> OverlappingGuests;
-
-	UPROPERTY(VisibleInstanceOnly, Category = "Shoot|Character")
-	TObjectPtr<class AGuestCharacter> OverlappingGuest;
-
-	// 餐桌候选集
+	// 餐桌候选集（点单 / 上菜 / 收空碟全部在餐桌上完成，客人本身不再参与交互）
 	UPROPERTY(VisibleInstanceOnly, Category = "Shoot|Character")
 	TArray<TObjectPtr<class AChairSeat>> OverlappingChairSeats;
 
@@ -498,10 +490,6 @@ public:
 	void RemoveOverlappingGate(class AGateCounter* Gate);
 	void RefreshBestGate();
 
-	void AddOverlappingGuest(class AGuestCharacter* Guest);
-	void RemoveOverlappingGuest(class AGuestCharacter* Guest);
-	void RefreshBestGuest();
-
 	void AddOverlappingChairSeat(class AChairSeat* Seat);
 	void RemoveOverlappingChairSeat(class AChairSeat* Seat);
 	void RefreshBestChairSeat();
@@ -624,13 +612,6 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Character")
 	FORCEINLINE AGateCounter* GetOverlappingGate() const { return OverlappingGate; }
-
-	// 客人交互：靠近时由 AGuestCharacter 的交互球注册/反注册（用于 E 键接单）
-	UFUNCTION(BlueprintCallable, Category = "Shoot|Guest")
-	void SetOverlappingGuest(AGuestCharacter* Guest);
-
-	UFUNCTION(BlueprintCallable, Category = "Shoot|Character")
-	FORCEINLINE AGuestCharacter* GetOverlappingGuest() const { return OverlappingGuest; }
 
 	// 餐桌交互：靠近时由 AChairSeat 的交互球注册/反注册（用于 E 键点单 / 上菜 / 收空碟）
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Chair")

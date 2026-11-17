@@ -9,8 +9,8 @@
 #include "Machine/AttractCounter.h"
 #include "Machine/Dishwasher.h"
 #include "Machine/ResearchStove.h"
-#include "NPC/GuestCharacter.h"
 #include "NPC/ChairSeat.h"
+#include "NPC/GuestCharacter.h"   // IsValid(Seat->Occupant) 需要完整类型
 #include "Dialogue/DialogueComponent.h"
 #include "Item/Plant.h"
 #include "Item/ItemActor.h"
@@ -830,34 +830,6 @@ void AShootCharacter::RefreshBestGate()
 		[this](const AActor* A) { return HasInteractionLineOfSight(A); });
 }
 
-// ============ 客人候选集 ============
-void AShootCharacter::AddOverlappingGuest(AGuestCharacter* Guest)
-{
-	if (!IsValid(Guest))
-	{
-		return;
-	}
-	OverlappingGuests.AddUnique(Guest);
-	RefreshBestGuest();
-}
-
-void AShootCharacter::RemoveOverlappingGuest(AGuestCharacter* Guest)
-{
-	if (!Guest)
-	{
-		return;
-	}
-	OverlappingGuests.Remove(Guest);
-	RefreshBestGuest();
-}
-
-void AShootCharacter::RefreshBestGuest()
-{
-	OverlappingGuest = PickBestInteractionCandidate(OverlappingGuests,
-		[this](const AActor* A) { return GetFacingWeightedDistance(A); },
-		[this](const AActor* A) { return HasInteractionLineOfSight(A); });
-}
-
 // ============ 餐桌候选集 ============
 void AShootCharacter::AddOverlappingChairSeat(AChairSeat* Seat)
 {
@@ -881,9 +853,46 @@ void AShootCharacter::RemoveOverlappingChairSeat(AChairSeat* Seat)
 
 void AShootCharacter::RefreshBestChairSeat()
 {
-	OverlappingChairSeat = PickBestInteractionCandidate(OverlappingChairSeats,
-		[this](const AActor* A) { return GetFacingWeightedDistance(A); },
-		[this](const AActor* A) { return HasInteractionLineOfSight(A); });
+	// 客人身上的交互已并入餐桌，玩家现在唯一的下单 / 上菜入口就是椅子。
+	// 一张桌子通常有两把椅子（各自一个 AChairSeat 实例），站在桌边时两把都在范围里：
+	// 若只按距离选，可能选中旁边那把空椅子，按 E 只得到"暂时没有客人入座"。
+	// 因此优先在"此刻真能交互"的椅子里选（有人坐 / 桌上有碟），都没有才退回最近的一把。
+	for (int32 i = OverlappingChairSeats.Num() - 1; i >= 0; --i)
+	{
+		if (!IsValid(OverlappingChairSeats[i]))
+		{
+			OverlappingChairSeats.RemoveAtSwap(i);
+		}
+	}
+
+	AChairSeat* BestActive = nullptr;
+	float BestActiveScore = FLT_MAX;
+	AChairSeat* BestAny = nullptr;
+	float BestAnyScore = FLT_MAX;
+
+	for (AChairSeat* Seat : OverlappingChairSeats)
+	{
+		if (!Seat || !HasInteractionLineOfSight(Seat))
+		{
+			continue;
+		}
+
+		const float Score = GetFacingWeightedDistance(Seat);
+		if (Score < BestAnyScore)
+		{
+			BestAnyScore = Score;
+			BestAny = Seat;
+		}
+
+		// 有客人 / 桌上有碟 → 这张桌子按 E 一定有结果
+		if ((IsValid(Seat->Occupant) || Seat->HasPlateOnSeat()) && Score < BestActiveScore)
+		{
+			BestActiveScore = Score;
+			BestActive = Seat;
+		}
+	}
+
+	OverlappingChairSeat = BestActive ? BestActive : BestAny;
 }
 
 // ============ 研究炉候选集 ============
@@ -1047,7 +1056,6 @@ void AShootCharacter::RefreshAllInteractionTargets()
 	RefreshBestDishwasher();
 	RefreshBestAttractCounter();
 	RefreshBestGate();
-	RefreshBestGuest();
 	RefreshBestChairSeat();
 	RefreshBestResearchStove();
 	RefreshBestEmptyPlate();
@@ -1118,11 +1126,6 @@ void AShootCharacter::SetOverlappingAttractCounter(AAttractCounter* Counter)
 void AShootCharacter::SetOverlappingGate(AGateCounter* Gate)
 {
 	OverlappingGate = Gate;
-}
-
-void AShootCharacter::SetOverlappingGuest(AGuestCharacter* Guest)
-{
-	OverlappingGuest = Guest;
 }
 
 void AShootCharacter::SetOverlappingChairSeat(AChairSeat* Seat)
@@ -1635,16 +1638,13 @@ void AShootCharacter::BuildInteractionOptions(TArray<FInteractOption, TInlineAll
 			});
 		}
 
-		if (OverlappingGuest && OverlappingGuest->CanPlayerServeDish())
+		// 上菜改到餐桌上完成：端着菜站在餐桌旁 → 直接给这桌客人上菜。
+		// 留在 Tier 1 是为了保住原来的手感：端着菜时"上菜"永远压过脚边的植物/垃圾。
+		if (OverlappingChairSeat && OverlappingChairSeat->CanPlayerServeDish(this))
 		{
-			AddOption(TierHandover, DistTo(OverlappingGuest), TEXT("端菜给客人"), OverlappingGuest, [this]()
+			AddOption(TierHandover, DistTo(OverlappingChairSeat), TEXT("上菜"), OverlappingChairSeat, [this]()
 			{
-				if (OverlappingGuest->TryServeDish(this, PickingItem))
-				{
-					ClearHeldItemState();
-					return true;
-				}
-				return false; // 菜不对/订单不匹配：不消费按键
+				return OverlappingChairSeat->TryInteractByPlayer(this);
 			});
 		}
 
@@ -1732,22 +1732,23 @@ void AShootCharacter::BuildInteractionOptions(TArray<FInteractOption, TInlineAll
 		});
 	}
 
-	// 餐桌：点单 / 上菜 / 收空碟
+	// 餐桌：点单 / 上菜 / 收空碟（客人身上的交互已全部并入餐桌）
 	if (OverlappingChairSeat)
 	{
-		AddOption(TierWorld, DistTo(OverlappingChairSeat), TEXT("餐桌"), OverlappingChairSeat, [this]()
+		// 提示文字按此刻能做的事实时变化：空手站过去看到的就是"点单"，而不是笼统的"餐桌"
+		const TCHAR* SeatAction = TEXT("餐桌");
+		if (OverlappingChairSeat->CanPlayerTakeOrder(this))
+		{
+			SeatAction = TEXT("点单");
+		}
+		else if (OverlappingChairSeat->CanPlayerCollectPlate(this))
+		{
+			SeatAction = TEXT("收走空碟");
+		}
+
+		AddOption(TierWorld, DistTo(OverlappingChairSeat), SeatAction, OverlappingChairSeat, [this]()
 		{
 			return OverlappingChairSeat->TryInteractByPlayer(this);
-		});
-	}
-
-	// 客人接单（仅"需要玩家接单"模式）
-	if (OverlappingGuest && OverlappingGuest->CanAcceptOrderByPlayer())
-	{
-		AddOption(TierWorld, DistTo(OverlappingGuest), TEXT("接单"), OverlappingGuest, [this]()
-		{
-			OverlappingGuest->AcceptOrderByPlayer();
-			return true;
 		});
 	}
 
@@ -2249,7 +2250,6 @@ bool AShootCharacter::HasBlockingInteractionTarget() const
 		|| OverlappingCounter != nullptr
 		|| OverlappingAttractCounter != nullptr
 		|| OverlappingGate != nullptr
-		|| OverlappingGuest != nullptr
 		|| OverlappingChairSeat != nullptr
 		|| OverlappingDishwasher != nullptr
 		|| OverlappingResearchStove != nullptr
@@ -3590,7 +3590,6 @@ void AShootCharacter::DoRepairEnd()
 		AddDebugTarget(OverlappingDishwasher);
 		AddDebugTarget(OverlappingAttractCounter);
 		AddDebugTarget(OverlappingGate);
-		AddDebugTarget(OverlappingGuest);
 		AddDebugTarget(OverlappingChairSeat);
 		AddDebugTarget(OverlappingResearchStove);
 

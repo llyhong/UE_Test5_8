@@ -26,9 +26,11 @@ void AGuestAIController::OnPossess(APawn* InPawn)
 	if (AGuestCharacter* Guest = Cast<AGuestCharacter>(InPawn))
 	{
 		// CreateWeakLambda：控制器被销毁后回调不执行，避免悬垂 this/Guest 访问
-		FTimerDelegate NextTickDelegate = FTimerDelegate::CreateWeakLambda(this, [this, Guest]()
+		TWeakObjectPtr<AGuestCharacter> WeakGuest(Guest);
+		FTimerDelegate NextTickDelegate = FTimerDelegate::CreateWeakLambda(this, [this, WeakGuest]()
 		{
-			if (IsValid(Guest))
+			AGuestCharacter* Guest = WeakGuest.Get();
+			if (IsValid(Guest) && !Guest->IsActorBeingDestroyed())
 			{
 				Guest->StartWalkingToSeat();
 			}
@@ -105,13 +107,24 @@ void AGuestAIController::MoveToSeatLocation(const FVector& Target, AGuestCharact
 					GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Green,
 						FString::Printf(TEXT("[AI] %s 已到达离场点"), *GetName()));
 				}
-				// 直接 C++ 调用到达回调（不再依赖反射 FindFunction）
-				Guest->OnReachLeavePoint();
-				StopMovement();
-				if (GetWorld())
+
+				UWorld* World = GetWorld();
+				if (!World)
 				{
-					GetWorld()->GetTimerManager().ClearTimer(ArriveCheckTimerHandle);
+					return;
 				}
+
+				// —— 顺序很重要 ——
+				// Guest->OnReachLeavePoint() 内部会 Destroy 客人 Pawn；而 AController::PawnPendingDestroy()
+				// 在 PlayerState 为空时（AI 控制器就是这种）会把这个控制器一起 Destroy()。
+				// 控制器一旦被标记 Garbage，成员会被填成 0xffffffffffffffff，
+				// 之后再调 StopMovement() / ClearTimer() 就是 EXCEPTION_ACCESS_VIOLATION 0xffffffffffffffff。
+				// 所以所有对 this 的访问必须放在销毁客人之前，调用完立刻 return。
+				World->GetTimerManager().ClearTimer(ArriveCheckTimerHandle);
+				StopMovement();
+
+				Guest->OnReachLeavePoint();
+				return;
 			}
 		});
 
@@ -353,13 +366,17 @@ bool AGuestAIController::AttemptMoveToSeat(AActor* Target, const FVector& SeatLo
 					GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Green,
 						FString::Printf(TEXT("[AI] %s 已到达座位 %s"), *GetName(), *Target->GetName()));
 				}
-				// 直接 C++ 调用到达回调（不再依赖反射 FindFunction）
-				Guest->SitDown();
-				StopMovement();
-				if (GetWorld())
+				// 顺序同离场路径：先做完对 this 的操作（清轮询 / 停移动），
+				// 再回调客人。SitDown 若在蓝图里做了销毁/Possess 变更，控制器可能一并失效，
+				// 之后任何成员访问都会读到 Garbage 填充值。
+				if (UWorld* World = GetWorld())
 				{
-					GetWorld()->GetTimerManager().ClearTimer(ArriveCheckTimerHandle);
+					World->GetTimerManager().ClearTimer(ArriveCheckTimerHandle);
 				}
+				StopMovement();
+
+				Guest->SitDown();
+				return;
 			}
 		});
 
@@ -412,8 +429,9 @@ bool AGuestAIController::AttemptMoveToSeat(AActor* Target, const FVector& SeatLo
 		TWeakObjectPtr<AActor> WeakTarget(Target);
 		TWeakObjectPtr<AGuestCharacter> WeakGuest(Guest);
 
-		FTimerDelegate RetryDelegate;
-		RetryDelegate.BindLambda([this, WeakTarget, WeakGuest, AttemptNo]()
+		// CreateWeakLambda：客人被销毁时控制器会被一起 Destroy（AController::PawnPendingDestroy），
+		// 若用 BareLambda 绑定裸 this，延迟重试触发时就会在 Garbage 对象上执行
+		FTimerDelegate RetryDelegate = FTimerDelegate::CreateWeakLambda(this, [this, WeakTarget, WeakGuest, AttemptNo]()
 		{
 			if (!WeakTarget.IsValid() || !WeakGuest.IsValid()) return;
 			if (bShowDebugInfo && GEngine)

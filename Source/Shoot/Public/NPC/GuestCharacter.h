@@ -5,14 +5,12 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
 #include "NPC/GuestTypes.h"
-#include "Interaction/InteractionConfig.h"
 #include "GuestCharacter.generated.h"
 
 class AGuestAIController;
 class AChairSeat;
 class AGuestManager;
 class UOrderHandle;
-class USphereComponent;
 class UWidgetComponent;
 class UGuestStatusWidget;
 class UTexture2D;
@@ -155,22 +153,6 @@ public:
 	/** 坐下点餐后产生的订单（未点餐 / 已上菜 / 已超时为 null） */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Guest")
 	TObjectPtr<UOrderHandle> CurrentOrder = nullptr;
-
-	/** 交互范围：玩家靠近后可按 E 接单（仅"需要玩家接单"模式使用） */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Guest|Components")
-	TObjectPtr<USphereComponent> InteractionSphere;
-
-	/** 交互判定半径。OnConstruction（编辑器视口）与 BeginPlay（运行时）都会强制应用到组件上 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Guest|Components", meta = (ClampMin = "10.0"))
-	float InteractionRadius = InteractionDistance::Guest;
-
-	/** 编辑器里改 InteractionRadius 时立即写进组件，关卡视口中即可看到真实判定球 */
-	virtual void OnConstruction(const FTransform& Transform) override;
-
-	/** 把 InteractionRadius（× Shoot.InteractScale 倍率）写进交互球。
-	 *  OnConstruction / BeginPlay / 运行时改倍率都会调用，必须幂等 */
-	UFUNCTION()
-	void ApplyInteractionScale();
 
 	/** 客人自身计时器（进食/等待上菜超时），不依赖 AI 控制器 */
 	FTimerHandle GuestTimerHandle;
@@ -382,16 +364,6 @@ protected:
 
 	/** 等待上菜超时：超时无人上菜则离场（无订单系统时的兜底） */
 	void StartWaitFoodTimeout();
-
-	/** 交互球：玩家进入范围时注册为可接单目标（仅"需要玩家接单"模式） */
-	UFUNCTION()
-	void OnInteractionOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
-		UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
-
-	/** 交互球：玩家离开范围时反注册 */
-	UFUNCTION()
-	void OnInteractionEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
-		UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
 
 	/** 进食结束后开始离开 */
 	void StartLeaving();

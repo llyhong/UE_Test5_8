@@ -42,16 +42,8 @@ AGuestCharacter::AGuestCharacter()
 	AIControllerClass = AGuestAIController::StaticClass();
 	AutoPossessAI = EAutoPossessAI::PlacedInWorldOrSpawned;
 
-	// 交互范围：玩家靠近后可按 E 接单（与上菜台/招揽台的交互球用法一致）
-	InteractionSphere = CreateDefaultSubobject<USphereComponent>(TEXT("InteractionSphere"));
-	InteractionSphere->SetupAttachment(RootComponent);
-	InteractionSphere->SetSphereRadius(InteractionRadius * InteractionScale::Get());
-	InteractionSphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-	InteractionSphere->SetCollisionResponseToAllChannels(ECR_Overlap);
-	InteractionSphere->SetGenerateOverlapEvents(true);
-	// 视口里未选中也画出判定球（粉色=客人），方便摆放时目测接单范围
-	InteractionSphere->ShapeColor = FColor(235, 110, 160);
-	InteractionSphere->bDrawOnlyIfSelected = false;
+	// 注意：客人身上不再挂交互球。点单 / 上菜 / 收空碟一律在餐桌上完成（AChairSeat），
+	// 客人只负责坐下、等待、进食、离场，避免玩家站在客人与桌子之间时提示抢到客人身上。
 
 	// 客人与客人之间的避让：
 	// 1) 开启 RVO 避让，AI 走向同一方向（如同时进场/同时离场）时会互相绕行，而不是顶在一起。
@@ -96,28 +88,9 @@ AGuestCharacter::AGuestCharacter()
 	// 按状态随机抽取，C++ 不再硬编码，便于策划在编辑器里维护。
 }
 
-void AGuestCharacter::OnConstruction(const FTransform& Transform)
-{
-	Super::OnConstruction(Transform);
-
-	// 编辑器视口预览：改 InteractionRadius 立刻反映到组件上
-	ApplyInteractionScale();
-}
-
-void AGuestCharacter::ApplyInteractionScale()
-{
-	if (InteractionSphere)
-	{
-		InteractionSphere->SetSphereRadius(InteractionRadius * InteractionScale::Get(), false);
-	}
-}
-
 void AGuestCharacter::BeginPlay()
 {
 	Super::BeginPlay();
-
-	// 运行时同样强制应用，覆盖蓝图里残留的旧半径
-	ApplyInteractionScale();
 
 	SetGuestState(EGuestState::WalkingIn);
 
@@ -126,13 +99,6 @@ void AGuestCharacter::BeginPlay()
 	if (UCapsuleComponent* Capsule = GetCapsuleComponent())
 	{
 		Capsule->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
-	}
-
-	// 交互球事件：把靠近的玩家注册为"可接单"目标
-	if (InteractionSphere)
-	{
-		InteractionSphere->OnComponentBeginOverlap.AddDynamic(this, &AGuestCharacter::OnInteractionOverlap);
-		InteractionSphere->OnComponentEndOverlap.AddDynamic(this, &AGuestCharacter::OnInteractionEndOverlap);
 	}
 }
 
@@ -803,28 +769,6 @@ bool AGuestCharacter::AcceptOrderByPlayer()
 
 	// 点单成功的调试信息已由 PlaceOrder 统一打印（含订单号与“玩家接单”标记）
 	return true;
-}
-
-void AGuestCharacter::OnInteractionOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
-	UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
-{
-	// 无论接单方式，都注册为可交互客人：
-	// - 需要玩家接单：靠近按 E 接单；
-	// - 方案B上菜：靠近“正在等餐”的客人按 E 直接端菜上菜。
-	if (AShootCharacter* Player = Cast<AShootCharacter>(OtherActor))
-	{
-		Player->AddOverlappingGuest(this);
-	}
-}
-
-void AGuestCharacter::OnInteractionEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
-	UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
-{
-	if (AShootCharacter* Player = Cast<AShootCharacter>(OtherActor))
-	{
-		// 只注销自己：多个客人范围交叠时，另一个仍是候选目标
-		Player->RemoveOverlappingGuest(this);
-	}
 }
 
 void AGuestCharacter::OnOrderServed()
