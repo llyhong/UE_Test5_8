@@ -37,6 +37,21 @@ void AGuestAIController::OnPossess(APawn* InPawn)
 	}
 }
 
+void AGuestAIController::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	// 打烊清场会成批销毁客人 Pawn，控制器可能比 Pawn 活得久；
+	// 这里统一清掉轮询定时器，避免残留回调继续拿旧 Pawn 指针做判断。
+	if (UWorld* World = GetWorld())
+	{
+		FTimerManager& TimerManager = World->GetTimerManager();
+		TimerManager.ClearTimer(ArriveCheckTimerHandle);
+		TimerManager.ClearTimer(SeatRetryTimerHandle);
+		TimerManager.ClearTimer(WanderCheckTimerHandle);
+	}
+
+	Super::EndPlay(EndPlayReason);
+}
+
 void AGuestAIController::MoveToSeatLocation(const FVector& Target, AGuestCharacter* Guest)
 {
 	if (!Guest) return;
@@ -49,21 +64,27 @@ void AGuestAIController::MoveToSeatLocation(const FVector& Target, AGuestCharact
 
 	// 用 Timer 轮询是否到达
 	// 使用 CreateWeakLambda：控制器（this）被销毁后，回调不会执行，从根本上避免悬垂 this（0xff...）访问。
-	FTimerDelegate NextTickDelegate = FTimerDelegate::CreateWeakLambda(this, [this, Guest, Target]()
+	// Guest 用 TWeakObjectPtr 持有：客人被销毁（打烊清场 ClearAllGuests）后 Get() 会返回 nullptr，
+	// 绝不能拿裸指针去 IsValid —— Pawn 被 GC 后裸指针可能指向已被复用的内存，从而在
+	// OnReachLeavePoint -> SetGuestState -> 蓝图事件里空指针崩溃。
+	TWeakObjectPtr<AGuestCharacter> WeakGuest(Guest);
+
+	FTimerDelegate NextTickDelegate = FTimerDelegate::CreateWeakLambda(this, [this, WeakGuest, Target]()
 	{
 		// 双保险：控制器或 World 已失效（如移动途中客人/控制器被销毁）时直接退出
 		if (!IsValid(this) || !GetWorld())
 		{
 			return;
 		}
-		FTimerDelegate TickDelegate = FTimerDelegate::CreateWeakLambda(this, [this, Guest, Target]()
+		FTimerDelegate TickDelegate = FTimerDelegate::CreateWeakLambda(this, [this, WeakGuest, Target]()
 		{
 			// 双保险：控制器已失效时直接退出（Don't dereference a dead controller's World）
 			if (!IsValid(this) || !GetWorld())
 			{
 				return;
 			}
-			if (!IsValid(Guest))
+			AGuestCharacter* Guest = WeakGuest.Get();
+			if (!IsValid(Guest) || Guest->IsActorBeingDestroyed())
 			{
 				GetWorld()->GetTimerManager().ClearTimer(ArriveCheckTimerHandle);
 				return;
@@ -285,14 +306,21 @@ bool AGuestAIController::AttemptMoveToSeat(AActor* Target, const FVector& SeatLo
 	{
 		GetWorld()->GetTimerManager().ClearTimer(ArriveCheckTimerHandle);
 
-		FTimerDelegate TickDelegate = FTimerDelegate::CreateWeakLambda(this, [this, Guest, Target, SeatLocation]()
+		// Guest 用 TWeakObjectPtr：客人被销毁（打烊清场）后 Get() 返回 nullptr，
+		// 不会在已释放内存上调用 SitDown 引发空指针崩溃
+		TWeakObjectPtr<AGuestCharacter> WeakGuest(Guest);
+		TWeakObjectPtr<AActor> WeakTarget(Target);
+
+		FTimerDelegate TickDelegate = FTimerDelegate::CreateWeakLambda(this, [this, WeakGuest, WeakTarget, SeatLocation]()
 		{
 			// 双保险：控制器或 World 已失效（如入座途中客人/控制器被销毁）时直接退出，避免悬垂指针崩溃
 			if (!IsValid(this) || !GetWorld())
 			{
 				return;
 			}
-			if (!IsValid(Guest) || !IsValid(Target))
+			AGuestCharacter* Guest = WeakGuest.Get();
+			AActor* Target = WeakTarget.Get();
+			if (!IsValid(Guest) || Guest->IsActorBeingDestroyed() || !IsValid(Target))
 			{
 				GetWorld()->GetTimerManager().ClearTimer(ArriveCheckTimerHandle);
 				return;

@@ -23,6 +23,9 @@ public:
 protected:
 	virtual void OnPossess(APawn* InPawn) override;
 
+	/** 控制器销毁时清掉所有轮询定时器，避免打烊清场后仍在已释放的 Pawn 上回调 */
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
 public:
 	/** 前往指定世界坐标，到达后自动调用 Guest->OnReachLeavePoint() */
 	void MoveToSeatLocation(const FVector& Target, AGuestCharacter* Guest);

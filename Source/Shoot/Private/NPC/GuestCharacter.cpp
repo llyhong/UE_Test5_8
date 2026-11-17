@@ -166,6 +166,13 @@ void AGuestCharacter::SetGuestState(EGuestState NewState)
 		SetActorTickEnabled(true);
 	}
 
+	// 已经开始销毁的 Actor 不再向蓝图派发事件：此时蓝图侧持有的引用（UI / 特效 / 其它 Actor）
+	// 很可能已经一起拆掉，ProcessEvent 进 BlueprintImplementableEvent 就是空指针访问（打烊清场踩到过）。
+	if (IsActorBeingDestroyed())
+	{
+		return;
+	}
+
 	OnGuestStateChanged(NewState);
 	UpdateStatusWidget(NewState);
 }
@@ -410,9 +417,13 @@ void AGuestCharacter::JoinQueue()
 
 	// 排队超时：离场并扣除声誉
 	GetWorld()->GetTimerManager().ClearTimer(QueueTimerHandle);
-	FTimerDelegate TimeoutDelegate;
-	TimeoutDelegate.BindLambda([this]()
+	FTimerDelegate TimeoutDelegate = FTimerDelegate::CreateWeakLambda(this, [this]()
 	{
+		// 客人已被销毁（打烊清场）时回调不执行
+		if (!IsValid(this) || IsActorBeingDestroyed())
+		{
+			return;
+		}
 		if (GuestState == EGuestState::Waiting)
 		{
 			OnQueueTimeout();
@@ -633,19 +644,35 @@ void AGuestCharacter::Tick(float DeltaSeconds)
 void AGuestCharacter::StartWaitFoodTimeout()
 {
 	// 兜底：无订单系统时，等待上菜超时则离开
-	GetWorld()->GetTimerManager().SetTimerForNextTick([this]()
+	// CreateWeakLambda：Actor 已销毁时回调不执行（避免在已释放的 this 上读 GuestState）
+	if (UWorld* World = GetWorld())
 	{
-		FTimerDelegate TimeoutDelegate;
-		TimeoutDelegate.BindLambda([this]()
+		World->GetTimerManager().SetTimerForNextTick(FTimerDelegate::CreateWeakLambda(this, [this]()
 		{
-			// 等待上菜 / 等待玩家接单 任一阶段超时都离场（客人没等到结果）
-			if (GuestState == EGuestState::WaitingFood || GuestState == EGuestState::WaitingOrder)
+			if (!IsValid(this) || IsActorBeingDestroyed())
 			{
-				StartLeaving();
+				return;
 			}
-		});
-		GetWorld()->GetTimerManager().SetTimer(GuestTimerHandle, TimeoutDelegate, WaitFoodTimeout, false);
-	});
+			UWorld* W = GetWorld();
+			if (!W)
+			{
+				return;
+			}
+			FTimerDelegate TimeoutDelegate = FTimerDelegate::CreateWeakLambda(this, [this]()
+			{
+				if (!IsValid(this) || IsActorBeingDestroyed())
+				{
+					return;
+				}
+				// 等待上菜 / 等待玩家接单 任一阶段超时都离场（客人没等到结果）
+				if (GuestState == EGuestState::WaitingFood || GuestState == EGuestState::WaitingOrder)
+				{
+					StartLeaving();
+				}
+			});
+			W->GetTimerManager().SetTimer(GuestTimerHandle, TimeoutDelegate, WaitFoodTimeout, false);
+		}));
+	}
 }
 
 bool AGuestCharacter::PlaceOrder()
@@ -852,15 +879,31 @@ void AGuestCharacter::StartEating()
 	bIsSitting = true;
 
 	// 进食结束后：方案B 把桌上菜品转为空碟占据座位，再离座
-	GetWorld()->GetTimerManager().SetTimerForNextTick([this]()
+	// CreateWeakLambda：Actor 已销毁（打烊清场）时回调不执行，避免 FinishEating 访问悬垂 this
+	if (UWorld* World = GetWorld())
 	{
-		FTimerDelegate EatDelegate;
-		EatDelegate.BindLambda([this]()
+		World->GetTimerManager().SetTimerForNextTick(FTimerDelegate::CreateWeakLambda(this, [this]()
 		{
-			FinishEating();
-		});
-		GetWorld()->GetTimerManager().SetTimer(GuestTimerHandle, EatDelegate, EatDuration, false);
-	});
+			if (!IsValid(this) || IsActorBeingDestroyed())
+			{
+				return;
+			}
+			UWorld* W = GetWorld();
+			if (!W)
+			{
+				return;
+			}
+			FTimerDelegate EatDelegate = FTimerDelegate::CreateWeakLambda(this, [this]()
+			{
+				if (!IsValid(this) || IsActorBeingDestroyed())
+				{
+					return;
+				}
+				FinishEating();
+			});
+			W->GetTimerManager().SetTimer(GuestTimerHandle, EatDelegate, EatDuration, false);
+		}));
+	}
 }
 
 bool AGuestCharacter::CanPlayerServeDish() const
@@ -1179,24 +1222,51 @@ void AGuestCharacter::StartLeaving()
 
 	// 离场兜底：若离场点导航不可达导致永远走不到（轮询距离 < 80 不触发），
 	// 超时后强制销毁，避免客人永久残留场景。正常到达会先清掉本定时器。
-	GetWorld()->GetTimerManager().SetTimerForNextTick([this]()
+	// 一律用 CreateWeakLambda 绑定：Actor 在计时期间被销毁（打烊清场 / GC）时回调不会执行，
+	// 避免在已释放的 this 上执行 OnReachLeavePoint 造成空指针崩溃。
+	if (UWorld* World = GetWorld())
 	{
-		FTimerDelegate LeaveDelegate;
-		LeaveDelegate.BindLambda([this]()
+		World->GetTimerManager().SetTimerForNextTick(FTimerDelegate::CreateWeakLambda(this, [this]()
 		{
-			if (GuestState != EGuestState::Dead)
+			if (!IsValid(this) || IsActorBeingDestroyed())
 			{
-				OnReachLeavePoint();
+				return;
 			}
-		});
-		GetWorld()->GetTimerManager().SetTimer(LeaveTimeoutTimerHandle, LeaveDelegate, 10.0f, false);
-	});
+			UWorld* W = GetWorld();
+			if (!W)
+			{
+				return;
+			}
+			FTimerDelegate LeaveDelegate = FTimerDelegate::CreateWeakLambda(this, [this]()
+			{
+				if (!IsValid(this) || IsActorBeingDestroyed() || GuestState == EGuestState::Dead)
+				{
+					return;
+				}
+				OnReachLeavePoint();
+			});
+			W->GetTimerManager().SetTimer(LeaveTimeoutTimerHandle, LeaveDelegate, 10.0f, false);
+		}));
+	}
 }
 
 void AGuestCharacter::OnReachLeavePoint()
 {
+	// 走到离场点 / 离场兜底超时都会进这里，两者可能同时到达；
+	// 若 Actor 已进入销毁流程，不要再碰状态与蓝图事件（否则 ProcessEvent 访问已释放对象）
+	if (!IsValid(this) || IsActorBeingDestroyed() || GuestState == EGuestState::Dead)
+	{
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
 	// 取消离场兜底计时器（正常到达时本函数先被调用，避免重复销毁）
-	GetWorld()->GetTimerManager().ClearTimer(LeaveTimeoutTimerHandle);
+	World->GetTimerManager().ClearTimer(LeaveTimeoutTimerHandle);
 
 	// 销毁前先从管理器反注册，避免列表残留
 	if (Manager)
