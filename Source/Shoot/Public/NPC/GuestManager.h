@@ -82,6 +82,33 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GuestManager|Pacing", meta = (ClampMin = "0.1"))
 	float SpawnRetryDelay = 3.0f;
 
+	// ========== 开业前期节奏（逐个来客，避免开场长时间空窗后一下涌入） ==========
+	/** 前期来客节奏表：每个元素表示一次来客事件生成几位客人，按顺序消费。
+	 *  例如 {1,1,1,2,1,2}：先来 1 位，再来 1 位……表走完后才进入常规波峰循环。清空 = 不开前期节奏。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GuestManager|Pacing|EarlyGame")
+	TArray<int32> EarlyArrivalPattern;
+
+	/** 前期节奏中相邻两次来客事件的间隔（秒）；表走完后恢复 SpawnInterval / 波峰节奏 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GuestManager|Pacing|EarlyGame", meta = (ClampMin = "1.0", Units = "s"))
+	float EarlyArrivalInterval = 12.f;
+
+	// ========== 未点单积压闸门（玩家一直不接单时停止进客） ==========
+	/** 未点单客人积压上限：在场（含排队）尚未被玩家接单的客人达到该数量时暂停生成新客，
+	 *  玩家接单、积压降到上限以下后自动恢复。0 = 不限制（旧行为）。
+	 *  默认 3：前期来客 1,1,1 三位都没点单，就不会再进第 4 位。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GuestManager|Pacing|OrderGate", meta = (ClampMin = "0"))
+	int32 MaxUnorderedGuestsBeforePause = 3;
+
+	/** 当前未点单客人数（在场 + 排队中，尚未进入等菜/进食等已接单状态）；供 UI / 调试 */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|GuestManager|Pacing|OrderGate")
+	int32 GetUnorderedGuestCount() const;
+
+	// ========== 离场后的来客间隔（避免前一位刚走、下一位立刻冒出来） ==========
+	/** 任意客人离场（吃完离开 / 生气离场 / 超时离开）后，至少间隔这么多秒才会生成下一位客人。
+	 *  0 = 关闭该间隔（保持旧行为）。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GuestManager|Pacing", meta = (ClampMin = "0.0", Units = "s"))
+	float SpawnDelayAfterGuestLeave = 5.f;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|GuestManager|Pacing")
 	bool bInCustomerRush = false;
 
@@ -351,6 +378,12 @@ private:
 	bool bSpawningPaused = true;
 	bool bCustomerPacingStarted = false;
 	double NextRushStartTime = 0.0;
+
+	/** 最近一次客人离场的世界时间（秒）；用于 SpawnDelayAfterGuestLeave 的来客间隔 */
+	double LastGuestLeaveWorldTime = -1.0;
+
+	/** 前期来客节奏表已消费到的位置（每次开门营业从头开始） */
+	int32 EarlyArrivalIndex = 0;
 
 	/** 单次来客定时器；尚未找到 TimeSystem 时也用于重试绑定 */
 	FTimerHandle AutoSpawnTimerHandle;

@@ -415,12 +415,43 @@ void ADiningHygieneManager::HandleMessCleaned(ADiningMessActor* Mess)
 
 	ActiveMesses.Remove(Mess);
 	PenaltyAccumSeconds.Remove(Mess);
+	++TotalCleanedCount;
 
 	if (bShowDebugInfo)
 	{
 		ShowDebug(FString::Printf(TEXT("[就餐区卫生] 已清理 1 处（剩余 %d 个）"), ActiveMesses.Num()),
 			FLinearColor(0.3f, 0.9f, 0.4f));
 	}
+}
+
+void ADiningHygieneManager::SetAutoSpawnEnabled(bool bEnabled)
+{
+	bAutoSpawn = bEnabled;
+	if (UWorld* World = GetWorld())
+	{
+		// 重新开启时从当前时刻重新计时，避免立刻补刷一堆
+		NextSpawnWorldTime = World->GetTimeSeconds() + Rand.FRandRange(SpawnIntervalMin, SpawnIntervalMax);
+	}
+}
+
+void ADiningHygieneManager::ClearAllMesses()
+{
+	TArray<TObjectPtr<ADiningMessActor>> ToDestroy = ActiveMesses;
+	ActiveMesses.Empty();
+	PenaltyAccumSeconds.Empty();
+	for (ADiningMessActor* Mess : ToDestroy)
+	{
+		if (IsValid(Mess))
+		{
+			Mess->Destroy();
+		}
+	}
+}
+
+ADiningMessActor* ADiningHygieneManager::SpawnMessInArea(EDiningMessType Type)
+{
+	EnsureRandomReady();
+	return SpawnMess(Type, PickSpawnLocation());
 }
 
 void ADiningHygieneManager::ShowDebug(const FString& Message, const FLinearColor& Color) const

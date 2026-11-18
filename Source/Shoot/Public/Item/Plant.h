@@ -82,6 +82,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Shoot|Plant|WildHarvest")
 	bool CanHarvestFruitStoreInBasket() const;
 
+	/** 果实对应的物品 ID（新手任务引导用）；配置缺失时返回 -1 */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Plant")
+	int32 GetFruitItemID() const;
+
 	/** 留空使用去 PIE 前缀的地图名|Actor FName；重命名或运行时生成点可指定完整稳定 Key。 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Plant|Save")
 	FName PlantKeyOverride = NAME_None;

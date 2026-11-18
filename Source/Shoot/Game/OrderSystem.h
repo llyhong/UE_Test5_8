@@ -67,7 +67,7 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Shoot|Order")
 	bool IsExpired() const;
 
-	void InitializePatience(const ULevelOrderCfg* Config);
+	void InitializePatience(const ULevelOrderCfg* Config, int32 BusinessDay);
 
 	/** 单道菜的菜名：传入菜单 ID（MenuDataTable 的 FoodID）取该菜的 FMenuData::FoodName。
 	 *  不传（MenuID < 0）时返回整单显示名（多道菜用 "+" 连接，如“番茄炒蛋+米饭”） */
@@ -294,6 +294,13 @@ private:
 
 	/** 上次发放野味订单时的营业日（UTimeSystem::Day）；跨日自动重置计数 */
 	int32 WildOrderDay = INDEX_NONE;
+
+	/** 当前订单池是按哪一天构建的：天数变化后需要重建，才能让 UnlockDay 生效 */
+	int32 PoolBuiltDay = INDEX_NONE;
+
+	/** 新手引导按天顺序出单：当前游标所在天 / 序列内下一条索引（跨天自动归零） */
+	int32 TutorialSeqDay = INDEX_NONE;
+	int32 TutorialSeqCursor = 0;
 
 	int32 GetCurrentBusinessDay() const;
 

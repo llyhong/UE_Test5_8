@@ -72,6 +72,11 @@ USTRUCT(BlueprintType)
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Order")
 	float Probabilitys = 1.f;
 
+	/** 最早出现的营业日（UTimeSystem::Day，从 1 开始）：当前天数小于该值时，
+	 *  这道菜不会进订单池（例如番茄类菜设定为第 2 天）。0/1 = 第一天就可以点。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Order")
+	int32 UnlockDay = 0;
+
 	/** 野外专属菜品：本菜需要野外食材（DT_ItemInfo 里 bWildOnly=true 的食材）。
 	 *  勾选后这道菜不会进常规订单池，只在备料窗口内作为「限时高价订单」发放（见第 16 节）。
 	 *  默认 false，旧菜品不受影响。 */

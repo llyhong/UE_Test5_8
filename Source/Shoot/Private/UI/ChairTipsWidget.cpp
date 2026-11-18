@@ -81,7 +81,7 @@ FText UChairTipsWidget::GetSeatStateText() const
 	case EChairTipsState::Seated:
 		return FText::FromString(TEXT("入座中…"));
 	case EChairTipsState::WaitingOrder:
-		return FText::FromString(TEXT("等待点单"));
+		return FText::FromString(TEXT("按 E 点单"));
 	case EChairTipsState::WaitingFood:
 		return FText::FromString(TEXT("等待上菜"));
 	case EChairTipsState::Eating:

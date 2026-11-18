@@ -47,6 +47,9 @@ AGuestManager::AGuestManager()
 	BusinessOpenSound = OpenSound.Object;
 	static ConstructorHelpers::FObjectFinder<USoundBase> ClosedSound(TEXT("/Game/Audio/SFX/MS_UI_Hover"));
 	BusinessClosedSound = ClosedSound.Object;
+
+	// 开店前期逐位来客：1、1、1、2、1、2，走完才进入常规波峰节奏
+	EarlyArrivalPattern = {1, 1, 1, 2, 1, 2};
 }
 
 void AGuestManager::BeginPlay()
@@ -148,6 +151,42 @@ UTimeSystem* AGuestManager::BindBusiness()
 	return TS;
 }
 
+int32 AGuestManager::GetUnorderedGuestCount() const
+{
+	TSet<const AGuestCharacter*> Seen;
+	int32 Count = 0;
+	auto CountOne = [&Seen, &Count](const TObjectPtr<AGuestCharacter>& Guest)
+	{
+		AGuestCharacter* G = Guest.Get();
+		if (!G || Seen.Contains(G))
+		{
+			return;
+		}
+		Seen.Add(G);
+		switch (G->GuestState)
+		{
+		// 还没被玩家接单的阶段都算积压（已点单后转 WaitingFood / Eating，不再计入）
+		case EGuestState::WalkingIn:
+		case EGuestState::Waiting:
+		case EGuestState::Seated:
+		case EGuestState::WaitingOrder:
+			++Count;
+			break;
+		default:
+			break;
+		}
+	};
+	for (const TObjectPtr<AGuestCharacter>& Guest : ActiveGuests)
+	{
+		CountOne(Guest);
+	}
+	for (const TObjectPtr<AGuestCharacter>& Guest : WaitingQueue)
+	{
+		CountOne(Guest);
+	}
+	return Count;
+}
+
 void AGuestManager::ScheduleNextSpawn(float Delay)
 {
 	if (!bSpawningPaused && bAutoSpawn && SpawnInterval > 0.0f)
@@ -190,11 +229,75 @@ void AGuestManager::TickSpawn()
 		PauseSpawning();
 		return;
 	}
+	// 前期节奏：按配置表逐次来客（1,1,1,2,1,2…），表走完才落入常规波峰循环。
+	// 之前开门后要先干等一个完整周期，再被第一波波峰一次涌入，体验上就是“半天没客、一来一群”。
+	const float PressureScale = GetCoopPressureScale();
+
+	// 客人离场后的来客间隔：避免前一位刚走出场景、下一位立刻生成，节奏显得突兀
+	if (SpawnDelayAfterGuestLeave > 0.f && LastGuestLeaveWorldTime >= 0.0)
+	{
+		if (const UWorld* World = GetWorld())
+		{
+			const double Remain = LastGuestLeaveWorldTime + SpawnDelayAfterGuestLeave - World->GetTimeSeconds();
+			if (Remain > 0.0)
+			{
+				ScheduleNextSpawn(FMath::Max(static_cast<float>(Remain), 0.1f));
+				return;
+			}
+		}
+	}
+
+	// 玩家一直不接单时停止进客：避免客人越积越多、餐厅彻底失控
+	const int32 Unordered = GetUnorderedGuestCount();
+	int32 SpawnAllowance = 10;
+	if (MaxUnorderedGuestsBeforePause > 0)
+	{
+		SpawnAllowance = FMath::Max(0, MaxUnorderedGuestsBeforePause - Unordered);
+		if (SpawnAllowance <= 0)
+		{
+			ScheduleNextSpawn(FMath::Max(SpawnRetryDelay, 0.1f) / PressureScale);
+			return;
+		}
+	}
+
+	if (EarlyArrivalPattern.IsValidIndex(EarlyArrivalIndex))
+	{
+		const int32 Count = FMath::Min(FMath::Clamp(EarlyArrivalPattern[EarlyArrivalIndex], 1, 10), SpawnAllowance);
+		int32 Spawned = 0;
+		for (int32 i = 0; i < Count; ++i)
+		{
+			if (!SpawnGuest())
+			{
+				break;
+			}
+			++Spawned;
+		}
+		if (Spawned > 0)
+		{
+			++EarlyArrivalIndex;
+		}
+
+		if (!EarlyArrivalPattern.IsValidIndex(EarlyArrivalIndex))
+		{
+			// 前期节奏结束：切回常规间隔，并按 FirstRushDelay 启动第一次波峰
+			ScheduleNextSpawn(GetEffectiveSpawnInterval() / PressureScale);
+			if (UWorld* World = GetWorld())
+			{
+				World->GetTimerManager().SetTimer(RushPhaseTimerHandle,
+					this, &AGuestManager::AdvanceRushPhase, FMath::Max(FirstRushDelay, 0.1f), false);
+			}
+		}
+		else
+		{
+			ScheduleNextSpawn((Spawned > 0 ? EarlyArrivalInterval : SpawnRetryDelay) / PressureScale);
+		}
+		return;
+	}
+
 	Guest = SpawnGuest();
 	if (bCustomerPacingStarted)
 	{
 		// 备料窗口内放慢来客（GetEffectiveSpawnInterval 只放宽不收紧）
-		const float PressureScale = GetCoopPressureScale();
 		const float Interval = (bInCustomerRush ? FMath::Max(RushSpawnInterval, 0.1f) : GetEffectiveSpawnInterval()) / PressureScale;
 		ScheduleNextSpawn(Guest ? Interval : FMath::Max(SpawnRetryDelay, 0.1f) / PressureScale);
 	}
@@ -835,6 +938,11 @@ void AGuestManager::SpawnGuestsBurst(int32 Count)
 
 void AGuestManager::UnregisterGuest(AGuestCharacter* Guest)
 {
+	// 记录离场时刻：TickSpawn 据此保证下一位客人不会紧接着生成
+	if (const UWorld* World = GetWorld())
+	{
+		LastGuestLeaveWorldTime = World->GetTimeSeconds();
+	}
 	if (Guest)
 	{
 		ActiveGuests.Remove(Guest);
@@ -994,6 +1102,7 @@ void AGuestManager::PauseSpawning()
 	bCustomerPacingStarted = false;
 	bInCustomerRush = false;
 	NextRushStartTime = 0.0;
+	EarlyArrivalIndex = 0;
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(AutoSpawnTimerHandle);
@@ -1019,6 +1128,12 @@ void AGuestManager::ResumeSpawning()
 	}
 
 	bCustomerPacingStarted = true;
+	if (EarlyArrivalPattern.Num() > 0)
+	{
+		// 先按前期节奏逐位来客；第一次波峰等表走完后由 TickSpawn 启动
+		ScheduleNextSpawn(FMath::Max(EarlyArrivalInterval, 0.1f) / GetCoopPressureScale());
+		return;
+	}
 	ScheduleNextSpawn(GetEffectiveSpawnInterval());
 	World->GetTimerManager().SetTimer(RushPhaseTimerHandle,
 		this, &AGuestManager::AdvanceRushPhase, FMath::Max(FirstRushDelay, 0.1f), false);

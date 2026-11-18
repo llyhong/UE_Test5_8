@@ -10,7 +10,9 @@
 #include "Widgets/Input/SVirtualJoystick.h"
 #include "Game/BaseGameInstance.h"
 #include "Game/BaseLevelBP.h"
+#include "Game/TutorialTaskManager.h"
 #include "UI/SupplyWarningWidget.h"
+#include "Kismet/GameplayStatics.h"
 
 void AShootPlayerController::BeginPlay()
 {
@@ -39,6 +41,12 @@ void AShootPlayerController::BeginPlay()
 	if (IsLocalPlayerController())
 	{
 		USupplyWarningWidget::EnsureForPlayer(this);
+
+		// 关卡里没摆任务管理器时自动补一个，保证新手引导开箱可用（配置表由 CDO 指定）
+		if (GetWorld() && !UGameplayStatics::GetActorOfClass(this, ATutorialTaskManager::StaticClass()))
+		{
+			GetWorld()->SpawnActor<ATutorialTaskManager>(ATutorialTaskManager::StaticClass(), FTransform::Identity);
+		}
 	}
 }
 

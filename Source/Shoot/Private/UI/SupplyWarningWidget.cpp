@@ -69,9 +69,10 @@ TSharedRef<SWidget> USupplyWarningWidget::RebuildWidget()
 
 	if (UCanvasPanelSlot* BannerSlot = Root->AddChildToCanvas(BannerBorder))
 	{
-		BannerSlot->SetAnchors(FAnchors(0.5f, 0.f));
-		BannerSlot->SetAlignment(FVector2D(0.5f, 0.f));
-		BannerSlot->SetPosition(FVector2D(0.f, 28.f));
+		// 提醒固定在屏幕右下角，避开顶部的事件横幅与中部的交互提示
+		BannerSlot->SetAnchors(FAnchors(1.f, 1.f));
+		BannerSlot->SetAlignment(FVector2D(1.f, 1.f));
+		BannerSlot->SetPosition(FVector2D(-28.f, -28.f));
 		BannerSlot->SetAutoSize(true);
 	}
 

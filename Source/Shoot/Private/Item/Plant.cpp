@@ -217,6 +217,17 @@ bool APlant::CanHarvestFruitStoreInBasket() const
 	return !FruitCDO || FruitCDO->bCanStoreInBasket;
 }
 
+int32 APlant::GetFruitItemID() const
+{
+	const FPlantInfo* Info = GetPlantInfo();
+	if (!Info || !Info->FruitClass)
+	{
+		return -1;
+	}
+	const AItemActor* FruitCDO = Info->FruitClass->GetDefaultObject<AItemActor>();
+	return FruitCDO ? FruitCDO->GetItemID() : -1;
+}
+
 bool APlant::CanHarvest() const
 {
 	const FPlantInfo* Info = GetPlantInfo();

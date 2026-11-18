@@ -105,6 +105,15 @@ public:
 
 	UPROPERTY(EditAnywhere,BlueprintReadWrite, Category = "Shoot|Data")
 	float TargetScore;
+
+	/** 新手引导：按天覆盖的“前 N 单”出单顺序（key=天数；FoodIDs = 该天前几单依次点的菜品 FoodID，
+	 *  每个 FoodID 一单）。序列内的单优先于常规出单逻辑（配置顺序/随机池），发完后当天剩余订单回退常规逻辑。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Data|Tutorial")
+	TMap<int32, FOrderData> DayFoodSequences;
+
+	/** 新手引导：这些天里所有客人耐心值视为无限（订单不会迟到/超时），如 {1, 2}。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Data|Tutorial")
+	TArray<int32> InfinitePatienceDays;
 };
 
 // UCLASS(BlueprintType)

@@ -90,6 +90,13 @@ void AOrderSystem::Tick(float DeltaTime)
 {
 	if (IsStarted)
 	{
+		// 天数变化后重建订单池：菜品可配置 UnlockDay，跨天后才允许出现的菜需要重新入池
+		const int32 Today = GetCurrentBusinessDay();
+		if (PoolBuiltDay != Today)
+		{
+			RebuildOrderPool();
+		}
+
 		CurTime += DeltaTime;
 
 		// —— 订单超时检查（无论订单来自定时生成还是客人点餐）——
@@ -148,7 +155,7 @@ void AOrderSystem::Tick(float DeltaTime)
 						orderHandle->waitTime = 0;
 						orderHandle->RefreshOrderStats();
 						orderHandle->SetCoopWaitTimeScale(GetCoopWaitTimeScale());
-						orderHandle->InitializePatience(orderCfg);
+						orderHandle->InitializePatience(orderCfg, GetCurrentBusinessDay());
 						waitList.Add(orderHandle);
 						OnStartOrder.Broadcast(orderHandle, orderHandle->OrderData);
 						CurOrderIndex++;
@@ -182,6 +189,7 @@ void AOrderSystem::RebuildOrderPool()
 {
 	OrderPool.Reset();
 	OrderWeights.Reset();
+	PoolBuiltDay = GetCurrentBusinessDay();
 
 	UBaseGameInstance* GI = GetWorld() ? Cast<UBaseGameInstance>(GetWorld()->GetGameInstance()) : nullptr;
 	UFoodSystem* FS = GI ? GI->foodSystem : nullptr;
@@ -484,6 +492,12 @@ bool AOrderSystem::IsMenuServable(int32 FoodID, const TSet<int32>& SuppliedItemI
 		OutReason = TEXT("菜谱未解锁（需研究炉研究）");
 		return false;
 	}
+	// 菜品配置的最早营业日：例如番茄类菜设为第 2 天，新手第一天的订单里就不会出现
+	if (Menu.UnlockDay > 0 && GetCurrentBusinessDay() < Menu.UnlockDay)
+	{
+		OutReason = FString::Printf(TEXT("未到可点天数（第 %d 天开放）"), Menu.UnlockDay);
+		return false;
+	}
 	if (Menu.MenuItems.Num() == 0)
 	{
 		OutReason = TEXT("菜品没配食材");
@@ -780,35 +794,61 @@ UOrderHandle* AOrderSystem::RequestOrderForGuest(AGuestCharacter* Guest)
 		WildOrdersIssuedToday = 0;
 	}
 
+	FOrderData OrderData;
+	bool bWildOrder = false;
+
+	// 新手引导按天覆盖的前 N 单顺序（ULevelOrderCfg::DayFoodSequences）：
+	// 优先于常规出单逻辑，依次发放；序列发完后当天剩余订单走随机池（该天不再用配置顺序单）
+	bool bTutorialOrder = false;
+	const FOrderData* DaySeq = orderCfg ? orderCfg->DayFoodSequences.Find(Today) : nullptr;
+	if (DaySeq)
+	{
+		if (Today != TutorialSeqDay)
+		{
+			TutorialSeqDay = Today;
+			TutorialSeqCursor = 0;
+		}
+		if (TutorialSeqCursor < DaySeq->FoodIDs.Num())
+		{
+			OrderData.FoodIDs = { DaySeq->FoodIDs[TutorialSeqCursor] };
+			++TutorialSeqCursor;
+			bTutorialOrder = true;
+			UE_LOG(LogTemp, Log, TEXT("[OrderSystem] 新手引导顺序出单：第 %d/%d 单（第 %d 天）"),
+				TutorialSeqCursor, DaySeq->FoodIDs.Num(), Today);
+		}
+	}
+
 	// 点餐来源：备料窗口内优先发「限时野味订单」（不消耗配置订单序列游标，属窗口内额外机会单）；
 	// 否则优先按关卡订单配置（Level_01_Order 等）的顺序依次取；
 	// 关闭顺序出单或配置里没有订单时，才退回按菜品表 Probabilitys 的随机订单池
-	FOrderData OrderData;
-	bool bWildOrder = false;
-	if (bEnableWildOrderInPrepWindow && bPrepWindowActive
-		&& WildOrderDailyLimit > 0 && WildOrdersIssuedToday < GetEffectiveWildOrderDailyLimit()
-		&& TryBuildWildOrder(OrderData, CachedSuppliedItemIDs, CachedAvailableMachineIDs))
+	// （引导序列当天即使序列发完，也直接走随机池，不再用配置顺序单）
+	if (!bTutorialOrder)
 	{
-		bWildOrder = true;
-		WildOrdersIssuedToday++;
-	}
-	else if (bUseConfigOrderSequence && orderCfg && orderCfg->Orders.Num() > 0)
-	{
-		if (!GetNextConfigOrder(OrderData))
+		if (bEnableWildOrderInPrepWindow && bPrepWindowActive
+			&& WildOrderDailyLimit > 0 && WildOrdersIssuedToday < GetEffectiveWildOrderDailyLimit()
+			&& TryBuildWildOrder(OrderData, CachedSuppliedItemIDs, CachedAvailableMachineIDs))
 		{
-			// 配置订单已按顺序发完（bLoopConfigOrders=false）：不再随机塞单，保持关卡节奏可控
-			UE_LOG(LogTemp, Warning, TEXT("[OrderSystem] 关卡订单已发完（不循环），客人 %s 点不到单"), *Guest->GetName());
-			return nullptr;
+			bWildOrder = true;
+			WildOrdersIssuedToday++;
 		}
-	}
-	else
-	{
-		const FOrderData* RandomData = GetRandomOrder();
-		if (!RandomData)
+		else if (!DaySeq && bUseConfigOrderSequence && orderCfg && orderCfg->Orders.Num() > 0)
 		{
-			return nullptr;
+			if (!GetNextConfigOrder(OrderData))
+			{
+				// 配置订单已按顺序发完（bLoopConfigOrders=false）：不再随机塞单，保持关卡节奏可控
+				UE_LOG(LogTemp, Warning, TEXT("[OrderSystem] 关卡订单已发完（不循环），客人 %s 点不到单"), *Guest->GetName());
+				return nullptr;
+			}
 		}
-		OrderData = *RandomData;
+		else
+		{
+			const FOrderData* RandomData = GetRandomOrder();
+			if (!RandomData)
+			{
+				return nullptr;
+			}
+			OrderData = *RandomData;
+		}
 	}
 
 	// 客人点餐：生成订单并绑定该客人（订单生命周期 = 客人的等餐周期）
@@ -825,7 +865,7 @@ UOrderHandle* AOrderSystem::RequestOrderForGuest(AGuestCharacter* Guest)
 	}
 	orderHandle->RefreshOrderStats();
 	orderHandle->SetCoopWaitTimeScale(GetCoopWaitTimeScale());
-	orderHandle->InitializePatience(orderCfg);
+	orderHandle->InitializePatience(orderCfg, Today);
 
 	waitList.Add(orderHandle);
 	OnStartOrder.Broadcast(orderHandle, orderHandle->OrderData);
@@ -1133,8 +1173,24 @@ void UOrderHandle::SetWildOrder(float InPriceMultiplier)
 	bIsWildOrder = WildPriceMultiplier > 1.f;
 }
 
-void UOrderHandle::InitializePatience(const ULevelOrderCfg* Config)
+void UOrderHandle::InitializePatience(const ULevelOrderCfg* Config, int32 BusinessDay)
 {
+	// 新手引导：配置的天数里客人耐心值视为无限（等待时间放大到实际不可能超时）
+	const bool bInfinitePatience = Config && Config->InfinitePatienceDays.Contains(BusinessDay);
+	if (bInfinitePatience)
+	{
+		constexpr float HugeWait = 1e9f;
+		NormalWaitTime = HugeWait;
+		MenuWaitTimes.Reset();
+		for (const int32 FoodID : OrderData.FoodIDs)
+		{
+			MenuWaitTimes.Add(FoodID, HugeWait);
+		}
+		LateServeGraceSeconds = 0.f;
+		LateServePriceMultiplier = 1.f;
+		return;
+	}
+
 	const float Multiplier = Config ? FMath::Max(0.1f, Config->OrderWaitTimeMultiplier) : 1.f;
 	LateServeGraceSeconds = Config ? FMath::Max(0.f, Config->LateServeGraceSeconds) : 0.f;
 	LateServePriceMultiplier = Config ? FMath::Clamp(Config->LateServePriceMultiplier, 0.f, 1.f) : 1.f;

@@ -137,6 +137,22 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Shoot|DiningHygiene")
 	int32 GetActiveMessCount() const { return ActiveMesses.Num(); }
 
+	/** 累计已被清理的散落物数量（新手任务统计用；不随清场归零） */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|DiningHygiene")
+	int32 GetTotalCleanedCount() const { return TotalCleanedCount; }
+
+	/** 运行时开关自动撒点（新手第一天只刷固定数量垃圾时关闭） */
+	UFUNCTION(BlueprintCallable, Category = "Shoot|DiningHygiene")
+	void SetAutoSpawnEnabled(bool bEnabled);
+
+	/** 清空场上所有散落物（不广播清理奖励/惩罚） */
+	UFUNCTION(BlueprintCallable, Category = "Shoot|DiningHygiene")
+	void ClearAllMesses();
+
+	/** 在就餐区随机位置生成一个指定类型的散落物（新手任务刷垃圾用） */
+	UFUNCTION(BlueprintCallable, Category = "Shoot|DiningHygiene")
+	ADiningMessActor* SpawnMessInArea(EDiningMessType Type);
+
 protected:
 	/** 已绑定的时间系统（营业状态判定；关卡重建时钟时幂等重绑） */
 	UPROPERTY()
@@ -180,6 +196,9 @@ protected:
 
 	UFUNCTION()
 	void HandleMessCleaned(ADiningMessActor* Mess);
+
+	/** 累计清理数（新手任务进度基线） */
+	int32 TotalCleanedCount = 0;
 
 	void ShowDebug(const FString& Message, const FLinearColor& Color) const;
 };
