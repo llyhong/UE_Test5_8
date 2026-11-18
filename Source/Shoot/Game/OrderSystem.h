@@ -138,10 +138,12 @@ public:
 
 	/**
 	 * 按关卡订单配置（ULevelOrderCfg::Orders，如 Level_01_Order）的顺序取下一单：
-	 * 按数组顺序依次发放，跳过 FoodIDs 为空的配置项；一轮发完按 bLoopConfigOrders 决定回卷还是停发。
-	 * @return 是否取到订单；orderCfg 为空 / 已发完且不循环时返回 false
+	 * 按数组顺序依次发放，跳过 FoodIDs 为空、以及今天还发不了（未到 UnlockDay / 缺食材 / 缺机器）的配置项；
+	 * 一轮发完按 bLoopConfigOrders 决定回卷还是停发。
+	 * @param bOutNoneServable 可选：一整轮都没有今天能发的配置单时置 true，调用方据此退回随机订单池
+	 * @return 是否取到订单；orderCfg 为空 / 已发完且不循环 / 一轮内没有可发的单时返回 false
 	 */
-	bool GetNextConfigOrder(FOrderData& OutOrder);
+	bool GetNextConfigOrder(FOrderData& OutOrder, bool* bOutNoneServable = nullptr);
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Order")
 	bool PushFoods(const TArray<int>& FoodIDs);
 
@@ -319,6 +321,11 @@ private:
 
 	/** 收集本关所有加工机器的 MachineID（做不出的菜不进订单池） */
 	void CollectAvailableMachineIDs(TSet<int32>& OutMachineIDs) const;
+
+	/** 一张订单今天能不能发：订单里每道菜都要满足“已解锁 + 到了 UnlockDay + 食材有来源 + 机器在场”。
+	 *  关卡顺序单（Orders）与新手按天序列（DayFoodSequences）发单前都走这里，
+	 *  避免配置顺序绕过订单池的过滤（例如第 1 天按顺序发出第 2 天才开放的番茄汤） */
+	bool IsOrderServableToday(const FOrderData& Order, FString& OutReason) const;
 
 	/** 最近一次 RebuildOrderPool 收集到的食材来源（野味订单按它过滤，避免每次点餐都扫场景） */
 	TSet<int32> CachedSuppliedItemIDs;

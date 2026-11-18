@@ -17,6 +17,8 @@
 #include "Game/BusinessSimulation.h"
 #include "Game/BusinessTime.h"
 #include "GameFramework/PlayerController.h"
+#include "Blueprint/GameViewportSubsystem.h"
+#include "UObject/UObjectIterator.h"
 #include "Styling/CoreStyle.h"
 
 namespace
@@ -24,9 +26,78 @@ namespace
 	constexpr float CardFadeInSeconds = 0.25f;
 	constexpr float CardHoldSeconds = 7.f;
 	constexpr float CardFadeOutSeconds = 0.4f;
+	/** 营业结束结算卡居中显示时的放大倍数（卡片内容按右侧小卡设计，放到屏幕中间需要更醒目） */
+	constexpr float CenteredCardScale = 1.35f;
+	/** 结算期间多久重新扫一次视口控件（新弹出的 HUD 也要藏起来） */
+	constexpr float HudSuppressInterval = 0.25f;
 
 	/** 每个本地玩家只保留一张卡，避免多人同屏重复创建 */
 	TMap<TWeakObjectPtr<APlayerController>, TWeakObjectPtr<USeasonDailyCardWidget>> ActiveCards;
+
+	/** 结算期间被本卡隐藏的视口控件 → 隐藏前的可见性（收起结算卡时原样恢复） */
+	TMap<TWeakObjectPtr<UUserWidget>, ESlateVisibility> SuppressedHudWidgets;
+
+	/** 隐藏当前世界视口里除日结卡以外的所有顶层控件（HUD / 订单栏 / 任务清单 / 缺货横幅等） */
+	void SuppressOtherHud(UWorld* World)
+	{
+		UGameViewportSubsystem* ViewportSubsystem = UGameViewportSubsystem::Get();
+		if (!World || !ViewportSubsystem)
+		{
+			return;
+		}
+
+		for (TObjectIterator<UUserWidget> It; It; ++It)
+		{
+			UUserWidget* Widget = *It;
+			if (!IsValid(Widget) || Widget->HasAnyFlags(RF_ClassDefaultObject | RF_ArchetypeObject)
+				|| Widget->IsA<USeasonDailyCardWidget>() || Widget->GetWorld() != World
+				|| !ViewportSubsystem->IsWidgetAdded(Widget))
+			{
+				continue;
+			}
+
+			const ESlateVisibility Current = Widget->GetVisibility();
+			if (Current == ESlateVisibility::Collapsed || Current == ESlateVisibility::Hidden)
+			{
+				continue;
+			}
+
+			// 只记第一次隐藏前的状态：控件自己又把自己显示出来时再压回去，但恢复值不变
+			if (!SuppressedHudWidgets.Contains(Widget))
+			{
+				SuppressedHudWidgets.Add(Widget, Current);
+			}
+			Widget->SetVisibility(ESlateVisibility::Collapsed);
+		}
+	}
+
+	/** 恢复结算期间被隐藏的控件（已被移除 / 销毁的跳过） */
+	void RestoreOtherHud()
+	{
+		for (const TPair<TWeakObjectPtr<UUserWidget>, ESlateVisibility>& Pair : SuppressedHudWidgets)
+		{
+			UUserWidget* Widget = Pair.Key.Get();
+			if (IsValid(Widget) && Widget->GetVisibility() == ESlateVisibility::Collapsed)
+			{
+				Widget->SetVisibility(Pair.Value);
+			}
+		}
+		SuppressedHudWidgets.Reset();
+	}
+
+	/** 是否还有正在等“进入下一天”的结算卡（双人分屏时两张都收起才恢复 HUD） */
+	bool AnyInteractiveCardShowing()
+	{
+		for (const TPair<TWeakObjectPtr<APlayerController>, TWeakObjectPtr<USeasonDailyCardWidget>>& Pair : ActiveCards)
+		{
+			const USeasonDailyCardWidget* Card = Pair.Value.Get();
+			if (IsValid(Card) && Card->IsAwaitingNextDay())
+			{
+				return true;
+			}
+		}
+		return false;
+	}
 
 	FLinearColor GradeColor(ESeasonGrade Grade)
 	{
@@ -81,7 +152,9 @@ void USeasonDailyCardWidget::ShowForPlayer(APlayerController* PC, const USeasonS
 	Card->bInteractive = bAwaitNextDay;
 	Card->Apply(Season);
 	Card->Elapsed = 0.f;
+	Card->HudSuppressAccum = 0.f;
 	Card->bShowing = true;
+	Card->ApplyLayout(bAwaitNextDay);
 
 	// 营业结束卡停留等待按钮；其它日结卡仍在 7 秒后自动淡出
 	Card->SetVisibility(bAwaitNextDay ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::HitTestInvisible);
@@ -94,8 +167,51 @@ void USeasonDailyCardWidget::ShowForPlayer(APlayerController* PC, const USeasonS
 	{
 		Card->CardBorder->SetVisibility(bAwaitNextDay ? ESlateVisibility::Visible : ESlateVisibility::SelfHitTestInvisible);
 		Card->CardBorder->SetRenderOpacity(0.f);
-		Card->CardBorder->SetRenderTranslation(FVector2D(36.f, 0.f));
+		Card->CardBorder->SetRenderTranslation(Card->GetSlideOffset(0.f));
 	}
+
+	// 营业结束结算：屏幕上只留结算卡，其它 HUD（金钱/时钟、订单栏、任务清单、缺货横幅等）全部隐藏
+	if (bAwaitNextDay)
+	{
+		SuppressOtherHud(PC->GetWorld());
+	}
+}
+
+void USeasonDailyCardWidget::ApplyLayout(bool bCentered)
+{
+	if (!CardBorder)
+	{
+		return;
+	}
+
+	if (UCanvasPanelSlot* CardSlot = Cast<UCanvasPanelSlot>(CardBorder->Slot))
+	{
+		if (bCentered)
+		{
+			// 营业结束结算：正中间
+			CardSlot->SetAnchors(FAnchors(0.5f, 0.5f));
+			CardSlot->SetAlignment(FVector2D(0.5f, 0.5f));
+			CardSlot->SetPosition(FVector2D::ZeroVector);
+		}
+		else
+		{
+			// 其它日结卡：右侧居中偏下，避开顶部 HUD 与底部订单栏
+			CardSlot->SetAnchors(FAnchors(1.f, 0.5f));
+			CardSlot->SetAlignment(FVector2D(1.f, 0.5f));
+			CardSlot->SetPosition(FVector2D(-40.f, 60.f));
+		}
+		CardSlot->SetAutoSize(true);
+	}
+
+	// 以卡片中心为轴放大，居中时更醒目；右侧卡保持原尺寸
+	CardBorder->SetRenderTransformPivot(FVector2D(0.5f, 0.5f));
+	CardBorder->SetRenderScale(FVector2D(bCentered ? CenteredCardScale : 1.f));
+}
+
+FVector2D USeasonDailyCardWidget::GetSlideOffset(float Alpha) const
+{
+	const float Offset = (1.f - FMath::Clamp(Alpha, 0.f, 1.f)) * 36.f;
+	return bInteractive ? FVector2D(0.f, Offset) : FVector2D(Offset, 0.f);
 }
 
 void USeasonDailyCardWidget::DismissAll()
@@ -107,6 +223,9 @@ void USeasonDailyCardWidget::DismissAll()
 			Card->Dismiss();
 		}
 	}
+
+	// 结算卡全部收起：把结算期间隐藏的 HUD 恢复原样
+	RestoreOtherHud();
 }
 
 void USeasonDailyCardWidget::Dismiss()
@@ -374,6 +493,17 @@ void USeasonDailyCardWidget::NativeTick(const FGeometry& MyGeometry, float InDel
 
 	Elapsed += InDeltaTime;
 
+	// 结算期间新弹出的 HUD（打烊牌、缺货横幅、引导清单等）也要压下去
+	if (bInteractive)
+	{
+		HudSuppressAccum += InDeltaTime;
+		if (HudSuppressAccum >= HudSuppressInterval)
+		{
+			HudSuppressAccum = 0.f;
+			SuppressOtherHud(GetWorld());
+		}
+	}
+
 	float Alpha = 1.f;
 	if (Elapsed < CardFadeInSeconds)
 	{
@@ -386,7 +516,7 @@ void USeasonDailyCardWidget::NativeTick(const FGeometry& MyGeometry, float InDel
 	Alpha = FMath::Clamp(Alpha, 0.f, 1.f);
 
 	CardBorder->SetRenderOpacity(Alpha);
-	CardBorder->SetRenderTranslation(FVector2D((1.f - Alpha) * 36.f, 0.f));
+	CardBorder->SetRenderTranslation(GetSlideOffset(Alpha));
 
 	// 营业结束卡不自动消失，必须等玩家点“进入下一天”
 	if (!bInteractive && Elapsed >= CardHoldSeconds + CardFadeOutSeconds)
@@ -398,13 +528,21 @@ void USeasonDailyCardWidget::NativeTick(const FGeometry& MyGeometry, float InDel
 
 void USeasonDailyCardWidget::NativeDestruct()
 {
+	const bool bWasAwaiting = IsAwaitingNextDay();
 	if (bInteractive)
 	{
 		SetUIInputEnabled(false);
 	}
+	bShowing = false;
+	bInteractive = false;
 	if (APlayerController* PC = OwnerController.Get())
 	{
 		ActiveCards.Remove(TWeakObjectPtr<APlayerController>(PC));
+	}
+	// 结算卡被直接销毁（切关 / 退出）且没有别的结算卡在等：恢复被隐藏的 HUD
+	if (bWasAwaiting && !AnyInteractiveCardShowing())
+	{
+		RestoreOtherHud();
 	}
 	Super::NativeDestruct();
 }

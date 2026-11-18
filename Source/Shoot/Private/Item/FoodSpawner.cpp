@@ -2,6 +2,8 @@
 
 #include "Item/FoodSpawner.h"
 #include "Game/BaseGameInstance.h"
+#include "Game/BusinessSimulation.h"
+#include "Game/BusinessTime.h"
 #include "Machine/StorageWarehouse.h"
 #include "Data/ItemActorInfo.h"
 #include "UI/SpawnerRestockTipWidget.h"
@@ -86,8 +88,54 @@ FGuid AFoodSpawner::GetSpawnerSaveGuid()
 	return SpawnerGuid;
 }
 
+bool AFoodSpawner::IsDayLocked() const
+{
+	if (AvailableFromDay <= 1)
+	{
+		return false;
+	}
+	const UWorld* World = GetWorld();
+	const UBaseGameInstance* GI = World ? Cast<UBaseGameInstance>(World->GetGameInstance()) : nullptr;
+	const UTimeSystem* TS = (GI && GI->businessSimulation) ? GI->businessSimulation->TimeSystem.Get() : nullptr;
+	// 拿不到营业时钟（例如非营业关卡）时不锁，保持旧行为
+	return TS && TS->Day < AvailableFromDay;
+}
+
+void AFoodSpawner::UpdateDayLock()
+{
+	const bool bLocked = IsDayLocked();
+	const int8 NewState = bLocked ? 1 : 0;
+	if (NewState == AppliedDayLockState)
+	{
+		return;
+	}
+	// 首次检查且未锁：什么都不改，避免覆盖关卡里本来的显隐 / 碰撞设置
+	const bool bFirstApply = (AppliedDayLockState < 0);
+	AppliedDayLockState = NewState;
+	if (bFirstApply && !bLocked)
+	{
+		return;
+	}
+
+	// 隐藏整个箱子并关闭碰撞：玩家看不到也碰不到，交互球的 EndOverlap 会把它从候选目标里移除
+	SetActorHiddenInGame(bLocked);
+	SetActorEnableCollision(!bLocked);
+	if (bLocked && RestockTipComp && RestockTipComp->IsVisible())
+	{
+		RestockTipComp->SetVisibility(false);
+	}
+	UE_LOG(LogTemp, Log, TEXT("[FoodSpawner] %s %s（第 %d 天开放）"), *GetName(),
+		bLocked ? TEXT("未到开放天数，已隐藏") : TEXT("已到开放天数，恢复显示"), AvailableFromDay);
+}
+
 bool AFoodSpawner::CanSpawn() const
 {
+	// 还没到开放天数：箱子处于隐藏状态，不出料
+	if (IsDayLocked())
+	{
+		return false;
+	}
+
 	// 野外专属食材（DT_ItemInfo::bWildOnly）默认不从食材箱产出：
 	// 直接读生成目标 CDO 上的 ItemInfoRow，不需要运行时查表，也不影响其他系统。
 	if (!bAllowWildOnlyItems && SpawnItemActorClass)
@@ -125,6 +173,7 @@ void AFoodSpawner::Tick(float DeltaSeconds)
 	if (RestockTipAccum >= 0.2f)
 	{
 		RestockTipAccum = 0.f;
+		UpdateDayLock();
 		UpdateRestockTip();
 	}
 }
@@ -225,7 +274,7 @@ void AFoodSpawner::UpdateRestockTip()
 		return;
 	}
 
-	const bool bShow = IsLowStock() && IsLocalPlayerNearRestockTip();
+	const bool bShow = !IsDayLocked() && IsLowStock() && IsLocalPlayerNearRestockTip();
 	if (bShow)
 	{
 		if (!RestockTipComp->GetUserWidgetObject())
@@ -264,6 +313,9 @@ void AFoodSpawner::BeginPlay()
 	{
 		RestockTipComp->SetRelativeLocation(FVector(0.f, 0.f, RestockTipHeight));
 	}
+
+	// 开局立刻按当天决定显隐，不等第一次 Tick，避免第 1 天番茄箱闪现一帧
+	UpdateDayLock();
 
 	// 仅有限模式参与存档；无限(-1)不需要持久化（仓库驱动模式由仓库库存决定，也不走此处）
 	if (RemainingCount < 0)

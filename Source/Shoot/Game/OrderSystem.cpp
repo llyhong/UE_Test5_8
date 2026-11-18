@@ -400,6 +400,11 @@ void AOrderSystem::CollectSuppliedItemIDs(TSet<int32>& OutItemIDs) const
 
 	for (TActorIterator<AFoodSpawner> It(World); It; ++It)
 	{
+		// 还没到开放天数的食材箱（例如第 1 天隐藏的番茄箱）不算来源，仓库模式也一样
+		if (It->IsDayLocked())
+		{
+			continue;
+		}
 		if (bWarehouseDriven || It->CanSpawn())
 		{
 			AddItemSupply(OutItemIDs, It->SpawnItemActorClass);
@@ -637,14 +642,19 @@ FOrderData* AOrderSystem::GetRandomOrder()
 	return &OrderPool.Last();
 }
 
-bool AOrderSystem::GetNextConfigOrder(FOrderData& OutOrder)
+bool AOrderSystem::GetNextConfigOrder(FOrderData& OutOrder, bool* bOutNoneServable)
 {
+	if (bOutNoneServable)
+	{
+		*bOutNoneServable = false;
+	}
 	if (!orderCfg || orderCfg->Orders.Num() == 0)
 	{
 		return false;
 	}
 
 	const int32 NumOrders = orderCfg->Orders.Num();
+	int32 SkippedNotServable = 0;
 
 	// 按 Orders 数组顺序依次发单：一轮最多尝试 NumOrders 次，避免全是空配置时死循环
 	for (int32 Tried = 0; Tried < NumOrders; ++Tried)
@@ -669,13 +679,52 @@ bool AOrderSystem::GetNextConfigOrder(FOrderData& OutOrder)
 			continue;
 		}
 
+		// 今天还发不了的配置单（例如第 1 天轮到第 2 天才开放的番茄汤）直接跳过，取下一项
+		FString Reason;
+		if (!IsOrderServableToday(Config, Reason))
+		{
+			++SkippedNotServable;
+			UE_LOG(LogTemp, Log, TEXT("[OrderSystem] 跳过关卡配置第 %d/%d 单：%s"), ServedIndex + 1, NumOrders, *Reason);
+			continue;
+		}
+
 		OutOrder = Config;
 		UE_LOG(LogTemp, Log, TEXT("[OrderSystem] 按关卡配置出单：第 %d/%d 单"), ServedIndex + 1, NumOrders);
 		return true;
 	}
 
+	if (SkippedNotServable > 0)
+	{
+		// 一整轮的配置单今天都发不了：交给调用方退回随机订单池（池子已按当天条件过滤）
+		if (bOutNoneServable)
+		{
+			*bOutNoneServable = true;
+		}
+		UE_LOG(LogTemp, Warning, TEXT("[OrderSystem] 关卡配置订单今天都发不了（%d 单被过滤），改用随机订单池"), SkippedNotServable);
+		return false;
+	}
+
 	UE_LOG(LogTemp, Warning, TEXT("[OrderSystem] 关卡订单配置（ULevelOrderCfg::Orders）里没有填菜品的订单，请检查 LevelOrderConfigs 指向的资产"));
 	return false;
+}
+
+bool AOrderSystem::IsOrderServableToday(const FOrderData& Order, FString& OutReason) const
+{
+	if (Order.FoodIDs.Num() == 0)
+	{
+		OutReason = TEXT("订单没有菜品");
+		return false;
+	}
+	for (const int32 FoodID : Order.FoodIDs)
+	{
+		if (!IsMenuServable(FoodID, CachedSuppliedItemIDs, OutReason)
+			|| !IsMenuMachinePresent(FoodID, CachedAvailableMachineIDs, OutReason))
+		{
+			OutReason = FString::Printf(TEXT("菜品 %d %s"), FoodID, *OutReason);
+			return false;
+		}
+	}
+	return true;
 }
 
 // ==================== 备料窗口 / 限时野味订单（第 16 节 P0） ====================
@@ -797,6 +846,12 @@ UOrderHandle* AOrderSystem::RequestOrderForGuest(AGuestCharacter* Guest)
 	FOrderData OrderData;
 	bool bWildOrder = false;
 
+	// 跨天后 Tick 还没来得及重建时，先按今天的条件刷新食材 / 机器缓存，下面的过滤才准确
+	if (PoolBuiltDay != Today)
+	{
+		RebuildOrderPool();
+	}
+
 	// 新手引导按天覆盖的前 N 单顺序（ULevelOrderCfg::DayFoodSequences）：
 	// 优先于常规出单逻辑，依次发放；序列发完后当天剩余订单走随机池（该天不再用配置顺序单）
 	bool bTutorialOrder = false;
@@ -808,13 +863,25 @@ UOrderHandle* AOrderSystem::RequestOrderForGuest(AGuestCharacter* Guest)
 			TutorialSeqDay = Today;
 			TutorialSeqCursor = 0;
 		}
-		if (TutorialSeqCursor < DaySeq->FoodIDs.Num())
+		// 序列里今天还发不了的菜（未到 UnlockDay / 缺食材）跳过，避免引导单绕过当天过滤
+		while (TutorialSeqCursor < DaySeq->FoodIDs.Num())
 		{
-			OrderData.FoodIDs = { DaySeq->FoodIDs[TutorialSeqCursor] };
+			FOrderData Candidate;
+			Candidate.FoodIDs = { DaySeq->FoodIDs[TutorialSeqCursor] };
 			++TutorialSeqCursor;
+
+			FString Reason;
+			if (!IsOrderServableToday(Candidate, Reason))
+			{
+				UE_LOG(LogTemp, Log, TEXT("[OrderSystem] 新手引导序列跳过第 %d 单：%s"), TutorialSeqCursor, *Reason);
+				continue;
+			}
+
+			OrderData = MoveTemp(Candidate);
 			bTutorialOrder = true;
 			UE_LOG(LogTemp, Log, TEXT("[OrderSystem] 新手引导顺序出单：第 %d/%d 单（第 %d 天）"),
 				TutorialSeqCursor, DaySeq->FoodIDs.Num(), Today);
+			break;
 		}
 	}
 
@@ -824,23 +891,32 @@ UOrderHandle* AOrderSystem::RequestOrderForGuest(AGuestCharacter* Guest)
 	// （引导序列当天即使序列发完，也直接走随机池，不再用配置顺序单）
 	if (!bTutorialOrder)
 	{
+		bool bUseRandomPool = true;
 		if (bEnableWildOrderInPrepWindow && bPrepWindowActive
 			&& WildOrderDailyLimit > 0 && WildOrdersIssuedToday < GetEffectiveWildOrderDailyLimit()
 			&& TryBuildWildOrder(OrderData, CachedSuppliedItemIDs, CachedAvailableMachineIDs))
 		{
 			bWildOrder = true;
 			WildOrdersIssuedToday++;
+			bUseRandomPool = false;
 		}
 		else if (!DaySeq && bUseConfigOrderSequence && orderCfg && orderCfg->Orders.Num() > 0)
 		{
-			if (!GetNextConfigOrder(OrderData))
+			bool bNoneServable = false;
+			if (GetNextConfigOrder(OrderData, &bNoneServable))
+			{
+				bUseRandomPool = false;
+			}
+			else if (!bNoneServable)
 			{
 				// 配置订单已按顺序发完（bLoopConfigOrders=false）：不再随机塞单，保持关卡节奏可控
 				UE_LOG(LogTemp, Warning, TEXT("[OrderSystem] 关卡订单已发完（不循环），客人 %s 点不到单"), *Guest->GetName());
 				return nullptr;
 			}
+			// bNoneServable：配置单今天都发不了，退回已按当天过滤的随机池
 		}
-		else
+
+		if (bUseRandomPool)
 		{
 			const FOrderData* RandomData = GetRandomOrder();
 			if (!RandomData)

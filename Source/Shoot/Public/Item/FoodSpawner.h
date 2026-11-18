@@ -40,6 +40,15 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Spawn")
 	bool bAllowWildOnlyItems = false;
 
+	/** 从第几个营业日开始出现（UTimeSystem::Day）。<=1 表示一直可用；
+	 *  例如番茄箱设为 2：第 1 天整个箱子隐藏、不可交互，也不算订单系统的食材来源，第 2 天自动出现。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Spawn", meta = (ClampMin = "0"))
+	int32 AvailableFromDay = 0;
+
+	/** 当前营业日是否还没到 AvailableFromDay（为真时箱子隐藏、关闭碰撞、不能生成） */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Spawn")
+	bool IsDayLocked() const;
+
 	/** 是否还能生成：仓库驱动模式下取决于仓库是否有该食材库存；否则原逻辑（无限或剩余>0） */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Spawn")
 	bool CanSpawn() const;
@@ -115,6 +124,12 @@ private:
 
 	/** 显示条件（低库存 + 本地玩家靠近）成立时刷出提示，否则隐藏 */
 	void UpdateRestockTip();
+
+	/** 按 IsDayLocked 切换箱子的显隐与碰撞（只在状态变化时真正改动） */
+	void UpdateDayLock();
+
+	/** 上次应用的天数锁状态：-1 未应用，0 已开放，1 已隐藏 */
+	int8 AppliedDayLockState = -1;
 
 	/** 是否有任意本地玩家在提示显示距离内 */
 	bool IsLocalPlayerNearRestockTip() const;
