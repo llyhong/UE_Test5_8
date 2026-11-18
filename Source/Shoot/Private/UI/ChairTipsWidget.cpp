@@ -311,7 +311,22 @@ AItemActor* UChairTipsWidget::GetPlateOnSeat() const
 
 void UChairTipsWidget::ApplyOrderTipIcon()
 {
-	if (!OrderTipIcon || !WidgetTree)
+	if (!WidgetTree)
+	{
+		return;
+	}
+
+	// 等待点单：统一显示点单图标 T_Icon_Order；
+	// 已接单等待上菜：显示客人所点菜品的成品图标（菜品表 MenuIcon），没配图标时退回点单图标
+	UTexture2D* DesiredIcon = OrderTipIcon.Get();
+	if (GetSeatState() == EChairTipsState::WaitingFood)
+	{
+		if (UTexture2D* DishIcon = GetOrderIcon())
+		{
+			DesiredIcon = DishIcon;
+		}
+	}
+	if (!DesiredIcon)
 	{
 		return;
 	}
@@ -346,8 +361,8 @@ void UChairTipsWidget::ApplyOrderTipIcon()
 		}
 	}
 
-	if (CachedTipIconImage && CachedTipIconImage->GetBrush().GetResourceObject() != OrderTipIcon.Get())
+	if (CachedTipIconImage && CachedTipIconImage->GetBrush().GetResourceObject() != DesiredIcon)
 	{
-		CachedTipIconImage->SetBrushFromTexture(OrderTipIcon, false);
+		CachedTipIconImage->SetBrushFromTexture(DesiredIcon, false);
 	}
 }

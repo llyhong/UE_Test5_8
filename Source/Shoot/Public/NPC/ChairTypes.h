@@ -27,8 +27,8 @@ enum class EChairTipsState : uint8
 UENUM(BlueprintType)
 enum class EChairSeatTipsMode : uint8
 {
-	/** 只在客人等待点单时显示点单提示；点完单（绑定菜单）后即隐藏 */
-	OrderOnly	UMETA(DisplayName = "等待点单时显示"),
+	/** 等待点单时显示点单图标；接单后改显示所点菜品的图标，上菜后隐藏 */
+	OrderOnly	UMETA(DisplayName = "点单 / 等餐时显示"),
 	/** 只要有人（客人 / 空碟 / 菜单）就显示 */
 	Always		UMETA(DisplayName = "有人时常显"),
 	/** 仅玩家走进交互范围时显示（与机器类 TipsWidget 一致） */

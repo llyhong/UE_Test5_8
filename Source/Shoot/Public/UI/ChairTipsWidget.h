@@ -84,7 +84,7 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Chair|Tips")
 	TObjectPtr<AChairSeat> OwnerSeat;
 
-	/** 点单提示统一使用的订单图标（默认 T_Icon_Order）；会覆盖蓝图属性绑定写入的菜品图标 */
+	/** 等待点单时统一使用的点单图标（默认 T_Icon_Order）；接单后改为所点菜品图标（见 ApplyOrderTipIcon） */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Shoot|Chair|Tips")
 	TObjectPtr<UTexture2D> OrderTipIcon;
 
@@ -219,7 +219,7 @@ private:
 	/** 内容有变化才重建缓存并广播 OnMenuContentChanged；没变则什么都不做 */
 	void CheckMenuContentChanged();
 
-	/** 把提示里的图标统一换成 OrderTipIcon（蓝图属性绑定每帧会刷回菜品图标，故每帧校验一次） */
+	/** 按桌况切换提示图标：等待点单 → OrderTipIcon；等待上菜 → 所点菜品图标（蓝图属性绑定每帧可能改写，故每帧校验一次） */
 	void ApplyOrderTipIcon();
 
 	/** 提示里用于显示图标的第一张 Image（首次查找后缓存） */

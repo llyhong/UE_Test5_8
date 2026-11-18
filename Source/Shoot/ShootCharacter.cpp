@@ -1777,7 +1777,8 @@ void AShootCharacter::BuildInteractionOptions(TArray<FInteractOption, TInlineAll
 	}
 
 	// 餐桌：点单 / 上菜 / 收空碟（客人身上的交互已全部并入餐桌）
-	if (OverlappingChairSeat)
+	// 空桌（没有客人、桌上也没有碟子）按 E 没有任何结果：不加入候选，也就不显示 E 交互提示与高亮
+	if (OverlappingChairSeat && (IsValid(OverlappingChairSeat->Occupant) || OverlappingChairSeat->HasPlateOnSeat()))
 	{
 		// 提示文字按此刻能做的事实时变化：空手站过去看到的就是"点单"，而不是笼统的"餐桌"
 		const TCHAR* SeatAction = TEXT("餐桌");

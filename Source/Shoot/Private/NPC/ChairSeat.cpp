@@ -496,9 +496,12 @@ void AChairSeat::UpdateTipsVisibility()
 		return;
 	}
 
-		bool bShow = false;
-		// 客人坐下等玩家来点单时也要给标识，否则玩家不知道有客人要下单
-		const bool bWaitingOrder = GetSeatState() == EChairTipsState::WaitingOrder;
+	bool bShow = false;
+	const EChairTipsState SeatState = GetSeatState();
+	// 客人坐下等玩家来点单时也要给标识，否则玩家不知道有客人要下单
+	const bool bWaitingOrder = SeatState == EChairTipsState::WaitingOrder;
+	// 已接单、等待上菜：桌上显示客人点的菜品图标，提醒玩家这桌要什么
+	const bool bWaitingFood = SeatState == EChairTipsState::WaitingFood && IsValid(Occupant);
 	switch (TipsMode)
 	{
 	case EChairSeatTipsMode::Always:
@@ -511,9 +514,9 @@ void AChairSeat::UpdateTipsVisibility()
 		break;
 	case EChairSeatTipsMode::OrderOnly:
 	default:
-		// 默认：只在客人等待点单时显示点单提示；玩家点完单（已绑定菜单）后立即隐藏，
-		// 待上菜的菜品信息由顶部订单 UI 负责，不再在桌上残留点单图标
-		bShow = bWaitingOrder;
+		// 默认：等待点单时显示点单图标（T_Icon_Order）；接单后换成所点菜品的图标，
+		// 上菜后（用餐中 / 空碟 / 空桌）隐藏。图标切换见 UChairTipsWidget::ApplyOrderTipIcon
+		bShow = bWaitingOrder || bWaitingFood;
 		break;
 	}
 
