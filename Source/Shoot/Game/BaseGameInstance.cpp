@@ -20,6 +20,8 @@
 #include "TimerManager.h"
 #include "NavigationSystem.h"
 #include "UI/RecipeBookWidget.h"
+#include "UI/CharacterSelectWidget.h"
+#include "ShootCharacter.h"
 
 /** 控制台命令：切换空碟玩法开关，方便 A/B 对比两种玩法（运行时输入：Game.ToggleDirtyPlateFlow） */
 static FAutoConsoleCommand CmdToggleDirtyPlateFlow(
@@ -90,6 +92,11 @@ static FAutoConsoleCommand CmdToggleRecipeBook(
 
 void UBaseGameInstance::Init()
 {
+	// 选角表：蓝图未指定时用工程默认表（新增角色只需往表里加行）
+	if (!RoleInfoTable)
+	{
+		RoleInfoTable = LoadObject<UDataTable>(nullptr, TEXT("/Game/_Demo/Data/DT_CharacterRoles.DT_CharacterRoles"));
+	}
 	foodSystem = NewObject<UFoodSystem>(this);
 	foodSystem->InitMenuData(MenueDataTable);
 	foodSystem->InitItemInfoTable(ItemInfoTable);
@@ -145,6 +152,7 @@ void UBaseGameInstance::Init()
 
 	playerInfo = CreateDefaultPlayerInfo();
 	Super::Init();
+
 	UE_LOG(LogTemp, Warning, TEXT("GameInstance Initialized ok"));
 
 }
@@ -159,6 +167,237 @@ FPlayerInfo UBaseGameInstance::CreateDefaultPlayerInfo()
 	return o;
 }
 
+// ==================== 选角（登录 → 选角色 → 进入主关卡） ====================
+
+void UBaseGameInstance::OnWorldChanged(UWorld* OldWorld, UWorld* NewWorld)
+{
+	Super::OnWorldChanged(OldWorld, NewWorld);
+	if (!NewWorld)
+	{
+		return;
+	}
+	// 只处理运行中的世界（PIE / 打包运行），编辑器里切换地图不弹选角
+	if ((NewWorld->WorldType != EWorldType::PIE && NewWorld->WorldType != EWorldType::Game)
+		|| NewWorld->GetGameInstance() != this)
+	{
+		return;
+	}
+
+	const FString MapName = UWorld::RemovePIEPrefix(NewWorld->GetMapName());
+
+	// 回到登录 / 菜单地图时重置本会话标记：下次进主关卡重新走选角
+	if (MapName == TEXT("L_StartMenu") || MapName == TEXT("LoginMap") || MapName == TEXT("BigMap"))
+	{
+		bRoleSelectedThisSession = false;
+		if (CharacterSelectWidget)
+		{
+			CharacterSelectWidget->RemoveFromParent();
+			CharacterSelectWidget = nullptr;
+		}
+		return;
+	}
+
+	// 进入主关卡时若本会话还没选过角色，弹出选角界面（等玩家控制器就绪）
+	if (bEnableCharacterSelect && !bRoleSelectedThisSession && CharacterSelectMapName.ToString() == MapName)
+	{
+		CharacterSelectAttempts = 0;
+		NewWorld->GetTimerManager().SetTimer(
+			CharacterSelectTimerHandle, this, &UBaseGameInstance::TryShowCharacterSelect, 0.25f, false);
+	}
+}
+
+void UBaseGameInstance::TryShowCharacterSelect()
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	// 关卡刚加载时玩家控制器可能还没就绪：每 0.25 秒重试，最多约 10 秒
+	if (!UGameplayStatics::GetPlayerController(World, 0))
+	{
+		if (++CharacterSelectAttempts < 40)
+		{
+			World->GetTimerManager().SetTimer(
+				CharacterSelectTimerHandle, this, &UBaseGameInstance::TryShowCharacterSelect, 0.25f, false);
+		}
+		return;
+	}
+
+	ShowCharacterSelect();
+}
+
+bool UBaseGameInstance::FindRoleInfo(int32 RoleID, FRoleInfo& OutInfo) const
+{
+	if (!RoleInfoTable || RoleID == 0)
+	{
+		return false;
+	}
+
+	for (const TPair<FName, uint8*>& Pair : RoleInfoTable->GetRowMap())
+	{
+		const FRoleInfo* Row = reinterpret_cast<const FRoleInfo*>(Pair.Value);
+		if (Row && Row->ModelID == RoleID)
+		{
+			OutInfo = *Row;
+			return true;
+		}
+	}
+	return false;
+}
+
+TArray<int32> UBaseGameInstance::GetSelectableRoleIDs() const
+{
+	TArray<int32> IDs;
+	if (!RoleInfoTable)
+	{
+		return IDs;
+	}
+
+	for (const TPair<FName, uint8*>& Pair : RoleInfoTable->GetRowMap())
+	{
+		const FRoleInfo* Row = reinterpret_cast<const FRoleInfo*>(Pair.Value);
+		if (Row && Row->bSelectable && Row->ModelID != 0)
+		{
+			IDs.AddUnique(Row->ModelID);
+		}
+	}
+	IDs.Sort();
+	return IDs;
+}
+
+int32 UBaseGameInstance::GetNextSelectableRoleID(int32 AfterRoleID) const
+{
+	const TArray<int32> IDs = GetSelectableRoleIDs();
+	if (IDs.Num() == 0)
+	{
+		return AfterRoleID;
+	}
+
+	const int32 Index = IDs.IndexOfByKey(AfterRoleID);
+	return IDs.IsValidIndex(Index) ? IDs[(Index + 1) % IDs.Num()] : IDs[0];
+}
+
+void UBaseGameInstance::ShowCharacterSelect()
+{
+	// 跨关卡切换后旧控件可能已不在视口（GameInstance 仍持有引用），此时允许重建
+	if (CharacterSelectWidget && !CharacterSelectWidget->IsInViewport())
+	{
+		CharacterSelectWidget->RemoveFromParent();
+		CharacterSelectWidget = nullptr;
+	}
+	if (CharacterSelectWidget || !bEnableCharacterSelect)
+	{
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	if (GetSelectableRoleIDs().Num() == 0)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[Role] DT_CharacterRoles 中没有可配置角色（bSelectable=true），跳过选角"));
+		bRoleSelectedThisSession = true;
+		return;
+	}
+
+	APlayerController* PC = UGameplayStatics::GetPlayerController(World, 0);
+	if (!PC || !PC->IsLocalController())
+	{
+		return;
+	}
+
+	UCharacterSelectWidget* Widget = CreateWidget<UCharacterSelectWidget>(PC, UCharacterSelectWidget::StaticClass());
+	if (!Widget)
+	{
+		return;
+	}
+
+	Widget->SetInitialRole(SelectedRoleID);
+	Widget->AddToViewport(200);
+	CharacterSelectWidget = Widget;
+
+	FInputModeUIOnly InputMode;
+	InputMode.SetWidgetToFocus(Widget->TakeWidget());
+	InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+	PC->SetInputMode(InputMode);
+	PC->bShowMouseCursor = true;
+}
+
+void UBaseGameInstance::ConfirmRoleSelection(int32 RoleID)
+{
+	FRoleInfo Info;
+	if (!FindRoleInfo(RoleID, Info))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[Role] 找不到角色 ModelID=%d，忽略本次选择"), RoleID);
+		return;
+	}
+
+	if (!curSaveGameData)
+	{
+		LoadGameData();
+	}
+	if (!curSaveGameData)
+	{
+		curSaveGameData = Cast<UMySaveGame>(UGameplayStatics::CreateSaveGameObject(UMySaveGame::StaticClass()));
+	}
+
+	SelectedRoleID = RoleID;
+	playerInfo.ModelID = RoleID;
+	bRoleSelectedThisSession = true;
+
+	if (curSaveGameData)
+	{
+		curSaveGameData->SelectedRoleID = RoleID;
+		SaveGameData();
+	}
+
+	ApplyRoleToLocalPlayers();
+
+	if (CharacterSelectWidget)
+	{
+		CharacterSelectWidget->RemoveFromParent();
+		CharacterSelectWidget = nullptr;
+	}
+
+	if (UWorld* World = GetWorld())
+	{
+		if (APlayerController* PC = UGameplayStatics::GetPlayerController(World, 0))
+		{
+			PC->SetInputMode(FInputModeGameOnly());
+			PC->bShowMouseCursor = false;
+		}
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("[Role] 已选择角色：%s（ModelID=%d）"),
+		*Info.DisplayName.ToString(), RoleID);
+}
+
+void UBaseGameInstance::ApplyRoleToLocalPlayers()
+{
+	UWorld* World = GetWorld();
+	if (!World || SelectedRoleID == 0)
+	{
+		return;
+	}
+
+	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+	{
+		APlayerController* PC = It->Get();
+		if (PC && PC->IsLocalController())
+		{
+			if (AShootCharacter* Char = Cast<AShootCharacter>(PC->GetPawn()))
+			{
+				Char->ApplyRoleAppearance(SelectedRoleID);
+			}
+		}
+	}
+}
+
 void UBaseGameInstance::NewGameData()
 {
 	// 创建或覆盖存档对象
@@ -168,6 +407,7 @@ void UBaseGameInstance::NewGameData()
 	SaveData->UnlockedIngredients.Empty();
 	SaveData->UnlockedRecipes.Empty();
 	SaveData->DiscoveredItemKeys.Empty();
+	SaveData->SelectedRoleID = SelectedRoleID;
 	curSaveGameData = SaveData;
 	UnlockedIngredientIDs.Reset();
 	UnlockedRecipeIDs.Reset();
@@ -266,6 +506,13 @@ bool UBaseGameInstance::LoadGameData() {
 		for (const FName& Key : curSaveGameData->DiscoveredItemKeys)
 		{
 			DiscoveredItemKeys.AddUnique(Key);
+		}
+
+		// 同步上次选择的角色（0 表示还没选过，进关卡时会弹选角界面）
+		if (curSaveGameData->SelectedRoleID > 0)
+		{
+			SelectedRoleID = curSaveGameData->SelectedRoleID;
+			playerInfo.ModelID = SelectedRoleID;
 		}
 	}
 	RestoreCurrentWorldWildPlants();

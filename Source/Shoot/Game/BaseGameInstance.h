@@ -16,12 +16,14 @@
 #include "MySaveGame.h"
 #include "Data/DiscoveryInfo.h"
 #include "Data/ItemActorInfo.h"
+#include "Data/RoleInfo.h"
 #include "AI/ShootAIPartnerController.h"
 #include "BaseGameInstance.generated.h"
 
 class AItemActor;
 class AStorageWarehouse;
 class APlayerController;
+class UCharacterSelectWidget;
 
 /**
  * 
@@ -55,6 +57,57 @@ public:
 	bool LoadGameData();
 	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Gameplay")
 	TObjectPtr<UMySaveGame> curSaveGameData;
+
+	// ========== 选角（登录 → 选角色 → 进入主关卡） ==========
+	/** 角色配置表（RowStruct = FRoleInfo）。未配置时自动加载 /Game/_Demo/Data/DT_CharacterRoles。
+	 *  新增可选角色 = 往表里加一行，无需改界面代码。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Role",
+		meta = (RequiredAssetDataTags = "RowStructure=/Script/Shoot.RoleInfo"))
+	TObjectPtr<UDataTable> RoleInfoTable = nullptr;
+
+	/** 进入哪个地图时弹出选角界面（默认主关卡 Kitchen_New） */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Role")
+	FName CharacterSelectMapName = TEXT("Kitchen_New");
+
+	/** 是否启用选角流程（关闭后直接沿用存档/默认外观进关卡） */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Role")
+	bool bEnableCharacterSelect = true;
+
+	/** 当前选择的角色（DT_CharacterRoles 的 ModelID）；0 表示尚未选择 */
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Role")
+	int32 SelectedRoleID = 0;
+
+	/** 本会话是否已经选过角色（加载菜单地图时重置，用于避免在关卡间往返时反复弹窗） */
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Role")
+	bool bRoleSelectedThisSession = false;
+
+	/** 按 ModelID 查角色配置；找不到返回 false */
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Role")
+	bool FindRoleInfo(int32 RoleID, FRoleInfo& OutInfo) const;
+
+	/** DT_CharacterRoles 中所有可选角色的 ModelID（按 ModelID 升序） */
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Role")
+	TArray<int32> GetSelectableRoleIDs() const;
+
+	/** 取 AfterRoleID 之后的下一可选角色（AI 搭档用来避免和玩家撞外形）；没有则回退第一个 */
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Role")
+	int32 GetNextSelectableRoleID(int32 AfterRoleID) const;
+
+	/** 打开选角界面（为本地玩家 0 创建；已打开时忽略） */
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Role")
+	void ShowCharacterSelect();
+
+	/** 确认角色：写入存档 + 应用外观到场上所有本地玩家 + 关闭界面并恢复输入 */
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Role")
+	void ConfirmRoleSelection(int32 RoleID);
+
+	/** 把当前选中角色的外观应用到所有本地玩家的 Pawn（选角确认 / 手动刷新用） */
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Role")
+	void ApplyRoleToLocalPlayers();
+
+	/** 当前打开中的选角界面（无则 nullptr） */
+	UPROPERTY(Transient, BlueprintReadOnly, Category = "Shoot|Role")
+	TObjectPtr<UCharacterSelectWidget> CharacterSelectWidget;
 
 	/** 本地联机（分屏）：确保本地玩家数达到 DesiredCount。
 	 *  新增玩家立即获得 pawn（按 PlayerStart 顺序轮流分配出生点，避免叠在一起）。
@@ -306,6 +359,14 @@ private:
 	bool bWildHarvestSavePending = false;
 	void RefreshWildPlantRegrowSnapshots();
 	void RestoreCurrentWorldWildPlants();
+
+	// ========== 选角（等待本地玩家控制器就绪后再弹界面） ==========
+	/** 世界切换回调（PIE 复制世界不会触发 PostLoadMapWithWorld，须走此入口）：
+	 *  进入主关卡时弹出选角；回到登录 / 菜单地图时重置本会话标记 */
+	virtual void OnWorldChanged(UWorld* OldWorld, UWorld* NewWorld) override;
+	void TryShowCharacterSelect();
+	FTimerHandle CharacterSelectTimerHandle;
+	int32 CharacterSelectAttempts = 0;
 
 	bool IsMultiPlayerState = false;
 	

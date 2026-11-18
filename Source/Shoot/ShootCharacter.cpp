@@ -58,6 +58,7 @@
 #include "NiagaraComponent.h"
 #include "NiagaraFunctionLibrary.h"
 #include "NiagaraSystem.h"
+#include "TimerManager.h"
 #include "DrawDebugHelpers.h"
 #include "EngineUtils.h"
 
@@ -409,6 +410,49 @@ bool AShootCharacter::IsSpawner()
  	RetargetMesh->SetupAttachment(GetMesh());
 
  
+}
+
+void AShootCharacter::BeginPlay()
+{
+	Super::BeginPlay();
+
+	// 下一帧再应用角色外观：此时 PossessedBy 已完成，能区分玩家（用所选角色）与 AI 搭档（避开同款）
+	GetWorldTimerManager().SetTimerForNextTick(FTimerDelegate::CreateWeakLambda(this, [this]()
+	{
+		UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetGameInstance());
+		if (!GI)
+		{
+			return;
+		}
+		const int32 RoleID = IsPlayerControlled()
+			? GI->SelectedRoleID
+			: GI->GetNextSelectableRoleID(GI->SelectedRoleID);
+		ApplyRoleAppearance(RoleID);
+	}));
+}
+
+void AShootCharacter::ApplyRoleAppearance(int32 RoleID)
+{
+	UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetGameInstance());
+	if (!GI || !RetargetMesh || RoleID == 0)
+	{
+		return;
+	}
+
+	FRoleInfo Info;
+	if (!GI->FindRoleInfo(RoleID, Info))
+	{
+		return;
+	}
+
+	if (Info.SkeletalMesh)
+	{
+		RetargetMesh->SetSkeletalMesh(Info.SkeletalMesh);
+	}
+	if (Info.AnimClass)
+	{
+		RetargetMesh->SetAnimInstanceClass(Info.AnimClass);
+	}
 }
 
 void AShootCharacter::SetOverlappingItem(AItemActor* Item)

@@ -805,6 +805,9 @@ protected:
 	/** Initialize input action bindings */
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
 
+	/** 应用当前选角结果（角色外观由 DT_CharacterRoles 配置驱动） */
+	virtual void BeginPlay() override;
+
 protected:
 
 	/** Called for movement input */
@@ -1104,6 +1107,10 @@ public:
 	void OnThrowSucessEvent();
 
 public:
+
+	/** 按 DT_CharacterRoles 里 ModelID 对应的配置切换外观（RetargetMesh 的骨骼网格 + 动画蓝图） */
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Role")
+	void ApplyRoleAppearance(int32 RoleID);
 
 	UPROPERTY(EditAnywhere,BlueprintReadWrite,Category = "Shoot|Character")
 	TObjectPtr<USkeletalMeshComponent> RetargetMesh;

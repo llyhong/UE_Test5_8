@@ -25,6 +25,26 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Data")
 	FString Title;
 
+	/** 角色显示名（优先于 Title；为空时界面回退到 Title） */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Data")
+	FText DisplayName;
+
+	/** 角色介绍（选角界面显示） */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Data")
+	FText Description;
+
+	/** 性格 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Data")
+	FText Personality;
+
+	/** 喜好（可填多条，界面用「、」拼接显示） */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Data")
+	TArray<FText> Likes;
+
+	/** 是否出现在选角界面（占位 / 旧数据行可关掉） */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Data")
+	bool bSelectable = true;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Data")
 	TObjectPtr<USkeletalMesh> SkeletalMesh;
 

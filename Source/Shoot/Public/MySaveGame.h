@@ -61,6 +61,10 @@ class SHOOT_API UMySaveGame : public USaveGame
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Shoot|Discovery")
 	TArray<FName> DiscoveredItemKeys;
 
+	/** 玩家选择的角色（DT_CharacterRoles 的 ModelID）；0 表示尚未选择 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Shoot|Role")
+	int32 SelectedRoleID = 0;
+
 	// —— 赛季（USeasonSystem）持久化字段：48 天三幕 + 幕检查点 ——
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Shoot|Season")
 	int32 SeasonDay = 1;
