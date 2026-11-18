@@ -511,8 +511,9 @@ void AChairSeat::UpdateTipsVisibility()
 		break;
 	case EChairSeatTipsMode::OrderOnly:
 	default:
-		// 默认：绑定了菜单（等待上菜）或客人等待点单时显示
-		bShow = HasOrder() || bWaitingOrder;
+		// 默认：只在客人等待点单时显示点单提示；玩家点完单（已绑定菜单）后立即隐藏，
+		// 待上菜的菜品信息由顶部订单 UI 负责，不再在桌上残留点单图标
+		bShow = bWaitingOrder;
 		break;
 	}
 

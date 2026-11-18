@@ -202,7 +202,7 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Chair|Tips")
 	TObjectPtr<UWidgetComponent> TipsWidgetComp;
 
-	/** 提示控件的显示时机：默认只在绑定了菜单（等待上菜）时显示 */
+	/** 提示控件的显示时机：默认只在客人等待点单时显示，点完单即隐藏 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Chair|Tips")
 	EChairSeatTipsMode TipsMode = EChairSeatTipsMode::OrderOnly;
 
