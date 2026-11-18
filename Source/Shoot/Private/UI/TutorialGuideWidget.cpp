@@ -59,7 +59,7 @@ TSharedRef<SWidget> UTutorialGuideWidget::RebuildWidget()
 
 	ChecklistBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("ChecklistBorder"));
 	ChecklistBorder->SetBrushColor(FLinearColor(0.02f, 0.02f, 0.02f, 0.55f));
-	ChecklistBorder->SetPadding(FMargin(16.f, 12.f));
+	ChecklistBorder->SetPadding(FMargin(22.f, 16.f));
 	if (UCanvasPanelSlot* BorderSlot = Root->AddChildToCanvas(ChecklistBorder))
 	{
 		// 任务清单贴右侧竖直居中：右缘留 40px 安全边距，视野中心留给玩法与箭头
@@ -73,12 +73,15 @@ TSharedRef<SWidget> UTutorialGuideWidget::RebuildWidget()
 	ChecklistBorder->SetContent(Column);
 
 	TitleText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("TitleText"));
-	TitleText->SetFont(FCoreStyle::GetDefaultFontStyle("Bold", 18));
+	TitleText->SetFont(FCoreStyle::GetDefaultFontStyle("Bold", 24));
 	TitleText->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 0.82f, 0.3f, 1.f)));
 	Column->AddChildToVerticalBox(TitleText);
 
 	TaskColumn = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("TaskColumn"));
-	Column->AddChildToVerticalBox(TaskColumn);
+	if (UVerticalBoxSlot* TaskColumnSlot = Column->AddChildToVerticalBox(TaskColumn))
+	{
+		TaskColumnSlot->SetPadding(FMargin(0.f, 8.f, 0.f, 0.f));
+	}
 
 	ArrowImage = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), TEXT("ArrowImage"));
 	FVector2D ArrowSize(96.f, 96.f);
@@ -126,11 +129,14 @@ void UTutorialGuideWidget::RebuildChecklist()
 		if (!TaskLines.IsValidIndex(Index))
 		{
 			UTextBlock* Line = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
-			Line->SetFont(FCoreStyle::GetDefaultFontStyle("Regular", 15));
+			Line->SetFont(FCoreStyle::GetDefaultFontStyle("Regular", 19));
 			Line->SetColorAndOpacity(FSlateColor(FLinearColor(0.95f, 0.95f, 0.9f, 1.f)));
 			Line->SetShadowOffset(FVector2D(1.f, 1.f));
 			Line->SetShadowColorAndOpacity(FLinearColor(0.f, 0.f, 0.f, 0.8f));
-			TaskColumn->AddChildToVerticalBox(Line);
+			if (UVerticalBoxSlot* LineSlot = TaskColumn->AddChildToVerticalBox(Line))
+			{
+				LineSlot->SetPadding(FMargin(0.f, 3.f, 0.f, 0.f));
+			}
 			TaskLines.Add(Line);
 		}
 		TaskLines[Index]->SetText(FText::FromString(Lines[Index]));

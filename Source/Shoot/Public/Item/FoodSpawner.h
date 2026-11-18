@@ -6,6 +6,8 @@
 #include "Item/ItemActor.h"
 #include "FoodSpawner.generated.h"
 
+class UWidgetComponent;
+
 /**
  * 生成食物的箱子：从 AItemActor 中抽取出来的独立类（原 EIT_Spawn 类型）。
  * 玩家拾取（按 E）此箱子时，会依据 SpawnItemActorClass 生成一个食材/食物到手上。
@@ -18,6 +20,10 @@ class SHOOT_API AFoodSpawner : public AItemActor
 	GENERATED_BODY()
 
 public:
+	AFoodSpawner();
+
+	virtual void Tick(float DeltaSeconds) override;
+
 	/**
 	 * 箱内剩余可生成数量：
 	 *  -1 表示无限生成（默认，保持原行为）；
@@ -46,6 +52,28 @@ public:
 	 *  由仓库在玩家背包入库后调用，让箱子里的食材和仓库库存对应上。 */
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Spawn")
 	void AddStock(int32 Quantity);
+
+	// ==================== 低库存补货提示 ====================
+
+	/** 补货提示控件：挂在箱子上方，库存低于阈值且玩家靠近时显示“需要到野外补货” */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Spawn|RestockTip")
+	TObjectPtr<UWidgetComponent> RestockTipComp;
+
+	/** 提示显示距离（cm）：任意本地玩家进入该距离才显示；<=0 表示不限制距离 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Spawn|RestockTip", meta = (ClampMin = "0.0"))
+	float RestockTipHideDistance = 600.f;
+
+	/** 提示相对箱子的高度（cm）：按箱子大小微调到模型上方 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Spawn|RestockTip")
+	float RestockTipHeight = 130.f;
+
+	/** 当前有效库存：仓库联动模式取仓库库存，否则取 RemainingCount（-1 为无限） */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Spawn|RestockTip")
+	int32 GetEffectiveStock() const;
+
+	/** 是否低于低库存阈值（UBaseGameInstance::SpawnerLowStockThreshold，默认 3；无限箱永远不低） */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Spawn|RestockTip")
+	bool IsLowStock() const;
 
 	/** 关卡加载时从存档恢复剩余数量（首次则写入初始默认值） */
 	virtual void BeginPlay() override;
@@ -81,6 +109,24 @@ public:
 private:
 	/** 拼出存档 Key 文本：SpawnerKeyOverride 优先，否则「关卡名|Actor 名」 */
 	FString BuildSaveKeyText() const;
+
+	/** 低库存阈值（取 GameInstance 配置，缺省 3） */
+	int32 GetLowStockThreshold() const;
+
+	/** 显示条件（低库存 + 本地玩家靠近）成立时刷出提示，否则隐藏 */
+	void UpdateRestockTip();
+
+	/** 是否有任意本地玩家在提示显示距离内 */
+	bool IsLocalPlayerNearRestockTip() const;
+
+	/** 提示标题：食材名 + 当前库存/阈值 */
+	FText GetRestockTipTitle() const;
+
+	/** 上次写入提示文本的签名（食材名 + 库存），避免每次检查都刷文本 */
+	int32 LastRestockTipSignature = INDEX_NONE;
+
+	/** 两次检查的累计时间（0.2 秒检查一次即可） */
+	float RestockTipAccum = 0.f;
 
 	/** 是否已经计算过 SpawnerGuid */
 	bool bSpawnerGuidResolved = false;

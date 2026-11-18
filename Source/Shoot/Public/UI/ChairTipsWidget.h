@@ -10,6 +10,7 @@
 
 class AChairSeat;
 class AItemActor;
+class UImage;
 class UOrderHandle;
 
 /** 菜单条目：同一道菜按数量合并，方便蓝图直接铺列表（如「番茄炒蛋 x2」） */
@@ -77,9 +78,15 @@ class SHOOT_API UChairTipsWidget : public UUserWidget
 	GENERATED_BODY()
 
 public:
+	UChairTipsWidget(const FObjectInitializer& ObjectInitializer);
+
 	/** 拥有本控件的餐桌（由 AChairSeat 在刷新时主动赋值）；蓝图可直接取用，也可自行 Cast */
 	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Chair|Tips")
 	TObjectPtr<AChairSeat> OwnerSeat;
+
+	/** 点单提示统一使用的订单图标（默认 T_Icon_Order）；会覆盖蓝图属性绑定写入的菜品图标 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Shoot|Chair|Tips")
+	TObjectPtr<UTexture2D> OrderTipIcon;
 
 	/** C++ 把 OwnerSeat 赋值完成后调用一次：蓝图可在此安全地初始化（Construct 时 OwnerSeat 还是 null） */
 	UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|Chair|Tips")
@@ -211,4 +218,11 @@ private:
 
 	/** 内容有变化才重建缓存并广播 OnMenuContentChanged；没变则什么都不做 */
 	void CheckMenuContentChanged();
+
+	/** 把提示里的图标统一换成 OrderTipIcon（蓝图属性绑定每帧会刷回菜品图标，故每帧校验一次） */
+	void ApplyOrderTipIcon();
+
+	/** 提示里用于显示图标的第一张 Image（首次查找后缓存） */
+	UPROPERTY()
+	TObjectPtr<UImage> CachedTipIconImage = nullptr;
 };

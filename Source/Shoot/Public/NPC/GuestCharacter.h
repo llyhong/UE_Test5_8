@@ -12,7 +12,6 @@ class AChairSeat;
 class AGuestManager;
 class UOrderHandle;
 class UWidgetComponent;
-class UGuestStatusWidget;
 class UTexture2D;
 class AShootCharacter;
 class AItemActor;
@@ -37,8 +36,7 @@ enum class EGuestType : uint8
 	Special UMETA(DisplayName = "特殊客人"),
 };
 
-/** 头顶状态变化广播：传出状态 + 是否已吃饱（离场时区分“满意离开”与“等不及走了”），
- *  固定台词 / 颜色 / 贴图由监听的 GuestStatusWidget 从配置表按状态随机抽取。 */
+/** 状态变化广播：传出状态 + 是否已吃饱（离场时区分“满意离开”与“等不及走了”） */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FGuestStatusUpdatedSignature,
 	EGuestState, State, bool, bSatisfied);
 
@@ -163,18 +161,10 @@ public:
 	/** 离场兜底计时器：走向离场点若导航不可达，超时强制销毁，避免客人永久残留 */
 	FTimerHandle LeaveTimeoutTimerHandle;
 
-	/** 头顶状态气泡组件（屏幕空间，始终面向相机）。仅在“需要点餐”（WaitingOrder）与“等餐即将超时”时显示，其余状态隐藏 */
+	/** 头顶状态气泡组件：客人气泡已停用（显隐逻辑移除，组件始终保持隐藏）。
+	 *  组件保留是为了兼容派生蓝图里已经存在的组件模板引用。 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Guest|Status")
 	TObjectPtr<UWidgetComponent> StatusWidgetComp;
-
-	/** 等餐时订单剩余时间不足该值（秒）才额外显示头顶气泡，提醒玩家快要超时 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Guest|Status", meta = (ClampMin = "0.0"))
-	float StatusWidgetRemainSeconds = 10.f;
-
-	/** 头顶气泡（TipsWidget）隐藏距离：玩家（ShootCharacter）离本客人超过该距离时隐藏气泡；<=0 表示不限制距离。蓝图可配置。
-	 *  默认覆盖整个就餐区：玩家在煮饭区（灶台）也能看到远处椅子的点单提示。 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Guest|Status", meta = (ClampMin = "0.0"))
-	float StatusWidgetHideDistance = 2500.f;
 
 	/** 是否已用餐：离场时据此区分“吃饱了”与“等不及走了”的台词 */
 	bool bHasEaten = false;
@@ -201,22 +191,7 @@ public:
 	/** 每帧推进慌乱抖动；与坐姿 Tick 开关解耦，走路时慌乱也能表现 */
 	void UpdatePanicVisuals(float DeltaSeconds);
 
-	/** 状态变化时刷新头顶气泡显隐，并广播 OnGuestStatusUpdated（传出状态 + 是否已吃饱），由 GuestStatusWidget 从配置表随机抽取显示 */
-	void UpdateStatusWidget(EGuestState NewState);
-
-	/** 按当前状态（需要点餐 / 等餐快超时）刷新头顶气泡显隐；显示时顺带把 OwnerCharacter 交给控件 */
-	void RefreshStatusWidgetVisibility();
-
-	/** 当前是否应该显示头顶气泡：需要点餐（WaitingOrder）常显；等餐（WaitingFood）仅在订单剩余时间不足阈值时显示 */
-	bool ShouldShowStatusWidget() const;
-
-	/** 玩家（ShootCharacter）是否在气泡显示距离内：超出 StatusWidgetHideDistance 返回 false（<=0 视为不限制） */
-	bool IsPlayerWithinStatusWidgetDistance() const;
-
-	/** 当前订单剩余等待时间（秒）；尚未点单或订单数据异常时返回 -1 */
-	float GetOrderRemainSeconds() const;
-
-	/** 头顶状态变化广播（GuestStatusWidget 蓝图在 Construct 时绑定监听，从配置表按状态抽台词/颜色/贴图显示） */
+	/** 状态变化广播（传出状态 + 是否已吃饱）：保留给已有蓝图监听，客人头顶气泡已停用 */
 	UPROPERTY(BlueprintAssignable, Category = "Shoot|Guest|Status")
 	FGuestStatusUpdatedSignature OnGuestStatusUpdated;
 
@@ -312,6 +287,10 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+
+	/** 组件 BeginPlay 会自动 InitWidget 建出气泡控件；这里在它之前清掉蓝图模板配置的控件类，
+	 *  确保状态气泡在运行时完全不创建（头顶气泡已停用） */
+	virtual void PostInitializeComponents() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 	/** 状态变化通知蓝图（UI / 特效） */

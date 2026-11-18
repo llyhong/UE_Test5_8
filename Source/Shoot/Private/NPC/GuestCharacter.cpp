@@ -10,7 +10,6 @@
 #include "Components/CapsuleComponent.h"
 #include "Components/WidgetComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
-#include "UI/GuestStatusWidget.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
@@ -72,20 +71,28 @@ AGuestCharacter::AGuestCharacter()
 		Capsule->SetCollisionResponseToChannel(ECC_GameTraceChannel3, ECR_Overlap);
 	}
 
-	// 头顶状态气泡：屏幕空间、始终朝向相机，挂在头顶上方，不参与碰撞
+	// 头顶状态气泡已停用：组件保留（派生蓝图里仍有该组件模板），但不再创建控件、始终隐藏
 	StatusWidgetComp = CreateDefaultSubobject<UWidgetComponent>(TEXT("StatusWidgetComp"));
 	StatusWidgetComp->SetupAttachment(RootComponent);
 	StatusWidgetComp->SetRelativeLocation(FVector(0.f, 0.f, 120.f));
 	StatusWidgetComp->SetWidgetSpace(EWidgetSpace::Screen);
 	StatusWidgetComp->SetDrawAtDesiredSize(true);
-	StatusWidgetComp->SetWidgetClass(UGuestStatusWidget::StaticClass());
 	StatusWidgetComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	StatusWidgetComp->SetGenerateOverlapEvents(false);
-	// 默认隐藏：只在“需要点餐”或“等餐快超时”时显示（见 RefreshStatusWidgetVisibility）
 	StatusWidgetComp->SetVisibility(false);
+}
 
-	// 头顶状态气泡的台词 / 颜色 / 贴图改由 GuestStatusWidget 持有的配置表（StatusConfigTable）
-	// 按状态随机抽取，C++ 不再硬编码，便于策划在编辑器里维护。
+void AGuestCharacter::PostInitializeComponents()
+{
+	Super::PostInitializeComponents();
+
+	// 头顶状态气泡已停用：蓝图模板里仍配着旧控件类，而组件 BeginPlay 会自动 InitWidget，
+	// 必须在那之前清空，否则运行时仍会建出气泡控件实例（哪怕是隐藏的）
+	if (StatusWidgetComp)
+	{
+		StatusWidgetComp->SetWidgetClass(nullptr);
+		StatusWidgetComp->SetVisibility(false);
+	}
 }
 
 void AGuestCharacter::BeginPlay()
@@ -137,12 +144,6 @@ void AGuestCharacter::SetGuestState(EGuestState NewState)
 	const EGuestState OldState = GuestState;
 	GuestState = NewState;
 
-	// 等餐期间头顶气泡要按订单剩余时间动态出现：该阶段开启 Tick（钉住逻辑在 Tick 内部自行判断）
-	if (NewState == EGuestState::WaitingOrder || NewState == EGuestState::WaitingFood)
-	{
-		SetActorTickEnabled(true);
-	}
-
 	// 已经开始销毁的 Actor 不再向蓝图派发事件：此时蓝图侧持有的引用（UI / 特效 / 其它 Actor）
 	// 很可能已经一起拆掉，ProcessEvent 进 BlueprintImplementableEvent 就是空指针访问（打烊清场踩到过）。
 	if (IsActorBeingDestroyed())
@@ -151,121 +152,9 @@ void AGuestCharacter::SetGuestState(EGuestState NewState)
 	}
 
 	OnGuestStateChanged(NewState);
-	UpdateStatusWidget(NewState);
-}
-
-void AGuestCharacter::UpdateStatusWidget(EGuestState NewState)
-{
-	// 按状态（含“等餐快超时”）决定头顶气泡显隐，并把 OwnerCharacter 交给控件；
-	// 台词 / 颜色 / 贴图由 GuestStatusWidget 从配置表按状态随机抽取并显示。
-	RefreshStatusWidgetVisibility();
 
 	const bool bSatisfied = (NewState == EGuestState::Leaving && bHasEaten);
 	OnGuestStatusUpdated.Broadcast(NewState, bSatisfied);
-}
-
-bool AGuestCharacter::ShouldShowStatusWidget() const
-{
-	// 需要点餐：客人已落座等待玩家按 E 接单，一直显示提示
-	if (GuestState == EGuestState::WaitingOrder)
-	{
-		return true;
-	}
-
-	// 等餐中：订单剩余时间不足阈值时才显示，提醒玩家快要超时
-	if (GuestState == EGuestState::WaitingFood)
-	{
-		const float RemainSeconds = GetOrderRemainSeconds();
-		return RemainSeconds >= 0.f && RemainSeconds <= StatusWidgetRemainSeconds;
-	}
-
-	return false;
-}
-
-float AGuestCharacter::GetOrderRemainSeconds() const
-{
-	// 尚未点单（或订单数据异常）：无从判断，返回 -1
-	if (!CurrentOrder)
-	{
-		return -1.f;
-	}
-
-	const float MaxWait = CurrentOrder->GetOrderMaxWaitTime();
-	if (MaxWait <= 0.f)
-	{
-		return -1.f;
-	}
-
-	return FMath::Max(0.f, MaxWait - CurrentOrder->waitTime);
-}
-
-bool AGuestCharacter::IsPlayerWithinStatusWidgetDistance() const
-{
-	// <=0 视为不限制距离，任何距离都允许显示
-	if (StatusWidgetHideDistance <= 0.f)
-	{
-		return true;
-	}
-
-	// 取玩家 Pawn（ShootCharacter），取其位置与本客人比较距离
-	if (APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(GetWorld(), 0))
-	{
-		const float DistSq = FVector::DistSquared(GetActorLocation(), PlayerPawn->GetActorLocation());
-		return DistSq <= FMath::Square(StatusWidgetHideDistance);
-	}
-
-	// 拿不到玩家时不强制隐藏，避免误隐藏
-	return true;
-}
-
-void AGuestCharacter::RefreshStatusWidgetVisibility()
-{
-	if (!StatusWidgetComp)
-	{
-		return;
-	}
-
-	// 是否满足显示条件（状态）且玩家在气泡显示距离内；超出距离则隐藏
-	const bool bShow = ShouldShowStatusWidget() && IsPlayerWithinStatusWidgetDistance();
-	bool bWidgetJustCreated = false;
-	if (bShow)
-	{
-		// 组件隐藏时不会创建控件实例，显示前先确保建出来（InitWidget 内部幂等）
-		if (!StatusWidgetComp->GetUserWidgetObject())
-		{
-			StatusWidgetComp->InitWidget();
-			bWidgetJustCreated = true;
-		}
-
-		// 主动把自身赋给头顶气泡的 OwnerCharacter（WidgetComponent 创建的世界空间控件
-		// 无法从控件内部反向拿到所属 Actor，故由这里补设；每次刷新都设，覆盖控件晚创建的情况）。
-		bool bNeedStatusBroadcast = bWidgetJustCreated;
-		if (UGuestStatusWidget* GSW = Cast<UGuestStatusWidget>(StatusWidgetComp->GetUserWidgetObject()))
-		{
-			const bool bWasNull = (GSW->OwnerCharacter == nullptr);
-			GSW->OwnerCharacter = this;
-			// 仅在第一次赋值时通知蓝图去绑定委托，避免重复绑出多个处理函数。
-			if (bWasNull)
-			{
-				GSW->OnOwnerCharacterSet();
-				bNeedStatusBroadcast = true;
-			}
-		}
-
-		if (bNeedStatusBroadcast)
-		{
-			// 气泡控件可能在玩家太远时就已创建、但没绑定监听：此前的状态广播没有接收者，
-			// 控件会空着（订单图标缺失），直到下一次随机换台词才被刷新。
-			// 这里补发一次当前状态，让蓝图在首次绑定后立刻抽台词 / 图标 / 颜色。
-			const bool bSatisfied = (GuestState == EGuestState::Leaving && bHasEaten);
-			OnGuestStatusUpdated.Broadcast(GuestState, bSatisfied);
-		}
-	}
-
-	if (StatusWidgetComp->IsVisible() != bShow)
-	{
-		StatusWidgetComp->SetVisibility(bShow);
-	}
 }
 
 AChairSeat* AGuestCharacter::FindRandomFreeSeat() const
@@ -584,9 +473,6 @@ void AGuestCharacter::SetSeatedPinned(bool bPinned)
 void AGuestCharacter::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
-
-	// 等餐剩余时间在不停减少：每帧按状态 + 剩余时间刷新头顶气泡（内部仅在显隐变化时才改组件）
-	RefreshStatusWidgetVisibility();
 
 	UpdatePanicVisuals(DeltaSeconds);
 

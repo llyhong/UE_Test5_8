@@ -4,7 +4,10 @@
 #include "Game/BaseGameInstance.h"
 #include "Machine/StorageWarehouse.h"
 #include "Data/ItemActorInfo.h"
+#include "UI/SpawnerRestockTipWidget.h"
+#include "Components/WidgetComponent.h"
 #include "Engine/World.h"
+#include "GameFramework/PlayerController.h"
 
 namespace
 {
@@ -29,6 +32,21 @@ namespace
 		Hash ^= Hash >> 15;
 		return Hash;
 	}
+}
+
+AFoodSpawner::AFoodSpawner()
+{
+	// 补货提示：屏幕空间控件挂在箱子上方，不参与碰撞；默认隐藏，由 Tick 按库存与距离决定显隐
+	RestockTipComp = CreateDefaultSubobject<UWidgetComponent>(TEXT("RestockTipComp"));
+	RestockTipComp->SetupAttachment(RootComponent);
+	RestockTipComp->SetRelativeLocation(FVector(0.f, 0.f, RestockTipHeight));
+	RestockTipComp->SetWidgetSpace(EWidgetSpace::Screen);
+	RestockTipComp->SetDrawAtDesiredSize(true);
+	RestockTipComp->SetTwoSided(true);
+	RestockTipComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	RestockTipComp->SetGenerateOverlapEvents(false);
+	RestockTipComp->SetWidgetClass(USpawnerRestockTipWidget::StaticClass());
+	RestockTipComp->SetVisibility(false);
 }
 
 FString AFoodSpawner::BuildSaveKeyText() const
@@ -98,9 +116,154 @@ bool AFoodSpawner::CanSpawn() const
 	return RemainingCount != 0;
 }
 
+void AFoodSpawner::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+
+	// 提示检查不需要每帧做：0.2 秒一次足够，且不影响物品本身的交互 / 腐烂逻辑
+	RestockTipAccum += DeltaSeconds;
+	if (RestockTipAccum >= 0.2f)
+	{
+		RestockTipAccum = 0.f;
+		UpdateRestockTip();
+	}
+}
+
+int32 AFoodSpawner::GetEffectiveStock() const
+{
+	// 与 SupplyWarningWidget 同一口径：仓库联动时以仓库库存为准，否则看本箱剩余数量
+	if (const UWorld* World = GetWorld())
+	{
+		if (UBaseGameInstance* GI = Cast<UBaseGameInstance>(World->GetGameInstance()))
+		{
+			if (GI->bLinkSpawnerToWarehouse && SpawnItemActorClass)
+			{
+				return GI->GetWarehouseStock(SpawnItemActorClass);
+			}
+		}
+	}
+	return RemainingCount;
+}
+
+int32 AFoodSpawner::GetLowStockThreshold() const
+{
+	if (const UWorld* World = GetWorld())
+	{
+		if (const UBaseGameInstance* GI = Cast<UBaseGameInstance>(World->GetGameInstance()))
+		{
+			return FMath::Max(1, GI->SpawnerLowStockThreshold);
+		}
+	}
+	return 3;
+}
+
+bool AFoodSpawner::IsLowStock() const
+{
+	const int32 Stock = GetEffectiveStock();
+	// 无限箱（-1）永远够用，不提示
+	return Stock >= 0 && Stock < GetLowStockThreshold();
+}
+
+bool AFoodSpawner::IsLocalPlayerNearRestockTip() const
+{
+	const UWorld* World = GetWorld();
+	if (!World)
+	{
+		return false;
+	}
+
+	if (RestockTipHideDistance <= 0.f)
+	{
+		return true;
+	}
+
+	const float DistSq = FMath::Square(RestockTipHideDistance);
+	const FVector BoxLocation = GetActorLocation();
+	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+	{
+		const APlayerController* PC = It->Get();
+		if (!PC || !PC->IsLocalController())
+		{
+			continue;
+		}
+		if (const APawn* Pawn = PC->GetPawn())
+		{
+			if (FVector::DistSquared(BoxLocation, Pawn->GetActorLocation()) <= DistSq)
+			{
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+FText AFoodSpawner::GetRestockTipTitle() const
+{
+	FString ItemName = TEXT("食材");
+	if (SpawnItemActorClass)
+	{
+		if (const AItemActor* CDO = SpawnItemActorClass->GetDefaultObject<AItemActor>())
+		{
+			if (const FItemActorInfo* Row = CDO->ItemInfoRow.GetRow<FItemActorInfo>(TEXT("FoodSpawner::GetRestockTipTitle")))
+			{
+				if (!Row->ItemDes.IsEmpty())
+				{
+					ItemName = Row->ItemDes;
+				}
+			}
+		}
+	}
+
+	const int32 Stock = FMath::Max(0, GetEffectiveStock());
+	return FText::FromString(FString::Printf(TEXT("%s不足（%d/%d）"), *ItemName, Stock, GetLowStockThreshold()));
+}
+
+void AFoodSpawner::UpdateRestockTip()
+{
+	if (!RestockTipComp)
+	{
+		return;
+	}
+
+	const bool bShow = IsLowStock() && IsLocalPlayerNearRestockTip();
+	if (bShow)
+	{
+		if (!RestockTipComp->GetUserWidgetObject())
+		{
+			RestockTipComp->InitWidget();
+		}
+
+		if (USpawnerRestockTipWidget* Tip = Cast<USpawnerRestockTipWidget>(RestockTipComp->GetUserWidgetObject()))
+		{
+			const FText Title = GetRestockTipTitle();
+			const int32 Signature = static_cast<int32>(HashCombine(GetTypeHash(Title.ToString()), GetEffectiveStock()));
+			if (Signature != LastRestockTipSignature)
+			{
+				LastRestockTipSignature = Signature;
+				Tip->SetTip(Title, FText::FromString(TEXT("需要到野外补货")));
+			}
+		}
+	}
+	else
+	{
+		// 隐藏期间库存可能变化，下次显示时重写文案
+		LastRestockTipSignature = INDEX_NONE;
+	}
+
+	if (RestockTipComp->IsVisible() != bShow)
+	{
+		RestockTipComp->SetVisibility(bShow);
+	}
+}
+
 void AFoodSpawner::BeginPlay()
 {
 	Super::BeginPlay();
+
+	if (RestockTipComp)
+	{
+		RestockTipComp->SetRelativeLocation(FVector(0.f, 0.f, RestockTipHeight));
+	}
 
 	// 仅有限模式参与存档；无限(-1)不需要持久化（仓库驱动模式由仓库库存决定，也不走此处）
 	if (RemainingCount < 0)

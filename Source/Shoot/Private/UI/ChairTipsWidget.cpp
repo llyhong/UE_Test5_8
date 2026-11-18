@@ -6,6 +6,22 @@
 #include "Game/OrderSystem.h"
 #include "Game/BaseGameInstance.h"
 #include "Game/FoodSystem.h"
+#include "Blueprint/WidgetTree.h"
+#include "Components/Image.h"
+#include "Engine/Texture2D.h"
+#include "UObject/ConstructorHelpers.h"
+
+UChairTipsWidget::UChairTipsWidget(const FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer)
+{
+	// 点单提示统一用订单图标（用户指定），默认加载工程里的 T_Icon_Order
+	static ConstructorHelpers::FObjectFinder<UTexture2D> OrderIconFinder(
+		TEXT("/Game/_Demo/Textures/ICON/T_Icon_Order.T_Icon_Order"));
+	if (OrderIconFinder.Succeeded())
+	{
+		OrderTipIcon = OrderIconFinder.Object;
+	}
+}
 
 void UChairTipsWidget::RefreshTips()
 {
@@ -21,7 +37,9 @@ void UChairTipsWidget::RefreshTips()
 
 void UChairTipsWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 {
+	// Super 会先跑蓝图的属性绑定（会把图标刷回菜品图标），之后再统一换回订单图标
 	Super::NativeTick(MyGeometry, InDeltaTime);
+	ApplyOrderTipIcon();
 
 	// 倒计时 / 订单剩余时间需要连续刷新时按间隔驱动；<=0 表示只由餐桌事件驱动
 	if (AutoRefreshInterval <= 0.f || !OwnerSeat)
@@ -289,4 +307,47 @@ TArray<int32> UChairTipsWidget::GetFoodItemIDs(int32 FoodID) const
 AItemActor* UChairTipsWidget::GetPlateOnSeat() const
 {
 	return OwnerSeat ? OwnerSeat->PlateOnSeat : nullptr;
+}
+
+void UChairTipsWidget::ApplyOrderTipIcon()
+{
+	if (!OrderTipIcon || !WidgetTree)
+	{
+		return;
+	}
+
+	if (CachedTipIconImage && !IsValid(CachedTipIconImage))
+	{
+		CachedTipIconImage = nullptr;
+	}
+
+	if (!CachedTipIconImage)
+	{
+		UImage* FirstImage = nullptr;
+		WidgetTree->ForEachWidgetAndDescendants([&](UWidget* Widget)
+		{
+			UImage* Image = Cast<UImage>(Widget);
+			if (!Image)
+			{
+				return;
+			}
+			if (!FirstImage)
+			{
+				FirstImage = Image;
+			}
+			if (!CachedTipIconImage && Image->GetFName().ToString().Contains(TEXT("Icon")))
+			{
+				CachedTipIconImage = Image;
+			}
+		});
+		if (!CachedTipIconImage)
+		{
+			CachedTipIconImage = FirstImage;
+		}
+	}
+
+	if (CachedTipIconImage && CachedTipIconImage->GetBrush().GetResourceObject() != OrderTipIcon.Get())
+	{
+		CachedTipIconImage->SetBrushFromTexture(OrderTipIcon, false);
+	}
 }

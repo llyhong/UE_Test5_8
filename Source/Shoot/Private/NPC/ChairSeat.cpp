@@ -799,21 +799,6 @@ void AChairSeat::Tick(float DeltaTime)
 	// 每帧按“距离玩家 + 当前桌况”刷新提示控件显隐：玩家走远后自动隐藏，走近后恢复
 	UpdateTipsVisibility();
 
-	// 等待点单时提示气泡上下浮动，让玩家在远处也注意到“这桌要点单”
-	// （默认挂点高度 120，其他状态恢复默认高度避免浮动偏移残留）
-	if (TipsWidgetComp)
-	{
-		const bool bBobbing = TipsWidgetComp->IsVisible()
-			&& GetSeatState() == EChairTipsState::WaitingOrder;
-		const float Z = bBobbing
-			? 120.f + FMath::Sin(GetWorld()->GetTimeSeconds() * 4.f) * 12.f
-			: 120.f;
-		if (!FMath::IsNearlyEqual(TipsWidgetComp->GetRelativeLocation().Z, Z))
-		{
-			TipsWidgetComp->SetRelativeLocation(FVector(0.f, 0.f, Z));
-		}
-	}
-
 	// 调试：座位 / 挂点 / 占用客人可视化，便于排查占座与碟子摆放问题
 	if (!bDrawDebugSeatLink)
 	{
