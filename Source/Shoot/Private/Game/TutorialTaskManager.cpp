@@ -208,8 +208,16 @@ UTimeSystem* ATutorialTaskManager::GetTimeSystem() const
 bool ATutorialTaskManager::NeedsOpeningGuidance() const
 {
 	const UTimeSystem* TS = GetTimeSystem();
-	return bEnable && AppliedDay == 1 && ActiveTasks.Num() > 0 && TS
-		&& !TS->IsBusinessOpen() && !TS->IsEndOfDayReached();
+	if (!bEnable || ActiveTasks.IsEmpty() || !TS || TS->IsBusinessOpen() || TS->IsEndOfDayReached())
+		return false;
+	if (AppliedDay == 1) return true;
+	if (AppliedDay == 2)
+	{
+		// 先完成篮子采集和入库，轮到接待时才引导开门。
+		for (const FActiveTask& Task : ActiveTasks)
+			if (!Task.bDone) return Task.Row.TaskType == ETutorialTaskType::ServeGuests;
+	}
+	return false;
 }
 
 int32 ATutorialTaskManager::GetCurrentDay() const
@@ -766,7 +774,9 @@ void ATutorialTaskManager::UpdateFocusTarget()
 	FocusHint = FText::GetEmpty();
 	if (NeedsOpeningGuidance())
 	{
-		FocusHint = FText::FromString(TEXT("跟随箭头走到入口大门，靠近后按 E 开始试营业。今天完成 3 单即可，不限时。"));
+		FocusHint = AppliedDay == 1
+			? NSLOCTEXT("Tutorial", "FirstDayOpeningHint", "跟随箭头走到入口大门，靠近后按 E 开始试营业。今天完成 3 单即可，不限时。")
+			: NSLOCTEXT("Tutorial", "SecondDayOpeningHint", "备料完成！跟随箭头走到入口大门，靠近后按 E 开始营业，再接待今天的客人。");
 		const FVector Ref = GetLocalPlayerReferenceLocation(GetWorld());
 		AGateCounter* Gate = nullptr;
 		for (TActorIterator<AGateCounter> It(GetWorld()); It; ++It)
@@ -807,8 +817,19 @@ TArray<FTutorialChecklistEntry> ATutorialTaskManager::GetChecklistEntries() cons
 	TArray<FTutorialChecklistEntry> Entries;
 	if (NeedsOpeningGuidance())
 	{
+		if (AppliedDay == 2)
+			for (const FActiveTask& Task : ActiveTasks)
+			{
+				if (!Task.bDone) break;
+				FTutorialChecklistEntry& Completed = Entries.AddDefaulted_GetRef();
+				Completed.Text = FText::Format(NSLOCTEXT("Tutorial", "ObjectiveProgress", "{0}  {1}/{2}"),
+					Task.Row.Description, FText::AsNumber(Task.Progress), FText::AsNumber(FMath::Max(1, Task.Row.TargetCount)));
+				Completed.bCompleted = true;
+			}
 		FTutorialChecklistEntry& Entry = Entries.AddDefaulted_GetRef();
-		Entry.Text = NSLOCTEXT("Tutorial", "OpeningObjective", "走到入口大门，按 E 开始试营业");
+		Entry.Text = AppliedDay == 1
+			? NSLOCTEXT("Tutorial", "OpeningObjective", "走到入口大门，按 E 开始试营业")
+			: NSLOCTEXT("Tutorial", "SecondDayOpeningObjective", "走到入口大门，按 E 开始营业");
 		return Entries;
 	}
 	for (const FActiveTask& Task : ActiveTasks)
@@ -838,7 +859,8 @@ TArray<FTutorialChecklistEntry> ATutorialTaskManager::GetChecklistEntries() cons
 
 FText ATutorialTaskManager::GetDayTitle() const
 {
-	if (NeedsOpeningGuidance()) return FText::FromString(TEXT("第 1 天 · 准备开门"));
+	if (NeedsOpeningGuidance()) return FText::Format(
+		NSLOCTEXT("Tutorial", "PreparingToOpenTitle", "第 {0} 天 · 准备开门"), FText::AsNumber(AppliedDay));
 	return FText::FromString(FString::Printf(TEXT("第 %d 天任务"), FMath::Max(1, AppliedDay)));
 }
 

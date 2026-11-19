@@ -32,12 +32,12 @@ namespace
 {
 	TMap<TWeakObjectPtr<APlayerController>, TWeakObjectPtr<UTutorialGuideWidget>> GPlayerGuides;
 
-	FLinearColor Color(const TCHAR* Hex)
+	FLinearColor TutorialColor(const TCHAR* Hex)
 	{
 		return FLinearColor::FromSRGBColor(FColor::FromHex(Hex));
 	}
 
-	UBorder* Panel(UWidgetTree* Tree, FLinearColor Fill, float Radius,
+	UBorder* TutorialPanel(UWidgetTree* Tree, FLinearColor Fill, float Radius,
 		FLinearColor Outline = FLinearColor::Transparent, float OutlineWidth = 0.f)
 	{
 		UBorder* Border = Tree->ConstructWidget<UBorder>();
@@ -50,7 +50,7 @@ namespace
 	void Leaf(UWidgetTree* Tree, UCanvasPanel* Canvas, bool bRight, FVector2D Offset, float Angle)
 	{
 		UImage* Image = Tree->ConstructWidget<UImage>();
-		Image->SetBrush(FSlateRoundedBoxBrush(Color(TEXT("A4B879")), FVector4(1.f, 9.f, 1.f, 9.f)));
+		Image->SetBrush(FSlateRoundedBoxBrush(TutorialColor(TEXT("A4B879")), FVector4(1.f, 9.f, 1.f, 9.f)));
 		Image->SetVisibility(ESlateVisibility::HitTestInvisible);
 		Image->SetRenderTransformAngle(Angle);
 		UCanvasPanelSlot* Slot = Canvas->AddChildToCanvas(Image);
@@ -149,10 +149,10 @@ TSharedRef<SWidget> UTutorialGuideWidget::RebuildWidget()
 		BorderSlot->SetPosition(FVector2D(-24.f, 0.f));
 	}
 
-	ChecklistBorder = Panel(WidgetTree, Color(TEXT("FFF3D8")), 22.f, Color(TEXT("D4AA60")), 1.5f);
+	ChecklistBorder = TutorialPanel(WidgetTree, TutorialColor(TEXT("FFF3D8")), 22.f, TutorialColor(TEXT("D4AA60")), 1.5f);
 	ChecklistBorder->SetPadding(FMargin(5.f));
 	ChecklistSize->SetContent(ChecklistBorder);
-	UBorder* InnerBorder = Panel(WidgetTree, Color(TEXT("FFF9E9")), 17.f, Color(TEXT("E4C68A")), 1.f);
+	UBorder* InnerBorder = TutorialPanel(WidgetTree, TutorialColor(TEXT("FFF9E9")), 17.f, TutorialColor(TEXT("E4C68A")), 1.f);
 	InnerBorder->SetPadding(FMargin(12.f, 10.f));
 	ChecklistBorder->SetContent(InnerBorder);
 
@@ -163,7 +163,7 @@ TSharedRef<SWidget> UTutorialGuideWidget::RebuildWidget()
 
 	TitleText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("TitleText"));
 	TitleText->SetFont(FCoreStyle::GetDefaultFontStyle("Bold", 20));
-	TitleText->SetColorAndOpacity(FSlateColor(Color(TEXT("54351F"))));
+	TitleText->SetColorAndOpacity(FSlateColor(TutorialColor(TEXT("54351F"))));
 	TitleText->SetJustification(ETextJustify::Center);
 	TitleText->SetAutoWrapText(true);
 	TitleText->SetVisibility(ESlateVisibility::HitTestInvisible);
@@ -181,7 +181,7 @@ TSharedRef<SWidget> UTutorialGuideWidget::RebuildWidget()
 
 	USizeBox* DividerSize = WidgetTree->ConstructWidget<USizeBox>();
 	DividerSize->SetHeightOverride(1.f);
-	DividerSize->SetContent(Panel(WidgetTree, Color(TEXT("E4C68A")), 0.f));
+	DividerSize->SetContent(TutorialPanel(WidgetTree, TutorialColor(TEXT("E4C68A")), 0.f));
 	Column->AddChildToVerticalBox(DividerSize);
 
 	ScrollSize = WidgetTree->ConstructWidget<USizeBox>();
@@ -202,7 +202,7 @@ TSharedRef<SWidget> UTutorialGuideWidget::RebuildWidget()
 
 	HintText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("HintText"));
 	HintText->SetFont(FCoreStyle::GetDefaultFontStyle("Regular", 16));
-	HintText->SetColorAndOpacity(FSlateColor(Color(TEXT("826547"))));
+	HintText->SetColorAndOpacity(FSlateColor(TutorialColor(TEXT("826547"))));
 	HintText->SetAutoWrapText(true);
 	HintText->SetVisibility(ESlateVisibility::Collapsed);
 	// 当前操作固定在列表外，历史步骤再多也不会把按键说明挤出可视区。
@@ -264,19 +264,19 @@ void UTutorialGuideWidget::RebuildChecklist(float Width)
 		const bool bNewRow = !TaskRows.IsValidIndex(Index);
 		if (bNewRow)
 		{
-			UBorder* Row = Panel(WidgetTree, FLinearColor::Transparent, 9.f);
+			UBorder* Row = TutorialPanel(WidgetTree, FLinearColor::Transparent, 9.f);
 			Row->SetPadding(FMargin(8.f, 6.f));
 			TaskColumn->AddChildToVerticalBox(Row)->SetPadding(FMargin(0.f, 2.f));
 			UHorizontalBox* RowContent = WidgetTree->ConstructWidget<UHorizontalBox>();
 			Row->SetContent(RowContent);
 
-			USizeBox* IconSize = WidgetTree->ConstructWidget<USizeBox>();
-			IconSize->SetWidthOverride(30.f);
-			IconSize->SetHeightOverride(30.f);
+			USizeBox* TutorialIconSize = WidgetTree->ConstructWidget<USizeBox>();
+			TutorialIconSize->SetWidthOverride(30.f);
+			TutorialIconSize->SetHeightOverride(30.f);
 			UImage* Icon = WidgetTree->ConstructWidget<UImage>();
 			Icon->SetVisibility(ESlateVisibility::HitTestInvisible);
-			IconSize->SetContent(Icon);
-			RowContent->AddChildToHorizontalBox(IconSize)->SetVerticalAlignment(VAlign_Top);
+			TutorialIconSize->SetContent(Icon);
+			RowContent->AddChildToHorizontalBox(TutorialIconSize)->SetVerticalAlignment(VAlign_Top);
 
 			UTextBlock* Line = WidgetTree->ConstructWidget<UTextBlock>();
 			Line->SetAutoWrapText(true);
@@ -298,7 +298,7 @@ void UTutorialGuideWidget::RebuildChecklist(float Width)
 		{
 			const bool bCurrent = Index == CurrentIndex;
 			TaskRows[Index]->SetBrush(FSlateRoundedBoxBrush(
-				bCurrent ? Color(TEXT("FFE9B7")) : FLinearColor::Transparent, 9.f));
+				bCurrent ? TutorialColor(TEXT("FFE9B7")) : FLinearColor::Transparent, 9.f));
 			UImage* Icon = TaskIcons[Index];
 			Icon->GetParent()->SetVisibility(Entry.bNote ? ESlateVisibility::Collapsed : ESlateVisibility::SelfHitTestInvisible);
 			if (Entry.bCompleted && CompletionTexture)
@@ -308,13 +308,13 @@ void UTutorialGuideWidget::RebuildChecklist(float Width)
 			}
 			else
 			{
-				Icon->SetBrush(FSlateRoundedBoxBrush(Color(TEXT("FFF6DF")), 6.f, Color(TEXT("D4AA60")), 1.2f));
+				Icon->SetBrush(FSlateRoundedBoxBrush(TutorialColor(TEXT("FFF6DF")), 6.f, TutorialColor(TEXT("D4AA60")), 1.2f));
 				Icon->SetDesiredSizeOverride(FVector2D(30.f, 30.f));
 			}
 			UTextBlock* Line = TaskLines[Index];
 			Line->SetText(Entry.Text);
 			Line->SetFont(FCoreStyle::GetDefaultFontStyle(Entry.bNote ? "Regular" : "Bold", Entry.bNote ? 16 : 18));
-			Line->SetColorAndOpacity(FSlateColor(Color(Entry.bCompleted ? TEXT("456B34")
+			Line->SetColorAndOpacity(FSlateColor(TutorialColor(Entry.bCompleted ? TEXT("456B34")
 				: (Entry.bNote ? TEXT("826547") : TEXT("54351F")))));
 			// 为滚动条、图标及内边距预留空间，换行宽度不超过实际文本区域。
 			Line->SetWrapTextAt(FMath::Max(48.f, Width - (Entry.bNote ? 92.f : 122.f)));
@@ -382,8 +382,8 @@ void UTutorialGuideWidget::NativeTick(const FGeometry& MyGeometry, float InDelta
 	if (bMeasureFixedContent) ForceLayoutPrepass();
 	const float FixedHeight = TitleText->GetDesiredSize().Y + 18.f
 		+ (FocusHint.IsEmpty() ? 0.f : HintText->GetDesiredSize().Y + 16.f) + 39.f;
-	const float CardHeight = FMath::Min(720.f, FMath::Max(180.f, LocalSize.Y - 48.f));
-	const float ScrollHeight = FMath::Max(48.f, CardHeight - FixedHeight);
+	const float TutorialCardHeight = FMath::Min(720.f, FMath::Max(180.f, LocalSize.Y - 48.f));
+	const float ScrollHeight = FMath::Max(48.f, TutorialCardHeight - FixedHeight);
 	if (!FMath::IsNearlyEqual(ScrollHeight, CachedScrollHeight))
 	{
 		ScrollSize->SetMaxDesiredHeight(ScrollHeight);

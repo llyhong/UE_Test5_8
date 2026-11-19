@@ -126,7 +126,7 @@ private:
 	bool bHasFocusTarget = false;
 
 	UTimeSystem* GetTimeSystem() const;
-	/** 首日未开门时先引导营业，避免接单任务把箭头指向空餐桌。 */
+	/** 首日开门前、第二天完成备料后，引导到入口营业。 */
 	bool NeedsOpeningGuidance() const;
 	ADiningHygieneManager* FindHygieneManager() const;
 	int32 GetCurrentDay() const;

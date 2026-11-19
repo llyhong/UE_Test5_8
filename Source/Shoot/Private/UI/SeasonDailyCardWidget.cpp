@@ -110,7 +110,7 @@ namespace
 		return false;
 	}
 
-	FLinearColor Color(const TCHAR* Hex)
+	FLinearColor DailyCardColor(const TCHAR* Hex)
 	{
 		return FLinearColor::FromSRGBColor(FColor::FromHex(Hex));
 	}
@@ -118,7 +118,7 @@ namespace
 	UBorder* Panel(UWidgetTree* Tree, FName Name, const TCHAR* Fill, const TCHAR* Rim, float Radius)
 	{
 		UBorder* Border = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), Name);
-		Border->SetBrush(FSlateRoundedBoxBrush(Color(Fill), Radius, Color(Rim), 2.f));
+		Border->SetBrush(FSlateRoundedBoxBrush(DailyCardColor(Fill), Radius, DailyCardColor(Rim), 2.f));
 		Border->SetPadding(FMargin(18.f, 12.f));
 		Border->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
 		return Border;
@@ -129,7 +129,7 @@ namespace
 		UTextBlock* Block = Tree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), Name);
 		Block->SetFont(FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), FontSize));
 		Block->SetText(Value);
-		Block->SetColorAndOpacity(FSlateColor(Color(Ink)));
+		Block->SetColorAndOpacity(FSlateColor(DailyCardColor(Ink)));
 		Block->SetVisibility(ESlateVisibility::HitTestInvisible);
 		return Block;
 	}
@@ -138,11 +138,11 @@ namespace
 	{
 		switch (Grade)
 		{
-		case ESeasonGrade::Excellent: return Color(TEXT("A76513"));
-		case ESeasonGrade::Great:     return Color(TEXT("527D32"));
-		case ESeasonGrade::Good:      return Color(TEXT("28657F"));
-		case ESeasonGrade::Fair:      return Color(TEXT("A96B2D"));
-		default:                      return Color(TEXT("A54351"));
+		case ESeasonGrade::Excellent: return DailyCardColor(TEXT("A76513"));
+		case ESeasonGrade::Great:     return DailyCardColor(TEXT("527D32"));
+		case ESeasonGrade::Good:      return DailyCardColor(TEXT("28657F"));
+		case ESeasonGrade::Fair:      return DailyCardColor(TEXT("A96B2D"));
+		default:                      return DailyCardColor(TEXT("A54351"));
 		}
 	}
 
@@ -187,7 +187,7 @@ public:
 		const FVector2f Size(Geometry.GetLocalSize());
 		const FSlateFontInfo Font = FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 16);
 		const auto Measure = FSlateApplication::Get().GetRenderer()->GetFontMeasureService();
-		const FLinearColor Ink = Color(TEXT("75512C")) * Style.GetColorAndOpacityTint();
+		const FLinearColor Ink = DailyCardColor(TEXT("75512C")) * Style.GetColorAndOpacityTint();
 		const ESlateDrawEffect Effects = bEnabled ? ESlateDrawEffect::None : ESlateDrawEffect::DisabledEffect;
 		auto DrawText = [&](const FString& Value, FVector2f Position)
 		{
@@ -222,7 +222,7 @@ public:
 			DrawText(Label, FVector2f(Left - Measure->Measure(Label, Font).X - 12.f, Y - 10.f));
 			FSlateDrawElement::MakeLines(Elements, Layer, Geometry.ToPaintGeometry(),
 				TArray<FVector2f>{FVector2f(Left, Y), FVector2f(Right, Y)}, Effects,
-				Color(TEXT("EBDDCA")) * Style.GetColorAndOpacityTint(), true, 1.f);
+				DailyCardColor(TEXT("EBDDCA")) * Style.GetColorAndOpacityTint(), true, 1.f);
 		}
 
 		TArray<FVector2f> Points;
@@ -239,7 +239,7 @@ public:
 		{
 			TArray<FSlateVertex> Vertices;
 			TArray<SlateIndex> Indices;
-			const FColor Fill = (Color(TEXT("A4BD79")).CopyWithNewOpacity(0.19f) * Style.GetColorAndOpacityTint()).ToFColor(true);
+			const FColor Fill = (DailyCardColor(TEXT("A4BD79")).CopyWithNewOpacity(0.19f) * Style.GetColorAndOpacityTint()).ToFColor(true);
 			for (int32 Index = 1; Index < Points.Num(); ++Index)
 			{
 				const SlateIndex Base = static_cast<SlateIndex>(Vertices.Num());
@@ -255,7 +255,7 @@ public:
 				FSlateApplication::Get().GetRenderer()->GetResourceHandle(*FCoreStyle::Get().GetBrush(TEXT("WhiteBrush"))),
 				Vertices, Indices, nullptr, 0, 0, Effects);
 			FSlateDrawElement::MakeLines(Elements, Layer + 2, Geometry.ToPaintGeometry(), Points, Effects,
-				Color(TEXT("6D8B43")) * Style.GetColorAndOpacityTint(), true, 3.f);
+				DailyCardColor(TEXT("6D8B43")) * Style.GetColorAndOpacityTint(), true, 3.f);
 		}
 		for (const FVector2f Point : Points)
 		{
@@ -268,7 +268,7 @@ public:
 
 private:
 	TArray<FDailyFinancialRecord> Records;
-	FSlateRoundedBoxBrush PointBrush = FSlateRoundedBoxBrush(Color(TEXT("A4BD79")), 6.f, Color(TEXT("6D8B43")), 1.5f);
+	FSlateRoundedBoxBrush PointBrush = FSlateRoundedBoxBrush(DailyCardColor(TEXT("A4BD79")), 6.f, DailyCardColor(TEXT("6D8B43")), 1.5f);
 };
 
 void USeasonDailyCardWidget::ShowForPlayer(APlayerController* PC, const USeasonSystem* Season, bool bAwaitNextDay)
@@ -308,7 +308,6 @@ void USeasonDailyCardWidget::ShowForPlayer(APlayerController* PC, const USeasonS
 
 	// 营业结束卡停留等待按钮；其它日结卡仍在 7 秒后自动淡出
 	Card->SetVisibility(bAwaitNextDay ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::HitTestInvisible);
-	Card->SetUIInputEnabled(bAwaitNextDay);
 	if (Card->NextDayButton)
 	{
 		Card->NextDayButton->SetVisibility(bAwaitNextDay ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
@@ -326,6 +325,7 @@ void USeasonDailyCardWidget::ShowForPlayer(APlayerController* PC, const USeasonS
 	{
 		SuppressOtherHud(PC->GetWorld());
 	}
+	Card->SetUIInputEnabled(bAwaitNextDay);
 }
 
 void USeasonDailyCardWidget::ApplyLayout(bool bCentered)
@@ -355,9 +355,9 @@ void USeasonDailyCardWidget::ApplyLayout(bool bCentered)
 	}
 
 	const float Width = bCentered ? 1320.f : 640.f;
-	if (USizeBox* CardWidth = Cast<USizeBox>(WidgetTree->FindWidget(TEXT("CardWidth"))))
+	if (USizeBox* DailyCardWidth = Cast<USizeBox>(WidgetTree->FindWidget(TEXT("CardWidth"))))
 	{
-		CardWidth->SetWidthOverride(Width);
+		DailyCardWidth->SetWidthOverride(Width);
 	}
 	for (UTextBlock* Block : {StatsText, NetText, SeasonText, HintText})
 	{
@@ -441,6 +441,10 @@ void USeasonDailyCardWidget::Dismiss()
 
 void USeasonDailyCardWidget::HandleNextDayClicked()
 {
+	if (!IsAwaitingNextDay())
+	{
+		return;
+	}
 	if (APlayerController* PC = OwnerController.Get())
 	{
 		if (UBaseGameInstance* GI = Cast<UBaseGameInstance>(PC->GetGameInstance()))
@@ -465,16 +469,53 @@ void USeasonDailyCardWidget::SetUIInputEnabled(bool bEnabled)
 	if (bEnabled)
 	{
 		FInputModeUIOnly Mode;
-		Mode.SetWidgetToFocus(TakeWidget());
+		Mode.SetWidgetToFocus(NextDayButton->TakeWidget());
 		Mode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
 		PC->SetInputMode(Mode);
+		NextDayButton->SetUserFocus(PC);
 		PC->bShowMouseCursor = true;
 	}
 	else
 	{
 		PC->SetInputMode(FInputModeGameOnly());
 		PC->bShowMouseCursor = false;
+		FSlateApplication::Get().SetUserFocusToGameViewport(PC->GetLocalPlayer()->GetControllerId());
 	}
+}
+
+FReply USeasonDailyCardWidget::NativeOnPreviewKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent)
+{
+	if (!IsAwaitingNextDay())
+	{
+		return Super::NativeOnPreviewKeyDown(InGeometry, InKeyEvent);
+	}
+
+	FSlateApplication& Slate = FSlateApplication::Get();
+	const EUINavigationAction Action = Slate.GetNavigationActionFromKey(InKeyEvent);
+	if (Action == EUINavigationAction::Accept)
+	{
+		if (!InKeyEvent.IsRepeat())
+		{
+			HandleNextDayClicked();
+		}
+		return FReply::Handled();
+	}
+	if (Action == EUINavigationAction::Back || InKeyEvent.GetKey() == EKeys::BackSpace
+		|| Slate.GetNavigationDirectionFromKey(InKeyEvent) != EUINavigation::Invalid)
+	{
+		NextDayButton->SetUserFocus(OwnerController.Get());
+		return FReply::Handled();
+	}
+	return Super::NativeOnPreviewKeyDown(InGeometry, InKeyEvent);
+}
+
+FReply USeasonDailyCardWidget::NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
+{
+	if (IsAwaitingNextDay())
+	{
+		return FReply::Handled().SetUserFocus(NextDayButton->TakeWidget(), EFocusCause::Mouse);
+	}
+	return Super::NativeOnMouseButtonDown(InGeometry, InMouseEvent);
 }
 
 TSharedRef<SWidget> USeasonDailyCardWidget::RebuildWidget()
@@ -502,7 +543,7 @@ TSharedRef<SWidget> USeasonDailyCardWidget::RebuildWidget()
 	BackdropSlot->SetOffsets(FMargin(0.f));
 
 	UBorder* Wash = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("BackdropWash"));
-	Wash->SetBrushColor(Color(TEXT("FFF9E7")).CopyWithNewOpacity(0.28f));
+	Wash->SetBrushColor(DailyCardColor(TEXT("FFF9E7")).CopyWithNewOpacity(0.28f));
 	Wash->SetVisibility(ESlateVisibility::Collapsed);
 	UCanvasPanelSlot* WashSlot = Root->AddChildToCanvas(Wash);
 	WashSlot->SetAnchors(FAnchors(0.f, 0.f, 1.f, 1.f));
@@ -510,7 +551,7 @@ TSharedRef<SWidget> USeasonDailyCardWidget::RebuildWidget()
 
 	CardBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Card"));
 	CardBorder->SetPadding(FMargin(9.f));
-	CardBrush = FSlateRoundedBoxBrush(Color(TEXT("FFF9E7")), 29.f, Color(TEXT("D4AA60")), 3.f);
+	CardBrush = FSlateRoundedBoxBrush(DailyCardColor(TEXT("FFF9E7")), 29.f, DailyCardColor(TEXT("D4AA60")), 3.f);
 	CardBorder->SetBrush(CardBrush);
 
 	UCanvasPanelSlot* CardSlot = Root->AddChildToCanvas(CardBorder);
@@ -519,12 +560,12 @@ TSharedRef<SWidget> USeasonDailyCardWidget::RebuildWidget()
 	CardSlot->SetPosition(FVector2D(-40.f, 60.f));
 	CardSlot->SetAutoSize(true);
 
-	USizeBox* CardWidth = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("CardWidth"));
-	CardWidth->SetWidthOverride(360.f);
-	CardBorder->SetContent(CardWidth);
+	USizeBox* DailyCardWidth = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("CardWidth"));
+	DailyCardWidth->SetWidthOverride(360.f);
+	CardBorder->SetContent(DailyCardWidth);
 	UBorder* Inset = Panel(WidgetTree, TEXT("CardInset"), TEXT("FFF6E5"), TEXT("E4C68A"), 22.f);
 	Inset->SetPadding(FMargin(24.f, 18.f));
-	CardWidth->SetContent(Inset);
+	DailyCardWidth->SetContent(Inset);
 	UVerticalBox* Column = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("Column"));
 	Inset->SetContent(Column);
 
@@ -537,16 +578,16 @@ TSharedRef<SWidget> USeasonDailyCardWidget::RebuildWidget()
 			UTextBlock* Title = Text(WidgetTree, TEXT("Title"), FText::FromString(TEXT("今日财务报表")), 40, TEXT("75512C"));
 			FSlateFontInfo Font = Title->GetFont();
 			Font.OutlineSettings.OutlineSize = 2;
-			Font.OutlineSettings.OutlineColor = Color(TEXT("FFF9E9"));
+			Font.OutlineSettings.OutlineColor = DailyCardColor(TEXT("FFF9E9"));
 			Title->SetFont(Font);
 			Title->SetShadowOffset(FVector2D(0.f, 2.f));
-			Title->SetShadowColorAndOpacity(Color(TEXT("E8C79C")));
+			Title->SetShadowColorAndOpacity(DailyCardColor(TEXT("E8C79C")));
 			TitleRow->AddChildToHorizontalBox(Title)->SetPadding(FMargin(12.f, 0.f));
 		}
 		else
 		{
 			UImage* Leaf = WidgetTree->ConstructWidget<UImage>();
-			FSlateRoundedBoxBrush LeafBrush(Color(TEXT("A4BD49")), FVector4(2.f, 16.f, 2.f, 16.f));
+			FSlateRoundedBoxBrush LeafBrush(DailyCardColor(TEXT("A4BD49")), FVector4(2.f, 16.f, 2.f, 16.f));
 			LeafBrush.ImageSize = FVector2D(15.f, 27.f);
 			Leaf->SetBrush(LeafBrush);
 			Leaf->SetRenderTransformAngle(Index == 0 ? -35.f : 35.f);
@@ -662,19 +703,24 @@ TSharedRef<SWidget> USeasonDailyCardWidget::RebuildWidget()
 
 	NextDayButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("NextDayButton"));
 	FButtonStyle ButtonStyle;
-	ButtonStyle.SetNormal(FSlateRoundedBoxBrush(Color(TEXT("F6C74E")), 24.f, Color(TEXT("FFF0AC")), 3.f));
-	ButtonStyle.SetHovered(FSlateRoundedBoxBrush(Color(TEXT("FFDD75")), 24.f, Color(TEXT("FFF8DC")), 4.f));
-	ButtonStyle.SetPressed(FSlateRoundedBoxBrush(Color(TEXT("E5B947")), 24.f, Color(TEXT("FFF0AC")), 3.f));
+	ButtonStyle.SetNormal(FSlateRoundedBoxBrush(DailyCardColor(TEXT("F6C74E")), 24.f, DailyCardColor(TEXT("FFF0AC")), 3.f));
+	ButtonStyle.SetHovered(FSlateRoundedBoxBrush(DailyCardColor(TEXT("FFDD75")), 24.f, DailyCardColor(TEXT("FFF8DC")), 4.f));
+	ButtonStyle.SetPressed(FSlateRoundedBoxBrush(DailyCardColor(TEXT("E5B947")), 24.f, DailyCardColor(TEXT("FFF0AC")), 3.f));
 	ButtonStyle.SetNormalPadding(FMargin(8.f));
 	ButtonStyle.SetPressedPadding(FMargin(8.f, 10.f, 8.f, 6.f));
 	NextDayButton->SetStyle(ButtonStyle);
+	for (const EUINavigation Direction : {EUINavigation::Left, EUINavigation::Right, EUINavigation::Up,
+		EUINavigation::Down, EUINavigation::Next, EUINavigation::Previous})
+	{
+		NextDayButton->SetNavigationRuleBase(Direction, EUINavigationRule::Stop);
+	}
 	NextDayButton->SetVisibility(ESlateVisibility::Collapsed);
 	NextDayButton->OnClicked.AddDynamic(this, &USeasonDailyCardWidget::HandleNextDayClicked);
 	UBorder* ButtonInset = Panel(WidgetTree, TEXT("ButtonInset"), TEXT("FFDD75"), TEXT("FFEAA2"), 17.f);
 	ButtonInset->SetPadding(FMargin(14.f, 9.f));
 	ButtonInset->SetHorizontalAlignment(HAlign_Center);
 	ButtonInset->SetVerticalAlignment(VAlign_Center);
-	NextDayButtonText = Text(WidgetTree, TEXT("NextDayLabel"), FText::FromString(TEXT("进入下一天")), 23, TEXT("8D5817"));
+	NextDayButtonText = Text(WidgetTree, TEXT("NextDayLabel"), FText::FromString(TEXT("进入下一天  ·  A / 回车 / 空格")), 23, TEXT("8D5817"));
 	NextDayButtonText->SetJustification(ETextJustify::Center);
 	ButtonInset->SetContent(NextDayButtonText);
 	NextDayButton->SetContent(ButtonInset);
@@ -707,14 +753,14 @@ void USeasonDailyCardWidget::Apply(const USeasonSystem* Season)
 	{
 		return Value > 0 ? FString(TEXT("+")) + Number(Value) : Number(Value);
 	};
-	const FLinearColor ProfitInk = Color(Profit >= 0 ? TEXT("527D32") : TEXT("A54351"));
+	const FLinearColor ProfitInk = DailyCardColor(Profit >= 0 ? TEXT("527D32") : TEXT("A54351"));
 	RevenueText->SetText(Record ? FText::AsNumber(Record->Revenue) : FText::FromString(TEXT("暂无记录")));
 	ExpenseText->SetText(Record ? FText::AsNumber(Record->OperatingExpense) : FText::FromString(TEXT("暂无记录")));
-	ExpenseText->SetColorAndOpacity(FSlateColor(Color(TEXT("A96B2D"))));
+	ExpenseText->SetColorAndOpacity(FSlateColor(DailyCardColor(TEXT("A96B2D"))));
 	ProfitText->SetText(FText::FromString(SignedNumber(Profit)));
 	ProfitText->SetColorAndOpacity(FSlateColor(ProfitInk));
 	CashText->SetText(FText::AsNumber(Cash));
-	CashText->SetColorAndOpacity(FSlateColor(Color(TEXT("28657F"))));
+	CashText->SetColorAndOpacity(FSlateColor(DailyCardColor(TEXT("28657F"))));
 	if (RevenueChart.IsValid())
 	{
 		RevenueChart->SetRecords(Season->DailyFinancialHistory);
@@ -729,7 +775,7 @@ void USeasonDailyCardWidget::Apply(const USeasonSystem* Season)
 			const bool bUnknown = !Record && (Index == 0 || Index == 1 || Index == 4 || Index == 5);
 			DetailValues[Index]->SetText(FText::FromString(bUnknown ? TEXT("暂无记录")
 				: (Index == 5 ? Number(Values[Index]) : SignedNumber(Values[Index]))));
-			DetailValues[Index]->SetColorAndOpacity(FSlateColor(Color(
+			DetailValues[Index]->SetColorAndOpacity(FSlateColor(DailyCardColor(
 				(Index == 1 || Index == 3) ? TEXT("A96B2D")
 				: ((Index == 5 && Values[Index] > 0) || Values[Index] < 0) ? TEXT("A54351") : TEXT("527D32"))));
 		}
