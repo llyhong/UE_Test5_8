@@ -122,7 +122,8 @@ void USupplyWarningWidget::Refresh()
 	{
 		AFoodSpawner* Spawner = *It;
 		UClass* ItemClass = Spawner->SpawnItemActorClass.Get();
-		if (!ItemClass)
+		// 当天还没开放（已隐藏）的箱子玩家用不到，不该提醒补货（如第 1 天隐藏的番茄箱）
+		if (!ItemClass || Spawner->IsDayLocked())
 		{
 			continue;
 		}

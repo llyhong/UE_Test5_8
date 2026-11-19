@@ -900,7 +900,7 @@ void AShootCharacter::RefreshBestChairSeat()
 	// 客人身上的交互已并入餐桌，玩家现在唯一的下单 / 上菜入口就是椅子。
 	// 一张桌子通常有两把椅子（各自一个 AChairSeat 实例），站在桌边时两把都在范围里：
 	// 若只按距离选，可能选中旁边那把空椅子，按 E 只得到"暂时没有客人入座"。
-	// 因此优先在"此刻真能交互"的椅子里选（有人坐 / 桌上有碟），都没有才退回最近的一把。
+	// 因此优先在"此刻真能交互"的椅子里选（能点单 / 能上菜 / 能收空碟），都没有才退回最近的一把。
 	for (int32 i = OverlappingChairSeats.Num() - 1; i >= 0; --i)
 	{
 		if (!IsValid(OverlappingChairSeats[i]))
@@ -928,8 +928,12 @@ void AShootCharacter::RefreshBestChairSeat()
 			BestAny = Seat;
 		}
 
-		// 有客人 / 桌上有碟 → 这张桌子按 E 一定有结果
-		if ((IsValid(Seat->Occupant) || Seat->HasPlateOnSeat()) && Score < BestActiveScore)
+		// 此刻按 E 真能办成事（点单 / 上菜 / 收空碟）的椅子优先：
+		// 同桌一把在用餐、一把在等点单时，不会因为用餐那把更近就把点单入口挡掉
+		const bool bActionable = Seat->CanPlayerTakeOrder(this)
+			|| Seat->CanPlayerCollectPlate(this)
+			|| (PickingItem && !PickingItem->bIsDirtyPlate && Seat->CanPlayerServeDish(this));
+		if (bActionable && Score < BestActiveScore)
 		{
 			BestActiveScore = Score;
 			BestActive = Seat;
@@ -1776,20 +1780,15 @@ void AShootCharacter::BuildInteractionOptions(TArray<FInteractOption, TInlineAll
 		});
 	}
 
-	// 餐桌：点单 / 上菜 / 收空碟（客人身上的交互已全部并入餐桌）
-	// 空桌（没有客人、桌上也没有碟子）按 E 没有任何结果：不加入候选，也就不显示 E 交互提示与高亮
-	if (OverlappingChairSeat && (IsValid(OverlappingChairSeat->Occupant) || OverlappingChairSeat->HasPlateOnSeat()))
+	// 餐桌：点单 / 收空碟（上菜见 Tier 1 的"上菜"候选；客人身上的交互已全部并入餐桌）
+	// 只有此刻按 E 真能办成事才加入候选：空桌、客人入座中、已上菜用餐中、空手等上菜时
+	// 按 E 都没有实际结果，不显示 E 交互提示与高亮
+	const bool bSeatCanTakeOrder = OverlappingChairSeat && OverlappingChairSeat->CanPlayerTakeOrder(this);
+	const bool bSeatCanCollectPlate = OverlappingChairSeat && OverlappingChairSeat->CanPlayerCollectPlate(this);
+	if (bSeatCanTakeOrder || bSeatCanCollectPlate)
 	{
 		// 提示文字按此刻能做的事实时变化：空手站过去看到的就是"点单"，而不是笼统的"餐桌"
-		const TCHAR* SeatAction = TEXT("餐桌");
-		if (OverlappingChairSeat->CanPlayerTakeOrder(this))
-		{
-			SeatAction = TEXT("点单");
-		}
-		else if (OverlappingChairSeat->CanPlayerCollectPlate(this))
-		{
-			SeatAction = TEXT("收走空碟");
-		}
+		const TCHAR* SeatAction = bSeatCanTakeOrder ? TEXT("点单") : TEXT("收走空碟");
 
 		AddOption(TierWorld, DistTo(OverlappingChairSeat), SeatAction, OverlappingChairSeat, [this]()
 		{
@@ -1934,6 +1933,55 @@ void AShootCharacter::BuildInteractionOptions(TArray<FInteractOption, TInlineAll
 			DoPick();
 			return true;
 		});
+	}
+
+	// 手上拿着外出背包：脚边散落的食材（如鸡窝旁的鸡蛋）按 E 直接装进篮子，篮子不脱手。
+	// 原先拿着篮子时只有"放下"可选，按 E 会把篮子扔掉，捡不起野外的散落食材
+	if (AOutdoorBasket* Basket = GetEquippedBasket())
+	{
+		AItemActor* Loose = OverlappingItem;
+		const bool bLooseIngredient = IsValid(Loose) && Loose != Basket && CanPick()
+			&& !Cast<AOutdoorBasket>(Loose) && !Cast<ADish>(Loose)
+			&& Loose->bPickable && !Loose->bIsEmptyPlate && !Loose->bIsDirtyPlate
+			&& Loose->GetMenuFoodID() < 0 // 做好的成品菜不进篮子
+			&& Loose->GetItemState() != EItemState::EIS_Equipped
+			&& Loose->GetItemState() != EItemState::EIS_Cooking
+			&& !IsDropLockActive(Loose);
+		if (bLooseIngredient)
+		{
+			const bool bStorable = Loose->bCanStoreInBasket;
+			AddOption(TierWorld, DistTo(Loose), bStorable ? TEXT("装进篮子") : TEXT("拾取（该食材只能手持）"), Loose, [this, Loose]()
+			{
+				if (!IsValid(Loose))
+				{
+					return false;
+				}
+				if (!Loose->bCanStoreInBasket)
+				{
+					// 不能入篮的食材：只提示，按键已消费，避免误把篮子扔在地上
+					if (GEngine)
+					{
+						GEngine->AddOnScreenDebugMessage(-1, 2.5f, FColor::Yellow,
+							FString::Printf(TEXT("[背包] %s 只能手持携带，请先放下篮子再捡"), *Loose->GetItemDisplayName()));
+					}
+					return true;
+				}
+
+				const FString ItemName = Loose->GetItemDisplayName();
+				// 篮子满时 StoreHarvestInBasket 内部会给提示；同样消费按键，不把篮子放下
+				if (StoreHarvestInBasket(Loose, 1)) // 成功后世界上的物体已被销毁，之后不能再访问 Loose
+				{
+					RefreshBestOverlappingItem(); // 已销毁的引用会在重选时清理，并切到下一个目标
+					PlayGatheringMontage();
+					if (GEngine)
+					{
+						GEngine->AddOnScreenDebugMessage(-1, 1.5f, FColor::Green,
+							FString::Printf(TEXT("[背包] %s 已装进篮子"), *ItemName));
+					}
+				}
+				return true;
+			});
+		}
 	}
 
 	for (TActorIterator<AFireflyAreaVolume> It(GetWorld()); It; ++It)
@@ -2228,7 +2276,19 @@ void AShootCharacter::TickRangePick(float DeltaTime)
 	{
 		RangePickCooldown = RangePickInterval;
 		const FString ItemName = Item->GetName();
-		if (AddItemToInventory(Item)) // 内部销毁世界物体，之后不能再访问 Item
+		// 手上拿着外出背包：能入篮的食材优先装进篮子（"带篮子捡鸡蛋"等任务按篮内数量计），
+		// 不能入篮 / 篮子已满时才退回原逻辑收进背包
+		if (GetEquippedBasket() && Item->bCanStoreInBasket && StoreHarvestInBasket(Item, 1)) // 成功后 Item 已销毁
+		{
+			RemoveOverlappingItem(Item);
+			RefreshBestOverlappingItem();
+			if (GEngine)
+			{
+				GEngine->AddOnScreenDebugMessage(-1, 1.f, FColor::Green,
+					FString::Printf(TEXT("[范围拾取] %s 已装进篮子"), *ItemName));
+			}
+		}
+		else if (AddItemToInventory(Item)) // 内部销毁世界物体，之后不能再访问 Item
 		{
 			RemoveOverlappingItem(Item);
 			if (GEngine)
