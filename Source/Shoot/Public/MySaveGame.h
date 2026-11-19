@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/SaveGame.h"
 #include "Game/StaffSystem.h"
+#include "Game/SeasonSystem.h"
 #include "MySaveGame.generated.h"
 
 /**
@@ -37,6 +38,13 @@ class SHOOT_API UMySaveGame : public USaveGame
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Shoot|Business")
 	int32 BizDay = 1;
 
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, SaveGame, Category = "Shoot|Business")
+	int32 BizTodayIncome = 0;
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, SaveGame, Category = "Shoot|Business")
+	int32 BizTodayExpense = 0;
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, SaveGame, Category = "Shoot|Business")
+	int32 BizTodayInvestment = 0;
+
 	/** 员工 / 居民名册（含属性与是否在职），替代"关卡制"后的核心经营资产 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Shoot|Business")
 	TArray<FStaffMember> BizRoster;
@@ -48,6 +56,18 @@ class SHOOT_API UMySaveGame : public USaveGame
 	/** 已解锁的菜谱（菜品 FoodID，由研究炉解锁）。跨存档持久化。 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Shoot|Recipe")
 	TArray<int32> UnlockedRecipes;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Shoot|Recipe")
+	TArray<int32> DailyMenuFoodIDs;
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Shoot|Recipe")
+	TArray<int32> TastedFoodIDs;
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Shoot|Tutorial")
+	bool bFirstServiceTutorialComplete = false;
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Shoot|Tutorial")
+	int32 FirstDayOrdersServed = 0;
+	/** 只有实际依序完成的教学步骤才入档，不能从订单总数推断。 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Shoot|Tutorial")
+	TArray<int32> FirstDayTutorialCompletedSteps;
 
 	/** 食物箱剩余数量持久化：键 = 箱子 ActorGuid 字符串，值 = 剩余可生成数量。跨存档持久化。 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Shoot|Spawner")
@@ -68,6 +88,9 @@ class SHOOT_API UMySaveGame : public USaveGame
 	// —— 赛季（USeasonSystem）持久化字段：48 天三幕 + 幕检查点 ——
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Shoot|Season")
 	int32 SeasonDay = 1;
+	/** 空值是升级前的 48 天存档；新游戏记住所选赛季配置。 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Shoot|Season")
+	FName SeasonConfigProfile = NAME_None;
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Shoot|Season")
 	int32 SeasonAct = 1;
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Shoot|Season")
@@ -88,6 +111,9 @@ class SHOOT_API UMySaveGame : public USaveGame
 	bool bSeasonEnded = false;
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Shoot|Season")
 	int32 SeasonEnding = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, SaveGame, Category = "Shoot|Season|Finance")
+	TArray<FDailyFinancialRecord> SeasonDailyFinancialHistory;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Shoot|Season|Checkpoint")
 	bool bSeasonCheckpointValid = false;

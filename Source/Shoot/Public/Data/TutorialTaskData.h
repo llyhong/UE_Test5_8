@@ -24,11 +24,15 @@ enum class ETutorialTaskType : uint8
 	StoreToWarehouse UMETA(DisplayName = "存入仓库"),
 	/** 赚钱：进度 = 本关累计收入（LevelBP::MoneyEarnedThisLevel 按当天起点做差） */
 	EarnMoney UMETA(DisplayName = "赚取金钱"),
+	AcceptOrder UMETA(DisplayName = "接受订单"),
+	AddToCooker UMETA(DisplayName = "投入锅中"),
+	CookDish UMETA(DisplayName = "完成烹饪"),
+	CollectDish UMETA(DisplayName = "端起成品"),
 };
 
 /**
  * 新手任务数据表行结构（RowStruct = FTutorialTaskRow）。
- * 一天可以配多行，按 StepOrder 排序显示；同一天的任务同时开放，箭头指向第一个未完成的任务。
+ * 一天可以配多行，按 StepOrder 排序显示；同一天的任务依次开放，箭头指向当前未完成的任务。
  * 目标物件通过 Actor 标签（TargetActorTag）指定，避免写死关卡坐标：
  *  - ResearchItem  → 标签打在研究炉上（留空则找任意 AResearchStove）
  *  - StoreToWarehouse → 标签打在冰箱/仓库上（留空则找任意 AStorageWarehouse）

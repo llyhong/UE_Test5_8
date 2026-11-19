@@ -58,6 +58,10 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Gameplay")
 	TObjectPtr<UMySaveGame> curSaveGameData;
 
+	/** 直接运行 Kitchen_New 时使用独立的第一天进度，不读写正式经营存档。 */
+	UPROPERTY(Transient, BlueprintReadOnly, Category = "Shoot|Gameplay")
+	bool bUseTemporaryKitchenProgress = false;
+
 	// ========== 选角（登录 → 选角色 → 进入主关卡） ==========
 	/** 角色配置表（RowStruct = FRoleInfo）。未配置时自动加载 /Game/_Demo/Data/DT_CharacterRoles。
 	 *  新增可选角色 = 往表里加一行，无需改界面代码。 */
@@ -353,6 +357,8 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Gameplay")
 	FORCEINLINE void SetMultiPlayerState(bool state){IsMultiPlayerState = state;}
 private:
+	// 仅实际运行过开始菜单的会话允许延续正式经营进度。
+	bool bEnteredFromStartMenu = false;
 	// 单调时钟仅用于本次进程，不写入存档。
 	TMap<FString, double> WildPlantSnapshotTimes;
 	int32 ActiveWildHarvestTransactions = 0;

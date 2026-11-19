@@ -19,6 +19,8 @@
 #include "Data/MenuData.h"
 #include "Game/BaseGameInstance.h"
 #include "Game/FoodSystem.h"
+#include "Game/BaseLevelBP.h"
+#include "Game/OrderSystem.h"
 #include "GameFramework/PlayerController.h"
 #include "InputCoreTypes.h"
 #include "Styling/CoreStyle.h"
@@ -27,7 +29,7 @@ namespace
 {
 	constexpr int32 RecipeBookZOrder = 80;
 	constexpr float CardWidth = 430.f;
-	constexpr float CardHeight = 178.f;
+	constexpr float CardHeight = 218.f;
 	constexpr float CardGap = 12.f;
 	constexpr int32 MaxCardsPerRow = 3;
 	constexpr float PanelWidth = 1380.f;
@@ -49,6 +51,20 @@ namespace
 		Label->SetText(FText::FromString(Text));
 		return Label;
 	}
+}
+
+void UDailyMenuButton::Configure(URecipeBookWidget* InBook, AOrderSystem* InSystem, int32 InFoodID)
+{
+	Book = InBook;
+	System = InSystem;
+	FoodID = InFoodID;
+	OnClicked.AddDynamic(this, &UDailyMenuButton::ToggleDish);
+}
+
+void UDailyMenuButton::ToggleDish()
+{
+	if (System.IsValid() && System->ToggleDailyMenuDish(FoodID) && Book.IsValid())
+		Book->Refresh();
 }
 
 void URecipeBookWidget::ToggleForPlayer(APlayerController* PC)
@@ -82,6 +98,7 @@ void URecipeBookWidget::ToggleForPlayer(APlayerController* PC)
 		ActiveBooks.Add(TWeakObjectPtr<APlayerController>(PC), Book);
 	}
 
+	Book->SetIsFocusable(true);
 	Book->AddToViewport(RecipeBookZOrder);
 	Book->Refresh();
 	Book->SetUIInputEnabled(true);
@@ -183,6 +200,7 @@ TSharedRef<SWidget> URecipeBookWidget::RebuildWidget()
 	SummaryText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("SummaryText"));
 	SummaryText->SetFont(FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 14));
 	SummaryText->SetColorAndOpacity(FSlateColor(TextMuted));
+	SummaryText->SetAutoWrapText(true);
 	if (UVerticalBoxSlot* PanelSlot = Column->AddChildToVerticalBox(SummaryText))
 	{
 		PanelSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 14.f));
@@ -202,7 +220,7 @@ TSharedRef<SWidget> URecipeBookWidget::RebuildWidget()
 	CardList = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("CardList"));
 	ScrollBox->AddChild(CardList);
 
-	FooterText = MakeText(WidgetTree, TEXT("滚轮 / ↑↓ 翻看 · 点右上角 × 或按 E / Esc 关闭"), 12, TextMuted);
+	FooterText = MakeText(WidgetTree, TEXT("开门前调整今日菜单 · 新菜优先试做 · 滚轮翻看 · E / Esc 关闭"), 12, TextMuted);
 	Column->AddChildToVerticalBox(FooterText);
 
 	return Super::RebuildWidget();
@@ -252,9 +270,13 @@ void URecipeBookWidget::Refresh()
 
 	if (SummaryText)
 	{
+		const AOrderSystem* Orders = GI->curLevelBP ? GI->curLevelBP->orderSystem.Get() : nullptr;
+		const FString MenuInfo = Orders && Orders->orderCfg && Orders->orderCfg->bEnableDailyMenu
+			? FString::Printf(TEXT(" · 今日菜单 %d / %d · %s"), Orders->GetDailyMenu().Num(),
+				Orders->orderCfg->DailyMenuCapacity, Orders->IsDailyMenuEditable() ? TEXT("点击菜品按钮调整") : TEXT("营业或首日教学期间锁定")) : FString();
 		SummaryText->SetText(FText::FromString(FString::Printf(
-			TEXT("已解锁 %d / %d · 未解锁菜谱需在研究炉投入食材研究（剪影下方是研究线索）"),
-			UnlockedIDs.Num(), UnlockedIDs.Num() + LockedIDs.Num())));
+			TEXT("已解锁 %d / %d%s · 未解锁菜谱可在研究炉研究"),
+			UnlockedIDs.Num(), UnlockedIDs.Num() + LockedIDs.Num(), *MenuInfo)));
 	}
 
 	TArray<int32> OrderedIDs = UnlockedIDs;
@@ -346,6 +368,7 @@ UWidget* URecipeBookWidget::CreateCard(const FMenuData& Menu, int32 FoodID, bool
 	if (UHorizontalBoxSlot* InfoSlot = Row->AddChildToHorizontalBox(Info))
 	{
 		InfoSlot->SetVerticalAlignment(VAlign_Center);
+		InfoSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
 	}
 
 	const FString DisplayName = bUnlocked && !Menu.FoodName.IsEmpty()
@@ -399,6 +422,25 @@ UWidget* URecipeBookWidget::CreateCard(const FMenuData& Menu, int32 FoodID, bool
 		UTextBlock* MetaText = MakeText(WidgetTree, FString::Printf(TEXT("售价 %d · 最长等待 %.0f 秒"),
 			Menu.Price, Menu.MaxWaitTime), 12, TextMuted);
 		Info->AddChildToVerticalBox(MetaText);
+		AOrderSystem* Orders = GI && GI->curLevelBP ? GI->curLevelBP->orderSystem.Get() : nullptr;
+		if (Orders && Orders->orderCfg && Orders->orderCfg->bEnableDailyMenu)
+		{
+			const bool bSelected = Orders->GetDailyMenu().Contains(FoodID);
+			const bool bAvailable = Orders->GetAvailableDailyDishes().Contains(FoodID);
+			UDailyMenuButton* Button = WidgetTree->ConstructWidget<UDailyMenuButton>();
+			Button->Configure(this, Orders, FoodID);
+			Button->SetIsEnabled(Orders->IsDailyMenuEditable() && bAvailable
+				&& (bSelected ? Orders->GetDailyMenu().Num() > 1
+					: Orders->GetDailyMenu().Num() < Orders->orderCfg->DailyMenuCapacity));
+			Button->SetBackgroundColor(bSelected ? FLinearColor(0.16f, 0.42f, 0.25f) : FLinearColor(0.25f, 0.22f, 0.14f));
+			const FString Label = Menu.bRequiresWildIngredient ? TEXT("野味委托 · 备料时段提供")
+				: !bAvailable ? TEXT("尚缺设备、食材或未到开放日")
+				: bSelected ? TEXT("今日菜单 ✓ · 点击移除") : TEXT("加入今日菜单");
+			Button->SetContent(MakeText(WidgetTree, Label, 12, TextPrimary));
+			Button->SetToolTipText(FText::FromString(TEXT("开门前选择 1～4 道菜；营业期间菜单锁定")));
+			if (UVerticalBoxSlot* ButtonSlot = Info->AddChildToVerticalBox(Button))
+				ButtonSlot->SetPadding(FMargin(0.f, 8.f, 0.f, 0.f));
+		}
 	}
 	else
 	{

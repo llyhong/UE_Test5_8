@@ -1,6 +1,8 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 #include "NPC/GuestCharacter.h"
+#include "Game/TutorialTaskManager.h"
+#include "EngineUtils.h"
 #include "NPC/ChairSeat.h"
 #include "NPC/GuestManager.h"
 #include "ShootCharacter.h"
@@ -20,7 +22,6 @@
 #include "Game/BaseLevelBP.h"
 #include "Game/OrderSystem.h"
 #include "NiagaraComponent.h"
-#include "NiagaraFunctionLibrary.h"
 #include "NiagaraSystem.h"
 #include "UObject/ConstructorHelpers.h"
 
@@ -30,12 +31,19 @@ AGuestCharacter::AGuestCharacter()
 	PrimaryActorTick.bCanEverTick = true;
 	PrimaryActorTick.bStartWithTickEnabled = false;
 
-	// 上菜成功默认播放工程自带的彩带爆发特效；美术可在蓝图里替换成爱心 / 星星
-	static ConstructorHelpers::FObjectFinder<UNiagaraSystem> HappyFx(TEXT("/Game/StackOBot/FX/Confetti/NS_Confetti.NS_Confetti"));
-	if (HappyFx.Succeeded())
+	static ConstructorHelpers::FObjectFinder<UNiagaraSystem> HappySystem(TEXT("/Game/_Demo/Effect/Guest/NS_GuestHeartPop.NS_GuestHeartPop"));
+	if (HappySystem.Succeeded())
 	{
-		HappyEffectSystem = HappyFx.Object;
+		HappyEffectSystem = HappySystem.Object;
 	}
+
+	HappyNiagaraComponent = CreateDefaultSubobject<UNiagaraComponent>(TEXT("HappyNiagaraComponent"));
+	HappyNiagaraComponent->SetupAttachment(RootComponent);
+	HappyNiagaraComponent->SetAbsolute(true, true, true);
+	HappyNiagaraComponent->SetAutoActivate(false);
+	HappyNiagaraComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	HappyNiagaraComponent->SetGenerateOverlapEvents(false);
+	HappyNiagaraComponent->SetCastShadow(false);
 
 	// 由 AI 控制器自动接管
 	AIControllerClass = AGuestAIController::StaticClass();
@@ -506,6 +514,10 @@ void AGuestCharacter::Tick(float DeltaSeconds)
 
 void AGuestCharacter::StartWaitFoodTimeout()
 {
+	for (TActorIterator<ATutorialTaskManager> It(GetWorld()); It; ++It)
+	{
+		if (It->IsFirstServiceTutorialActive()) return;
+	}
 	// 兜底：无订单系统时，等待上菜超时则离开
 	// CreateWeakLambda：Actor 已销毁时回调不执行（避免在已释放的 this 上读 GuestState）
 	if (UWorld* World = GetWorld())
@@ -719,29 +731,17 @@ void AGuestCharacter::StartEating()
 	bIsEating = true;
 	bIsSitting = true;
 
-	// 上菜成功：先给蓝图一个开心表现入口，再生成默认 1~3 秒的彩带特效
 	BP_OnGuestHappy();
-	if (HappyEffectSystem && GetMesh() && GetWorld())
+	if (HappyEffectSystem && HappyNiagaraComponent && IsValid(SeatActor))
 	{
-		if (UNiagaraComponent* OldEffect = HappyEffectComponent.Get())
-		{
-			OldEffect->Deactivate();
-			OldEffect->DestroyComponent();
-		}
-		if (UNiagaraComponent* Effect = UNiagaraFunctionLibrary::SpawnSystemAttached(
-			HappyEffectSystem, GetMesh(), NAME_None, FVector(0.f, 0.f, 90.f), FRotator::ZeroRotator,
-			EAttachLocation::KeepRelativeOffset, false))
-		{
-			HappyEffectComponent = Effect;
-			// 持续时间到点后停止发射（已有粒子自然消散），默认 2 秒
-			GetWorld()->GetTimerManager().SetTimer(HappyEffectTimerHandle, FTimerDelegate::CreateWeakLambda(this, [this]()
-			{
-				if (UNiagaraComponent* Current = HappyEffectComponent.Get())
-				{
-					Current->Deactivate();
-				}
-			}), FMath::Clamp(HappyEffectDuration, 0.5f, 5.f), false);
-		}
+		const float EffectWidth = FMath::Clamp(HappyEffectWidth, 20.f, 240.f);
+		const float TableOffset = FMath::Max(HappyEffectTableOffset, EffectWidth * 0.5f + 20.f);
+		HappyNiagaraComponent->SetAsset(HappyEffectSystem);
+		HappyNiagaraComponent->SetVariableFloat(TEXT("User.EffectWidth"), EffectWidth);
+		HappyNiagaraComponent->SetVariableFloat(TEXT("User.Duration"), FMath::Clamp(HappyEffectDuration, 0.5f, 5.f));
+		HappyNiagaraComponent->SetWorldLocation(SeatActor->GetPlateSocketTransform().GetLocation()
+			+ FVector(0.f, 0.f, TableOffset));
+		HappyNiagaraComponent->Activate(true);
 	}
 
 	// 进食结束后：方案B 把桌上菜品转为空碟占据座位，再离座

@@ -10,6 +10,7 @@
 void USeasonSystem::Init(UEconomySystem* InEconomy, UBusinessSimulation* InBusiness)
 {
 	Economy = InEconomy;
+	NewGameConfigRowName = ConfigRowName;
 	Business = InBusiness;
 
 	Config = FSeasonConfigRow();
@@ -36,6 +37,11 @@ void USeasonSystem::Init(UEconomySystem* InEconomy, UBusinessSimulation* InBusin
 
 void USeasonSystem::ResetForNewGame()
 {
+	ConfigRowName = NewGameConfigRowName.IsNone() ? ConfigRowName : NewGameConfigRowName;
+	Config = FSeasonConfigRow();
+	if (ConfigTable)
+		if (const FSeasonConfigRow* Row = ConfigTable->FindRow<FSeasonConfigRow>(ConfigRowName, TEXT("NewSeason")))
+			Config = *Row;
 	SeasonDay = 1;
 	Act = 1;
 	SeasonMoneyEarned = 0;
@@ -54,10 +60,12 @@ void USeasonSystem::ResetForNewGame()
 	LastWildServed = 0;
 	LastAvgWait = 0.f;
 	LastDailyNet = 0;
+	LastDailyInvestment = 0;
 	LastMoney = 0;
 	LastReputation = 0;
 	LastStars = 0;
 	LastHint.Reset();
+	DailyFinancialHistory.Reset();
 	ResetToday();
 	bCheckpointValid = false;
 
@@ -148,7 +156,33 @@ void USeasonSystem::FailSeason(const FString& Reason)
 	OnSeasonEnded.Broadcast(false, Ending);
 }
 
-void USeasonSystem::EvaluateDay(int32 DailyNet, int32 Cash, int32 Reputation, int32 Stars)
+void USeasonSystem::RecordDailyReport(const FBusinessReport& Report)
+{
+	if (bSeasonEnded)
+	{
+		return;
+	}
+
+	FDailyFinancialRecord Record;
+	Record.Day = SeasonDay;
+	Record.Revenue = Report.Income;
+	Record.OperatingExpense = Report.Expense - Report.Investment;
+	Record.Investment = Report.Investment;
+	Record.Cash = Report.Money;
+	Record.UnpaidBills = Economy ? Economy->GetUnpaidBills() : 0;
+
+	DailyFinancialHistory.RemoveAll([this](const FDailyFinancialRecord& Existing)
+	{
+		return Existing.Day >= SeasonDay;
+	});
+	DailyFinancialHistory.Add(Record);
+	if (DailyFinancialHistory.Num() > 7)
+	{
+		DailyFinancialHistory.RemoveAt(0, DailyFinancialHistory.Num() - 7);
+	}
+}
+
+void USeasonSystem::EvaluateDay(int32 DailyNet, int32 Cash, int32 Reputation, int32 Stars, int32 Investment)
 {
 	if (bSeasonEnded)
 	{
@@ -185,6 +219,7 @@ void USeasonSystem::EvaluateDay(int32 DailyNet, int32 Cash, int32 Reputation, in
 	LastWildServed = TodayWildServed;
 	LastAvgWait = AvgWait;
 	LastDailyNet = DailyNet;
+	LastDailyInvestment = Investment;
 	LastMoney = Cash;
 	LastReputation = Reputation;
 	LastStars = Stars;
@@ -255,7 +290,7 @@ void USeasonSystem::EvaluateDay(int32 DailyNet, int32 Cash, int32 Reputation, in
 	// 每条连续线只在第 1 天播一次警告，避免每天刷屏；新手保护期内也播，让玩家提前感知趋势
 	if (ConsecutivePoorDays == 1) WarnStreak(TEXT("今日评级为 D"), ConsecutivePoorDays);
 	if (ConsecutiveLowRepDays == 1) WarnStreak(TEXT("声誉跌破 1 星线"), ConsecutiveLowRepDays);
-	if (ConsecutiveDebtDays == 1) WarnStreak(TEXT("今日未付食材账单"), ConsecutiveDebtDays);
+	if (ConsecutiveDebtDays == 1) WarnStreak(UnpaidBills > 0 ? TEXT("必要账单尚未付清") : TEXT("今日营业亏损（不含设备投资）"), ConsecutiveDebtDays);
 
 	// ---- 季末丰收祭 ----
 	if (SeasonDay >= Config.SeasonDays)
@@ -324,6 +359,10 @@ void USeasonSystem::RetryAct()
 		Business->TimeSystem->DayProgress = 0.f;
 	}
 
+	DailyFinancialHistory.RemoveAll([this](const FDailyFinancialRecord& Record)
+	{
+		return Record.Day >= CheckpointDay;
+	});
 	SeasonDay = CheckpointDay;
 	Act = FMath::Clamp((SeasonDay - 1) / FMath::Max(1, Config.DaysPerAct) + 1, 1, 3);
 	SeasonMoneyEarned = CheckpointSeasonMoneyEarned;
@@ -427,6 +466,7 @@ void USeasonSystem::Save()
 	}
 
 	UMySaveGame* Data = GI->curSaveGameData;
+	Data->SeasonConfigProfile = ConfigRowName;
 	Data->SeasonDay = SeasonDay;
 	Data->SeasonAct = Act;
 	Data->SeasonMoneyEarned = SeasonMoneyEarned;
@@ -438,6 +478,7 @@ void USeasonSystem::Save()
 	Data->bSeasonWon = bSeasonWon;
 	Data->bSeasonEnded = bSeasonEnded;
 	Data->SeasonEnding = static_cast<int32>(Ending);
+	Data->SeasonDailyFinancialHistory = DailyFinancialHistory;
 	Data->bSeasonCheckpointValid = bCheckpointValid;
 	Data->CheckpointDay = CheckpointDay;
 	Data->CheckpointMoney = CheckpointMoney;
@@ -457,6 +498,12 @@ void USeasonSystem::Load()
 	}
 
 	const UMySaveGame* Data = GI->curSaveGameData;
+	// 旧存档继续 48 天，新存档按创建时选的配置读取，避免被新默认截断。
+	ConfigRowName = Data->SeasonConfigProfile.IsNone() ? FName(TEXT("Default")) : Data->SeasonConfigProfile;
+	Config = FSeasonConfigRow();
+	if (ConfigTable)
+		if (const FSeasonConfigRow* Row = ConfigTable->FindRow<FSeasonConfigRow>(ConfigRowName, TEXT("LoadSeason")))
+			Config = *Row;
 	SeasonDay = FMath::Clamp(Data->SeasonDay, 1, FMath::Max(1, Config.SeasonDays));
 	Act = FMath::Clamp(Data->SeasonAct, 1, 3);
 	SeasonMoneyEarned = Data->SeasonMoneyEarned;
@@ -468,6 +515,11 @@ void USeasonSystem::Load()
 	bSeasonWon = Data->bSeasonWon;
 	bSeasonEnded = Data->bSeasonEnded;
 	Ending = static_cast<ESeasonEnding>(FMath::Clamp(Data->SeasonEnding, 0, 4));
+	DailyFinancialHistory = Data->SeasonDailyFinancialHistory;
+	if (DailyFinancialHistory.Num() > 7)
+	{
+		DailyFinancialHistory.RemoveAt(0, DailyFinancialHistory.Num() - 7);
+	}
 	bCheckpointValid = Data->bSeasonCheckpointValid;
 	CheckpointDay = Data->CheckpointDay;
 	CheckpointMoney = Data->CheckpointMoney;

@@ -12,6 +12,7 @@ class UBorder;
 class UTextBlock;
 class UButton;
 class APlayerController;
+class SRevenueChart;
 
 /**
  * 日结卡（C++ 构建，无需 WBP）：每天打烊结算时弹出。
@@ -58,7 +59,7 @@ private:
 	UPROPERTY()
 	UBorder* CardBorder = nullptr;
 
-	/** 卡片底刷：描边颜色随评级改，需要保留可改副本 */
+	/** 奶油纸卡与蜂蜜金描边。 */
 	UPROPERTY()
 	FSlateBrush CardBrush;
 
@@ -79,6 +80,24 @@ private:
 
 	UPROPERTY()
 	UTextBlock* NetText = nullptr;
+
+	UPROPERTY()
+	UTextBlock* RevenueText = nullptr;
+
+	UPROPERTY()
+	UTextBlock* ExpenseText = nullptr;
+
+	UPROPERTY()
+	UTextBlock* ProfitText = nullptr;
+
+	UPROPERTY()
+	UTextBlock* CashText = nullptr;
+
+	UPROPERTY()
+	TArray<TObjectPtr<UTextBlock>> DetailValues;
+
+	TSharedPtr<SRevenueChart> RevenueChart;
+	FVector2D LastLayoutSize = FVector2D::ZeroVector;
 
 	UPROPERTY()
 	UTextBlock* SeasonText = nullptr;

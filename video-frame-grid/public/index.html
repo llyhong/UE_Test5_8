@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f5f7f6" />
+    <title>帧格 · 视频拼图</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="/lucide/lucide.js" defer></script>
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true"
+            ><span></span><span></span><span></span><span></span
+          ></span>
+          <span>帧格</span>
+        </div>
+        <span class="topbar-label">视频画面拼图</span>
+      </header>
+
+      <main>
+        <div class="page-heading">
+          <div>
+            <p class="eyebrow">VIDEO CONTACT SHEET</p>
+            <h1>视频画面拼图</h1>
+          </div>
+          <span class="local-badge"
+            ><i data-lucide="hard-drive" aria-hidden="true"></i>本机处理</span
+          >
+        </div>
+
+        <div class="workspace">
+          <section class="video-section" aria-labelledby="video-title">
+            <div class="section-heading">
+              <h2 id="video-title">视频</h2>
+              <span id="file-size" class="muted"></span>
+            </div>
+            <div
+              id="dropzone"
+              class="dropzone"
+              role="button"
+              tabindex="0"
+              aria-label="选择视频文件"
+            >
+              <div id="empty-video" class="empty-video">
+                <div class="upload-icon">
+                  <i data-lucide="film" aria-hidden="true"></i>
+                </div>
+                <strong>选择或拖入视频</strong>
+                <span>MP4、MOV、WebM 等常见格式</span>
+                <button
+                  id="choose-button"
+                  type="button"
+                  class="button button-secondary"
+                >
+                  <i data-lucide="folder-open" aria-hidden="true"></i>选择视频
+                </button>
+              </div>
+              <video
+                id="video-preview"
+                class="video-preview"
+                controls
+                playsinline
+                hidden
+              ></video>
+              <input
+                id="file-input"
+                type="file"
+                accept="video/*,.mkv,.avi,.mov,.mp4,.webm"
+                hidden
+              />
+            </div>
+            <div id="video-details" class="video-details" hidden>
+              <div class="file-name">
+                <i data-lucide="file-video" aria-hidden="true"></i
+                ><span id="file-name"></span>
+              </div>
+              <div class="video-meta">
+                <span id="video-resolution">-</span
+                ><span id="video-duration">-</span>
+              </div>
+              <button
+                id="replace-button"
+                class="icon-button"
+                type="button"
+                title="更换视频"
+                aria-label="更换视频"
+              >
+                <i data-lucide="replace" aria-hidden="true"></i>
+              </button>
+            </div>
+          </section>
+
+          <section class="settings-section" aria-labelledby="settings-title">
+            <div class="section-heading">
+              <h2 id="settings-title">拼图设置</h2>
+              <span class="muted">单张图片</span>
+            </div>
+            <div class="setting-group">
+              <label>网格布局</label>
+              <div class="grid-controls">
+                <div class="number-field">
+                  <span>列</span
+                  ><input
+                    id="columns"
+                    type="number"
+                    min="1"
+                    max="10"
+                    value="3"
+                    inputmode="numeric"
+                  />
+                </div>
+                <span class="times" aria-hidden="true">×</span>
+                <div class="number-field">
+                  <span>行</span
+                  ><input
+                    id="rows"
+                    type="number"
+                    min="1"
+                    max="10"
+                    value="3"
+                    inputmode="numeric"
+                  />
+                </div>
+              </div>
+              <div class="setting-note">
+                <span id="frames-per-sheet">选取 9 帧</span
+                ><span>最多 10 × 10</span>
+              </div>
+            </div>
+            <div class="setting-group">
+              <label for="output-size">最终输出尺寸</label>
+              <div class="select-wrap">
+                <select id="output-size">
+                  <option value="512">512 × 512</option>
+                  <option value="1024">1024 × 1024</option>
+                  <option value="2048" selected>2048 × 2048</option>
+                  <option value="4096">4096 × 4096</option>
+                </select>
+                <i data-lucide="chevron-down" aria-hidden="true"></i>
+              </div>
+            </div>
+            <div class="setting-group">
+              <label for="spacing-percent">画面间距</label>
+              <div class="spacing-control">
+                <input
+                  id="spacing-percent"
+                  type="range"
+                  min="0"
+                  max="4"
+                  step="0.25"
+                  value="0.75"
+                />
+                <output id="spacing-value" for="spacing-percent output-size"
+                  >0.75% · 15 px</output
+                >
+              </div>
+            </div>
+            <div class="setting-group">
+              <span class="field-label">图片格式</span>
+              <div class="segmented" role="group" aria-label="图片格式">
+                <button
+                  class="segment active"
+                  type="button"
+                  data-format="jpg"
+                  aria-pressed="true"
+                >
+                  JPG
+                </button>
+                <button
+                  class="segment"
+                  type="button"
+                  data-format="png"
+                  aria-pressed="false"
+                >
+                  PNG
+                </button>
+              </div>
+            </div>
+            <div class="settings-footer">
+              <button
+                id="generate-button"
+                class="button button-primary"
+                type="button"
+                disabled
+              >
+                <i data-lucide="grid-3x3" aria-hidden="true"></i>生成拼图
+              </button>
+              <p id="settings-hint">选择视频后即可开始</p>
+            </div>
+          </section>
+        </div>
+
+        <section
+          id="progress-section"
+          class="progress-section"
+          hidden
+          aria-live="polite"
+        >
+          <div class="progress-top">
+            <div>
+              <span class="progress-pulse"></span
+              ><strong id="progress-title">正在处理</strong>
+            </div>
+            <span id="progress-count">准备中</span>
+          </div>
+          <div id="progress-track" class="progress-track">
+            <div id="progress-bar"></div>
+          </div>
+          <div class="progress-bottom">
+            <span id="progress-detail">正在读取视频</span
+            ><button id="cancel-button" type="button" class="text-button">
+              取消处理
+            </button>
+          </div>
+        </section>
+
+        <section
+          id="result-section"
+          class="result-section"
+          hidden
+          aria-labelledby="result-title"
+        >
+          <div class="result-header">
+            <div>
+              <p class="eyebrow">OUTPUT</p>
+              <h2 id="result-title">拼图结果</h2>
+              <p id="result-summary" class="muted"></p>
+            </div>
+            <div class="result-actions">
+              <button
+                id="update-spacing"
+                type="button"
+                class="button button-secondary"
+                hidden
+              >
+                <i data-lucide="sliders-horizontal" aria-hidden="true"></i
+                >更新间距
+              </button>
+              <button
+                id="new-button"
+                type="button"
+                class="button button-secondary"
+              >
+                <i data-lucide="plus" aria-hidden="true"></i>新建任务
+              </button>
+              <button
+                id="edit-frames"
+                type="button"
+                class="button button-secondary"
+              >
+                <i data-lucide="square-pen" aria-hidden="true"></i>删除帧
+              </button>
+              <a id="download-image" class="button button-primary" href="#"
+                ><i data-lucide="download" aria-hidden="true"></i>下载图片</a
+              >
+            </div>
+          </div>
+          <div class="result-image-wrap">
+            <img id="result-image" alt="视频拼图" title="点击放大" />
+          </div>
+        </section>
+
+        <div id="error-message" class="error-message" hidden role="alert"></div>
+      </main>
+    </div>
+
+    <dialog id="image-dialog" class="image-dialog">
+      <div class="dialog-top">
+        <span id="dialog-title"></span>
+        <div>
+          <a
+            id="dialog-download"
+            class="icon-button"
+            href="#"
+            title="下载拼图"
+            aria-label="下载拼图"
+            ><i data-lucide="download" aria-hidden="true"></i></a
+          ><button
+            id="dialog-close"
+            type="button"
+            class="icon-button"
+            title="关闭"
+            aria-label="关闭"
+          >
+            <i data-lucide="x" aria-hidden="true"></i>
+          </button>
+        </div>
+      </div>
+      <div class="editor-canvas">
+        <img id="dialog-image" alt="拼图预览" />
+        <div id="frame-grid" class="frame-grid"></div>
+      </div>
+      <div class="editor-footer">
+        <span id="edit-count"></span>
+        <div>
+          <button
+            id="restore-frames"
+            type="button"
+            class="button button-secondary"
+          >
+            恢复全部帧
+          </button>
+          <button id="apply-frames" type="button" class="button button-primary">
+            应用删除
+          </button>
+        </div>
+      </div>
+    </dialog>
+  </body>
+</html>

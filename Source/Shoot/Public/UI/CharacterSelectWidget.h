@@ -12,6 +12,7 @@ class UBorder;
 class UHorizontalBox;
 class UImage;
 class UTextBlock;
+class UTexture2D;
 
 /** 选角卡片按钮：记录角色 ID，点击时通知所属选角界面（支持表里继续加行） */
 UCLASS()
@@ -33,7 +34,12 @@ public:
 
 private:
 	UFUNCTION()
+	void HandlePressed();
+
+	UFUNCTION()
 	void HandleClicked();
+
+	bool bGamepadSimulatedClick = false;
 };
 
 /**
@@ -64,13 +70,19 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Shoot|Role")
 	int32 GetCurrentRoleID() const;
 
+	UWidget* GetDesiredFocusTarget();
+	void OnRoleClicked(int32 RoleID, bool bGamepadSimulatedClick);
+
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
 	virtual void NativeConstruct() override;
 	virtual void NativeDestruct() override;
-	virtual FReply NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent) override;
+	virtual FReply NativeOnPreviewKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent) override;
+	virtual FReply NativeOnAnalogValueChanged(const FGeometry& InGeometry, const FAnalogInputEvent& InAnalogEvent) override;
+	virtual FReply NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
 
 private:
+	void Navigate(EUINavigation Direction);
 	/** 按配置生成一张角色卡片 */
 	void BuildCard(int32 CardIndex, int32 RoleID);
 
@@ -79,6 +91,21 @@ private:
 
 	UFUNCTION()
 	void OnConfirmClicked();
+
+	UFUNCTION()
+	void OnHelpClicked();
+
+	UPROPERTY()
+	TObjectPtr<UTexture2D> BackgroundTexture;
+
+	UPROPERTY()
+	TMap<int32, TObjectPtr<UTexture2D>> RolePortraits;
+
+	UPROPERTY()
+	TObjectPtr<UButton> HelpButton;
+
+	UPROPERTY()
+	TObjectPtr<UBorder> HelpPanel;
 
 	UPROPERTY()
 	TObjectPtr<UBaseGameInstance> GameInstance;
@@ -109,17 +136,15 @@ private:
 	TArray<TObjectPtr<UBorder>> CardBorders;
 
 	UPROPERTY()
-	TArray<TObjectPtr<UImage>> CardIcons;
+	TArray<TObjectPtr<UBorder>> CardSelectionBadges;
 
 	UPROPERTY()
 	TArray<TObjectPtr<UTextBlock>> CardNameTexts;
-
-	UPROPERTY()
-	TArray<TObjectPtr<UTextBlock>> CardPersonalityTexts;
 
 	/** 可选角色 ModelID（与卡片顺序一致） */
 	TArray<int32> RoleIDs;
 
 	int32 CurrentRoleID = 0;
 	int32 InitialRoleID = 0;
+	bool bGameWasPaused = false;
 };

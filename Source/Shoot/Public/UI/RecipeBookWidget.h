@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
+#include "Components/Button.h"
 #include "RecipeBookWidget.generated.h"
 
 class APlayerController;
@@ -15,6 +16,23 @@ class UVerticalBox;
 class UWidget;
 
 struct FMenuData;
+class URecipeBookWidget;
+class AOrderSystem;
+
+/** 单张菜谱的菜单选择按钮，保留各自 FoodID，避免共享点击状态。 */
+UCLASS()
+class SHOOT_API UDailyMenuButton : public UButton
+{
+	GENERATED_BODY()
+public:
+	void Configure(URecipeBookWidget* InBook, AOrderSystem* InSystem, int32 InFoodID);
+private:
+	UFUNCTION()
+	void ToggleDish();
+	TWeakObjectPtr<URecipeBookWidget> Book;
+	TWeakObjectPtr<AOrderSystem> System;
+	int32 FoodID = INDEX_NONE;
+};
 
 /**
  * 菜谱图鉴（C++ 构建，无需 WBP）：

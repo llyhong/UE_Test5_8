@@ -1720,6 +1720,12 @@ void AShootCharacter::BuildInteractionOptions(TArray<FInteractOption, TInlineAll
 	}
 
 	// ---------------- Tier 2：环境交互（同层按距离决胜） ----------------
+	if (!PickingItem && CookingMachine && CookingMachine->IsAttentionAvailable())
+	{
+		ACookingMachine* Pan = CookingMachine;
+		AddOption(TierWorld, DistTo(Pan), TEXT("翻面 · 佳品奖励"), Pan,
+			[Pan]() { return Pan->PerformAttention(); });
+	}
 
 	// 植物：浇水 / 驱虫 / 收获
 	if (IsValid(OverlappingPlant) && (OverlappingPlant->CanHarvest()
@@ -2769,6 +2775,7 @@ void AShootCharacter::DoPick()
 				//原本在c++处理
 				UWorld* World = GetWorld();
 				AItemActor* Spawned = World->SpawnActor<AItemActor>(FoodSpawner->SpawnItemActorClass, GetActorLocation(), GetActorRotation());
+				if (!IsValid(Spawned)) return;
 				SetOverlappingItem(Spawned);
 				SetPickingItemStatus();
 				FoodSpawner->OnSpawnActorEvent();//广播给蓝图（特效/音效等）
@@ -2864,6 +2871,7 @@ void AShootCharacter::DoPick()
 
  void AShootCharacter::SetPickingItemStatus()
 {
+	if (!IsValid(OverlappingItem)) return;
  	AActor* PreAttachActor = OverlappingItem->GetAttachParentActor();
  	if (PreAttachActor != nullptr)
  	{

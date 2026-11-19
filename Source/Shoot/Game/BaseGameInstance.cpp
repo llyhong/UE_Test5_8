@@ -185,6 +185,29 @@ void UBaseGameInstance::OnWorldChanged(UWorld* OldWorld, UWorld* NewWorld)
 
 	const FString MapName = UWorld::RemovePIEPrefix(NewWorld->GetMapName());
 
+	if (MapName == TEXT("L_StartMenu"))
+	{
+		bEnteredFromStartMenu = true;
+		if (bUseTemporaryKitchenProgress)
+		{
+			// 离开直接测试会话后，让菜单按正常流程重新读取正式存档。
+			curSaveGameData = nullptr;
+			SelectedRoleID = 0;
+			playerInfo = CreateDefaultPlayerInfo();
+		}
+		bUseTemporaryKitchenProgress = false;
+	}
+	else if (MapName == TEXT("Kitchen_New") && !bEnteredFromStartMenu)
+	{
+		// 必须早于关卡 BeginPlay / 蓝图读档，避免旧订单数和教学状态进入新的一天。
+		bUseTemporaryKitchenProgress = true;
+		bRoleSelectedThisSession = false;
+		SelectedRoleID = 0;
+		playerInfo = CreateDefaultPlayerInfo();
+		NewGameData();
+		UE_LOG(LogTemp, Log, TEXT("[Progress] Direct Kitchen_New launch: fresh temporary day one; persistent save preserved"));
+	}
+
 	// 回到登录 / 菜单地图时重置本会话标记：下次进主关卡重新走选角
 	if (MapName == TEXT("L_StartMenu") || MapName == TEXT("LoginMap") || MapName == TEXT("BigMap"))
 	{
@@ -322,9 +345,10 @@ void UBaseGameInstance::ShowCharacterSelect()
 	CharacterSelectWidget = Widget;
 
 	FInputModeUIOnly InputMode;
-	InputMode.SetWidgetToFocus(Widget->TakeWidget());
+	InputMode.SetWidgetToFocus(Widget->GetDesiredFocusTarget()->TakeWidget());
 	InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
 	PC->SetInputMode(InputMode);
+	Widget->GetDesiredFocusTarget()->SetUserFocus(PC);
 	PC->bShowMouseCursor = true;
 }
 
@@ -408,6 +432,7 @@ void UBaseGameInstance::NewGameData()
 	SaveData->UnlockedRecipes.Empty();
 	SaveData->DiscoveredItemKeys.Empty();
 	SaveData->SelectedRoleID = SelectedRoleID;
+	SaveData->SeasonConfigProfile = SeasonConfigRowName;
 	curSaveGameData = SaveData;
 	UnlockedIngredientIDs.Reset();
 	UnlockedRecipeIDs.Reset();
@@ -416,6 +441,10 @@ void UBaseGameInstance::NewGameData()
 	WildPlantSnapshotTimes.Reset();
 	RestoreCurrentWorldWildPlants();
 	SaveGameData();
+	if (economySystem)
+	{
+		economySystem->Load();
+	}
 
 	// 新游戏：将经营模拟（日期 / 员工）重置回初始（存档默认 BizYear=1、BizRoster 空）
 	if (businessSimulation)
@@ -452,11 +481,20 @@ void UBaseGameInstance::SaveGameData()
 		curSaveGameData->WildPlantRegrowRemaining = WildPlantRegrowRemaining;
 
 		// 保存到指定插槽（SlotName为文件名，UserIndex通常为0）
-		UGameplayStatics::SaveGameToSlot(curSaveGameData, TEXT("SaveSlot_01"), 0);
+		if (!bUseTemporaryKitchenProgress)
+		{
+			UGameplayStatics::SaveGameToSlot(curSaveGameData, TEXT("SaveSlot_01"), 0);
+		}
 	}
 }
 
 bool UBaseGameInstance::LoadGameData() {
+	if (bUseTemporaryKitchenProgress)
+	{
+		// 兼容关卡及选角蓝图的重复读档请求；直接运行始终使用本次临时进度。
+		if (!curSaveGameData) NewGameData();
+		return curSaveGameData != nullptr;
+	}
 	// 从插槽加载存档
 	UMySaveGame* LoadedData = Cast<UMySaveGame>(UGameplayStatics::LoadGameFromSlot(TEXT("SaveSlot_01"), 0));
 	if (!LoadedData) return false;

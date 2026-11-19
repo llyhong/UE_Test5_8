@@ -9,6 +9,26 @@
 
 class UEconomySystem;
 class UBusinessSimulation;
+struct FBusinessReport;
+
+USTRUCT(BlueprintType)
+struct FDailyFinancialRecord
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Season|Finance")
+	int32 Day = 1;
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Season|Finance")
+	int32 Revenue = 0;
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Season|Finance")
+	int32 OperatingExpense = 0;
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Season|Finance")
+	int32 Investment = 0;
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Season|Finance")
+	int32 Cash = 0;
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Season|Finance")
+	int32 UnpaidBills = 0;
+};
 
 /** 日评级：由完成率 / 超时 / 平均等待 / 附加项加权得出（见 营业忙乱机制配置.md 18.3） */
 UENUM(BlueprintType)
@@ -152,6 +172,11 @@ public:
 	/** 赛季是否已收尾（胜利 / 失败 / B 结局都算）：置位后日结算不再推进赛季 */
 	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Season") bool bSeasonEnded = false;
 
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Season|Finance")
+	TArray<FDailyFinancialRecord> DailyFinancialHistory;
+
+	void RecordDailyReport(const FBusinessReport& Report);
+
 	// ---- 最近一次日结快照（日结卡用，当天数据在日结广播时写入） ----
 	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Season|Last") int32 LastServed = 0;
 	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Season|Last") int32 LastFailed = 0;
@@ -220,7 +245,10 @@ public:
 	 * @param Stars       当前经营星级
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Season")
-	void EvaluateDay(int32 DailyNet, int32 Cash, int32 Reputation, int32 Stars);
+	void EvaluateDay(int32 DailyNet, int32 Cash, int32 Reputation, int32 Stars, int32 Investment = 0);
+
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Season")
+	int32 LastDailyInvestment = 0;
 
 	/** 失败后回退到本幕第 1 天（日期 / 金钱 / 声誉 / 季收入都回退，解锁内容保留） */
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Season")
@@ -259,6 +287,7 @@ public:
 	void Load();
 
 private:
+	FName NewGameConfigRowName = NAME_None;
 	UPROPERTY(Transient)
 	TObjectPtr<UEconomySystem> Economy;
 

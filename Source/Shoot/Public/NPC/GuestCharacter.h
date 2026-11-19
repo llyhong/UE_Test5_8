@@ -77,13 +77,17 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Guest")
 	float EatDuration = 5.0f;
 
-	/** 上菜成功时的开心特效（默认使用工程里的彩带 Niagara；可换成爱心/星星等自备特效） */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Guest|Happy")
 	TObjectPtr<UNiagaraSystem> HappyEffectSystem;
 
-	/** 开心特效持续时间（秒），到期后停止发射；默认 2 秒，建议 1~3 秒 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Guest|Happy", meta = (ClampMin = "0.5", ClampMax = "5.0"))
-	float HappyEffectDuration = 2.0f;
+	float HappyEffectDuration = 5.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Guest|Happy", meta = (ClampMin = "20.0", ClampMax = "240.0"))
+	float HappyEffectWidth = 145.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Guest|Happy", meta = (ClampMin = "0.0"))
+	float HappyEffectTableOffset = 110.0f;
 
 	/** 等待上菜超时（秒），超时直接离开 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Guest")
@@ -181,9 +185,9 @@ public:
 	FRotator PanicBaseMeshRotation = FRotator::ZeroRotator;
 	bool bPanicBaseMeshCaptured = false;
 
-	/** 当前开心特效组件与定时器：连续上菜时先收掉旧的，避免叠加 */
-	TWeakObjectPtr<UNiagaraComponent> HappyEffectComponent;
-	FTimerHandle HappyEffectTimerHandle;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Guest|Happy")
+	TObjectPtr<UNiagaraComponent> HappyNiagaraComponent;
+
 
 	/** 摔倒后的免踩期截止时间（世界秒）：防止同一客人每 0.5 秒连续摔 */
 	float SlipImmuneUntilWorldTime = 0.f;
@@ -306,7 +310,7 @@ protected:
 	UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|Guest|Reaction")
 	void BP_OnGuestPanicked();
 
-	/** 上菜成功、客人开始开心进食（1~3 秒）：蓝图可加爱心飘字 / 音效，C++ 侧已有默认彩带特效 */
+	/** 上菜成功的音效 / 动画入口，头顶庆祝由 Niagara 播放 */
 	UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|Guest|Reaction")
 	void BP_OnGuestHappy();
 

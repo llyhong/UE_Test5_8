@@ -105,6 +105,9 @@ public:
 	/** 默认自动营业；当日手动打烊后不再自动重开，旧日客人收尾完成后才允许自动开门。 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Time|Business")
 	bool bAutoOpenBusiness = true;
+	/** 手动开门前停住营业时钟，给菜单选择与备料留足时间。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Time")
+	bool bPauseBeforeOpening = false;
 
 	/** 当前营业状态（运行时）：自动或手动开门且尚未打烊 */
 	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Time|Business")
@@ -129,6 +132,20 @@ public:
 	/** 玩家点“进入下一天”：还原白天光照、推进日期并恢复走时（不会重复日结算） */
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Time|Business")
 	void BeginNextBusinessDay();
+
+	/** 完成营业目标后立即进入正常日结流程，不等待打烊时刻。 */
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Time|Business")
+	bool FinishBusinessDayEarly();
+
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Time|Business")
+	void SetGoalDrivenBusiness(bool bEnabled) { bGoalDrivenBusiness = bEnabled; }
+	UFUNCTION(BlueprintPure, Category = "Shoot|Time|Business")
+	bool IsGoalDrivenBusiness() const { return bGoalDrivenBusiness; }
+
+private:
+	UPROPERTY(Transient)
+	bool bGoalDrivenBusiness = false;
+public:
 
 	/** 当前日期（只读） */
 	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Time")

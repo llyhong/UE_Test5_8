@@ -6,6 +6,7 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
 #include "TimerManager.h"
 #include "DrawDebugHelpers.h"
 #include "Game/BaseGameInstance.h"
@@ -13,6 +14,7 @@
 #include "Game/OrderSystem.h"
 #include "Game/EconomySystem.h"
 #include "Game/BusinessTime.h"
+#include "Game/TutorialTaskManager.h"
 #include "Kismet/GameplayStatics.h"
 #include "NavigationSystem.h"
 #include "Blueprint/UserWidget.h"
@@ -305,6 +307,10 @@ void AGuestManager::TickSpawn()
 
 void AGuestManager::AdvanceRushPhase()
 {
+	// 首日只练习三单，不显示常规营业的客流波峰。
+	if (const UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetGameInstance()))
+		if (GI->curLevelBP && GI->curLevelBP->orderSystem
+			&& GI->curLevelBP->orderSystem->GetFirstDayServiceTarget() > 0) return;
 	UWorld* World = GetWorld();
 	UTimeSystem* Previous = BoundTimeSystem.Get();
 	UTimeSystem* TS = BindBusiness();
@@ -757,6 +763,11 @@ void AGuestManager::DrawSpawnLeaveDebug() const
 
 AGuestCharacter* AGuestManager::SpawnGuest()
 {
+	// 首单教学期间只留一位客人，玩家可先学会流程再面对波峰。
+	for (TActorIterator<ATutorialTaskManager> It(GetWorld()); It; ++It)
+	{
+		if (It->IsFirstServiceTutorialActive() && ActiveGuests.Num() >= 1) return nullptr;
+	}
 	UWorld* World = GetWorld();
 	if (!World)
 	{
@@ -768,6 +779,22 @@ AGuestCharacter* AGuestManager::SpawnGuest()
 	if (!TS || !TS->IsBusinessOpen())
 	{
 		return nullptr;
+	}
+	if (const UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetGameInstance()))
+	{
+		const AOrderSystem* Orders = GI->curLevelBP ? GI->curLevelBP->orderSystem.Get() : nullptr;
+		if (Orders && Orders->GetFirstDayServiceTarget() > 0)
+		{
+			int32 UnservedGuests = 0;
+			for (const AGuestCharacter* Guest : ActiveGuests)
+			{
+				if (IsValid(Guest) && Guest->GuestState != EGuestState::Eating
+					&& Guest->GuestState != EGuestState::Leaving && Guest->GuestState != EGuestState::Dead)
+					++UnservedGuests;
+			}
+			if (Orders->GetFirstDayOrdersServed() + UnservedGuests >= Orders->GetFirstDayServiceTarget())
+				return nullptr;
+		}
 	}
 	if (!bSpawningPaused && (!bCustomerPacingStarted || TS != Previous))
 	{

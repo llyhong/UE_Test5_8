@@ -14,3 +14,9 @@ Content/Python/__pycache__/
 
 # Lighting built data (>100MB, GitHub rejects)
 *_BuiltData.uasset
+
+# Standalone video frame grid web tool
+!/video-frame-grid/
+!/video-frame-grid/**
+/video-frame-grid/node_modules/
+/video-frame-grid/.cache/

@@ -52,6 +52,15 @@ USTRUCT(BlueprintType)
 	float CookingTime;
 	UPROPERTY(EditAnywhere,BlueprintReadWrite, Category = "Shoot|Data")
 	bool CanOverCook;
+	/** 单次看锅奖励：仅配置给一种煎锅菜；错过只失去佳品奖励。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Cooking")
+	bool bRequiresAttention = false;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Cooking")
+	int32 AttentionUnlockDay = 3;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Cooking", meta = (ClampMin = "0.1", ClampMax = "0.8"))
+	float AttentionProgress = 0.5f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Cooking", meta = (ClampMin = "1.0"))
+	float AttentionWindowSeconds = 4.f;
 	/** 烹饪完成后生成的成品类（如"番茄炒鸡蛋"菜品对应的成品） */
 	UPROPERTY(EditAnywhere,BlueprintReadWrite, Category = "Shoot|Data")
 	TSubclassOf<AActor> CookedActorClass;

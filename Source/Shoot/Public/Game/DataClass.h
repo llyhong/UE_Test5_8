@@ -114,6 +114,18 @@ public:
 	/** 新手引导：这些天里所有客人耐心值视为无限（订单不会迟到/超时），如 {1, 2}。 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Data|Tutorial")
 	TArray<int32> InfinitePatienceDays;
+
+	/** 教学之后使用每日自选菜单，固定序列仅保留给教学。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Data|Menu")
+	bool bEnableDailyMenu = false;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Data|Menu", meta = (ClampMin = "1", ClampMax = "6"))
+	int32 DailyMenuCapacity = 4;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Data|Menu")
+	int32 FixedTutorialThroughDay = 1;
+
+	/** 首日按完成单数结束试营业；0 保留按时间营业。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Data|Tutorial", meta = (ClampMin = "0"))
+	int32 FirstDayServiceTarget = 0;
 };
 
 // UCLASS(BlueprintType)

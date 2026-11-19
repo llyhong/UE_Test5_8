@@ -26,7 +26,11 @@ public class Shoot : ModuleRules
 			"PhysicsCore",
 		});
 
-		PrivateDependencyModuleNames.AddRange(new string[] { "SlateCore" });
+		PrivateDependencyModuleNames.AddRange(new string[] { "SlateCore", "CommonInput" });
+		if (Target.bBuildEditor)
+		{
+			PrivateDependencyModuleNames.AddRange(new string[] { "RenderCore", "ImageCore" });
+		}
 
 		PublicIncludePaths.AddRange(new string[] {
 			"Shoot",

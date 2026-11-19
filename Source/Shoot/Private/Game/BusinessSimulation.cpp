@@ -3,6 +3,7 @@
 #include "Game/BusinessSimulation.h"
 #include "Game/BaseGameInstance.h"
 #include "Game/SeasonSystem.h"
+#include "MySaveGame.h"
 #include "Engine/Engine.h"
 
 void UBusinessSimulation::Init(UEconomySystem* InEconomy)
@@ -68,6 +69,14 @@ void UBusinessSimulation::Shutdown()
 
 void UBusinessSimulation::HandleMoneyChanged(int32 NewValue, int32 Delta, EMoneySource Source)
 {
+	if (Source == EMoneySource::SeasonReset || Source == EMoneySource::Debug)
+	{
+		return;
+	}
+	if (Delta < 0 && Source == EMoneySource::ShopPurchase)
+	{
+		TodayInvestment += -Delta;
+	}
 	if (Delta > 0)
 	{
 		TodayIncome += Delta;
@@ -81,6 +90,17 @@ void UBusinessSimulation::HandleMoneyChanged(int32 NewValue, int32 Delta, EMoney
 		MonthExpense += Abs;
 		YearExpense  += Abs;
 	}
+
+	// 经济委托返回后即保存，先同步当日真实收支，避免读档丢账。
+	if (UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetOuter()))
+	{
+		if (GI->curSaveGameData)
+		{
+			GI->curSaveGameData->BizTodayIncome = TodayIncome;
+			GI->curSaveGameData->BizTodayExpense = TodayExpense;
+			GI->curSaveGameData->BizTodayInvestment = TodayInvestment;
+		}
+	}
 }
 
 FBusinessReport UBusinessSimulation::MakeReport(int32 Y, int32 M, int32 D) const
@@ -92,6 +112,8 @@ FBusinessReport UBusinessSimulation::MakeReport(int32 Y, int32 M, int32 D) const
 	R.Income = TodayIncome;
 	R.Expense = TodayExpense;
 	R.Net = TodayIncome - TodayExpense;
+	R.Investment = TodayInvestment;
+	R.OperatingNet = R.Net + R.Investment;
 	R.Money = Economy ? Economy->GetMoney() : 0;
 	R.Reputation = Economy ? Economy->GetReputation() : 0;
 	R.Stars = RestaurantStars;
@@ -130,6 +152,7 @@ void UBusinessSimulation::ResetDailyLedger()
 {
 	TodayIncome = 0;
 	TodayExpense = 0;
+	TodayInvestment = 0;
 }
 
 void UBusinessSimulation::HandleBusinessDayEnded()
@@ -146,11 +169,15 @@ void UBusinessSimulation::HandleBusinessDayEnded()
 	RecomputeStars();
 
 	const FBusinessReport R = MakeReport(TimeSystem->Year, TimeSystem->Month, TimeSystem->Day);
+	if (SeasonSystem)
+	{
+		SeasonSystem->RecordDailyReport(R);
+	}
 	OnDailyReport.Broadcast(R);
 
 	if (SeasonSystem)
 	{
-		SeasonSystem->EvaluateDay(R.Net, R.Money, R.Reputation, RestaurantStars);
+		SeasonSystem->EvaluateDay(R.OperatingNet, R.Money, R.Reputation, RestaurantStars, R.Investment);
 	}
 
 	ResetDailyLedger();
@@ -173,12 +200,16 @@ void UBusinessSimulation::OnDay(int32 Y, int32 M, int32 D)
 
 	// 日报表（已含当日被动收支与玩家当日消费）
 	FBusinessReport R = MakeReport(Y, M, D);
+	if (SeasonSystem)
+	{
+		SeasonSystem->RecordDailyReport(R);
+	}
 	OnDailyReport.Broadcast(R);
 
 	// 赛季：日评级 → 连续失败线 → 丰收祭胜负（用当日报表，账本清零前调用）
 	if (SeasonSystem)
 	{
-		SeasonSystem->EvaluateDay(R.Net, R.Money, R.Reputation, RestaurantStars);
+		SeasonSystem->EvaluateDay(R.OperatingNet, R.Money, R.Reputation, RestaurantStars, R.Investment);
 	}
 
 	// 重置日账本
@@ -270,6 +301,10 @@ void UBusinessSimulation::Save()
 		return;
 	}
 
+	GI->curSaveGameData->BizTodayIncome = TodayIncome;
+	GI->curSaveGameData->BizTodayExpense = TodayExpense;
+	GI->curSaveGameData->BizTodayInvestment = TodayInvestment;
+
 	if (TimeSystem)
 	{
 		GI->curSaveGameData->BizYear  = TimeSystem->Year;
@@ -295,6 +330,10 @@ void UBusinessSimulation::Load()
 	{
 		return;
 	}
+
+	TodayIncome = GI->curSaveGameData->BizTodayIncome;
+	TodayExpense = GI->curSaveGameData->BizTodayExpense;
+	TodayInvestment = GI->curSaveGameData->BizTodayInvestment;
 
 	if (TimeSystem)
 	{

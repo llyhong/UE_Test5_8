@@ -31,6 +31,12 @@ struct FBusinessReport
 	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Business")
 	int32 Net = 0;
 
+	/** 营业利润不含设备投资；现金流仍由 Net 展示。 */
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Business")
+	int32 OperatingNet = 0;
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Business")
+	int32 Investment = 0;
+
 	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Business")
 	int32 Money = 0;
 	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Business")
@@ -100,6 +106,7 @@ public:
 	// ---- 账本（滚动累计，结算时重置对应周期） ----
 	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Business") int32 TodayIncome = 0;
 	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Business") int32 TodayExpense = 0;
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Business") int32 TodayInvestment = 0;
 	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Business") int32 MonthIncome = 0;
 	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Business") int32 MonthExpense = 0;
 	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Business") int32 YearIncome = 0;
@@ -133,6 +140,8 @@ public:
 	/** 重算经营星级（赛季系统注入后 / 读档后由外部调用） */
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Business")
 	void RefreshStars() { RecomputeStars(); }
+	UFUNCTION(BlueprintPure, Category = "Shoot|Business")
+	FBusinessReport GetTodayReport() const { return MakeReport(0, 0, 0); }
 
 	/** 写入存档（日期 + 员工名册）。会在每次日结算时自动调用，也可手动调用。 */
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Business")

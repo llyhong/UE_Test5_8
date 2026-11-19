@@ -92,6 +92,10 @@ public:
 	/** 当前这道菜实际需要的总烹饪时间（已乘速度倍率） */
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Food")
 	float GetRequiredCookTime() const;
+	UFUNCTION(BlueprintPure, Category = "Shoot|Food")
+	bool IsAttentionAvailable() const;
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Food")
+	bool PerformAttention();
 
 	UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|Food Events")
 	void OnAddFoodMateiral();
@@ -229,6 +233,8 @@ protected:
 	bool bNoPlateNotified = false;
 
 private:
+	bool bAttentionPerformed = false;
+	bool UsesAttention() const;
 	ULocalPlayer* LocalPlayer;
 
 	UPROPERTY()

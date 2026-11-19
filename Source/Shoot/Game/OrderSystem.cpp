@@ -16,6 +16,8 @@
 #include "Item/Plant.h"
 #include "Animal/AnimalCharacter.h"
 #include "Machine/CookingMachine.h"
+#include "MySaveGame.h"
+#include "Game/TutorialTaskManager.h"
 
 namespace
 {
@@ -73,6 +75,8 @@ void AOrderSystem::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	{
 		GI->OnRecipesUnlocked.RemoveDynamic(this, &AOrderSystem::HandleRecipesUnlocked);
 		GI->OnIngredientsUnlocked.RemoveDynamic(this, &AOrderSystem::HandleIngredientsUnlocked);
+		if (GI->businessSimulation && GI->businessSimulation->TimeSystem)
+			GI->businessSimulation->TimeSystem->SetGoalDrivenBusiness(false);
 	}
 
 	// 清空所有未完成订单：waitList 是 UPROPERTY，句柄会随本 Actor 一起被 GC 回收，无需 AddToRoot。
@@ -88,6 +92,27 @@ void AOrderSystem::EndPlay(const EEndPlayReason::Type EndPlayReason)
 // Called every frame
 void AOrderSystem::Tick(float DeltaTime)
 {
+	if (UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetGameInstance()))
+	{
+		if (GI->businessSimulation && GI->businessSimulation->TimeSystem)
+		{
+			UTimeSystem* Time = GI->businessSimulation->TimeSystem;
+			const int32 Target = GetFirstDayServiceTarget();
+			Time->SetGoalDrivenBusiness(Target > 0);
+			// 结算卡前退出后读档：赛季已结算，但经营日期尚未确认换日，直接续到第二天，避免重复收支。
+			if (IsStarted && Target > 0 && GetFirstDayOrdersServed() >= Target
+				&& !Time->IsEndOfDayReached() && GI->curSaveGameData && GI->curSaveGameData->SeasonDay > 1)
+			{
+				GI->businessSimulation->SkipNextDaySettlement();
+				Time->AdvanceDays(1);
+				Time->SetGoalDrivenBusiness(false);
+				GI->businessSimulation->Save();
+			}
+			// 上菜调用栈结束后再日结，避免清场修改正在完成的订单或吞掉品质奖励。
+			else if (IsStarted && Target > 0 && GetFirstDayOrdersServed() >= Target && Time->IsBusinessOpen())
+				Time->FinishBusinessDayEarly();
+		}
+	}
 	if (IsStarted)
 	{
 		// 天数变化后重建订单池：菜品可配置 UnlockDay，跨天后才允许出现的菜需要重新入池
@@ -212,6 +237,7 @@ void AOrderSystem::RebuildOrderPool()
 	CollectSuppliedItemIDs(CachedSuppliedItemIDs);
 	// 本关实际存在的加工机器：菜谱指定的机器不在场，同样做不出来
 	CollectAvailableMachineIDs(CachedAvailableMachineIDs);
+	RefreshDailyMenu();
 	int32 BlockedByLock = 0;
 	int32 BlockedBySupply = 0;
 	auto IsServableOrLog = [this, FS, &BlockedByLock, &BlockedBySupply](int32 FoodID) -> bool
@@ -283,7 +309,7 @@ void AOrderSystem::RebuildOrderPool()
 	};
 
 	// 1) 关卡里配置的自定义套餐（一单多道菜）：只取 FoodIDs，其余全部由菜品表派生
-	if (orderCfg)
+	if (orderCfg && !orderCfg->bEnableDailyMenu)
 	{
 		for (const FOrderData& Custom : orderCfg->Orders)
 		{
@@ -333,6 +359,10 @@ void AOrderSystem::RebuildOrderPool()
 		{
 			continue;
 		}
+		if (orderCfg && orderCfg->bEnableDailyMenu && !DailyMenuIDs.Contains(FoodID))
+		{
+			continue;
+		}
 		if (!IsServableOrLog(FoodID))
 		{
 			continue;
@@ -377,6 +407,124 @@ void AOrderSystem::HandleRecipesUnlocked(const TArray<int32>& UnlockedFoodIDs)
 {
 	UE_LOG(LogTemp, Log, TEXT("[OrderSystem] 菜谱解锁 %d 个，重建订单池"), UnlockedFoodIDs.Num());
 	RebuildOrderPool();
+	if (orderCfg && orderCfg->bEnableDailyMenu)
+	{
+		const TArray<int32> Available = GetAvailableDailyDishes();
+		for (const int32 ID : UnlockedFoodIDs)
+		{
+			if (!Available.Contains(ID)) continue;
+			PendingTastingIDs.AddUnique(ID);
+			if (!DailyMenuIDs.Contains(ID))
+			{
+				if (DailyMenuIDs.Num() >= FMath::Max(1, orderCfg->DailyMenuCapacity))
+					DailyMenuIDs.Pop();
+				DailyMenuIDs.Add(ID);
+			}
+		}
+		SaveDailyMenu();
+		RebuildOrderPool();
+	}
+}
+
+TArray<int32> AOrderSystem::GetAvailableDailyDishes() const
+{
+	TArray<int32> Result;
+	const UBaseGameInstance* GI = GetWorld() ? Cast<UBaseGameInstance>(GetWorld()->GetGameInstance()) : nullptr;
+	UFoodSystem* FS = GI ? GI->foodSystem.Get() : nullptr;
+	if (!FS) return Result;
+	for (const int32 ID : FS->GetFoodIDsByMachine(0))
+	{
+		const FMenuData Menu = FS->GetMenuData(ID);
+		FString Reason;
+		if (Menu.Price > 0 && Menu.Probabilitys > 0.f && !Menu.bRequiresWildIngredient
+			&& IsMenuServable(ID, CachedSuppliedItemIDs, Reason)
+			&& IsMenuMachinePresent(ID, CachedAvailableMachineIDs, Reason))
+			Result.Add(ID);
+	}
+	Result.Sort();
+	return Result;
+}
+
+bool AOrderSystem::IsDailyMenuEditable() const
+{
+	const UBaseGameInstance* GI = GetWorld() ? Cast<UBaseGameInstance>(GetWorld()->GetGameInstance()) : nullptr;
+	const UTimeSystem* TS = GI && GI->businessSimulation ? GI->businessSimulation->TimeSystem.Get() : nullptr;
+	return orderCfg && orderCfg->bEnableDailyMenu && TS && !TS->IsBusinessOpen()
+		&& GetCurrentBusinessDay() > orderCfg->FixedTutorialThroughDay;
+}
+
+void AOrderSystem::SaveDailyMenu() const
+{
+	if (UBaseGameInstance* GI = GetWorld() ? Cast<UBaseGameInstance>(GetWorld()->GetGameInstance()) : nullptr)
+	{
+		if (GI->curSaveGameData)
+		{
+			GI->curSaveGameData->DailyMenuFoodIDs = DailyMenuIDs;
+			GI->SaveGameData();
+		}
+	}
+}
+
+void AOrderSystem::RefreshDailyMenu()
+{
+	if (!orderCfg || !orderCfg->bEnableDailyMenu) return;
+	const TArray<int32> Available = GetAvailableDailyDishes();
+	UBaseGameInstance* GI = GetWorld() ? Cast<UBaseGameInstance>(GetWorld()->GetGameInstance()) : nullptr;
+	if (DailyMenuIDs.IsEmpty() && GI && GI->curSaveGameData)
+		DailyMenuIDs = GI->curSaveGameData->DailyMenuFoodIDs;
+	DailyMenuIDs.RemoveAll([&](int32 ID) { return !Available.Contains(ID); });
+	const int32 Capacity = FMath::Max(1, orderCfg->DailyMenuCapacity);
+	if (DailyMenuIDs.Num() > Capacity) DailyMenuIDs.SetNum(Capacity);
+	const bool bNeedsDefault = DailyMenuIDs.IsEmpty();
+	for (int32 ID : Available)
+	{
+		if (DailyMenuIDs.Num() >= Capacity) break;
+		if (bNeedsDefault || (bDailyMenuInitialized && !KnownAvailableDishes.Contains(ID)))
+			DailyMenuIDs.AddUnique(ID);
+	}
+	KnownAvailableDishes = TSet<int32>(Available);
+	bDailyMenuInitialized = true;
+}
+
+bool AOrderSystem::ToggleDailyMenuDish(int32 FoodID)
+{
+	if (!IsDailyMenuEditable() || !GetAvailableDailyDishes().Contains(FoodID)) return false;
+	if (DailyMenuIDs.Contains(FoodID))
+	{
+		if (DailyMenuIDs.Num() <= 1) return false;
+		DailyMenuIDs.Remove(FoodID);
+	}
+	else
+	{
+		if (DailyMenuIDs.Num() >= FMath::Max(1, orderCfg->DailyMenuCapacity)) return false;
+		DailyMenuIDs.Add(FoodID);
+	}
+	SaveDailyMenu();
+	RebuildOrderPool();
+	return true;
+}
+
+bool AOrderSystem::TryBuildTastingOrder(FOrderData& OutOrder)
+{
+	if (!orderCfg || !orderCfg->bEnableDailyMenu
+		|| GetCurrentBusinessDay() <= orderCfg->FixedTutorialThroughDay) return false;
+	UBaseGameInstance* GI = GetWorld() ? Cast<UBaseGameInstance>(GetWorld()->GetGameInstance()) : nullptr;
+	if (!GI || !GI->curSaveGameData) return false;
+	TArray<int32> Candidates = PendingTastingIDs;
+	Candidates.Append(DailyMenuIDs);
+	for (int32 ID : Candidates)
+	{
+		if (!DailyMenuIDs.Contains(ID) || GI->curSaveGameData->TastedFoodIDs.Contains(ID)) continue;
+		FString Reason;
+		if (!IsMenuServable(ID, CachedSuppliedItemIDs, Reason)
+			|| !IsMenuMachinePresent(ID, CachedAvailableMachineIDs, Reason)) continue;
+		OutOrder.FoodIDs = {ID};
+		PendingTastingIDs.Remove(ID);
+		GI->curSaveGameData->TastedFoodIDs.AddUnique(ID);
+		GI->SaveGameData();
+		return true;
+	}
+	return false;
 }
 
 void AOrderSystem::HandleIngredientsUnlocked(const TArray<int32>& UnlockedIDs)
@@ -812,7 +960,37 @@ bool AOrderSystem::TryBuildWildOrder(FOrderData& OutOrder, const TSet<int32>& Su
 bool AOrderSystem::CanAcceptNewOrder() const
 {
 	const int32 MaxOrders = orderCfg ? FMath::Max(1, orderCfg->MaxWaitOrderNum) : 4;
-	return IsStarted && waitList.Num() < MaxOrders;
+	const int32 Target = GetFirstDayServiceTarget();
+	return IsStarted && waitList.Num() < MaxOrders
+		&& (Target <= 0 || GetFirstDayOrdersServed() + waitList.Num() < Target);
+}
+
+int32 AOrderSystem::GetFirstDayServiceTarget() const
+{
+	return orderCfg && GetCurrentBusinessDay() == 1 ? FMath::Max(0, orderCfg->FirstDayServiceTarget) : 0;
+}
+
+int32 AOrderSystem::GetFirstDayOrdersServed() const
+{
+	const UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetGameInstance());
+	return GI && GI->curSaveGameData
+		? FMath::Max(0, GI->curSaveGameData->FirstDayOrdersServed)
+		: FirstDayOrdersServed;
+}
+
+void AOrderSystem::RecordFirstDayOrderServed()
+{
+	if (GetFirstDayServiceTarget() <= 0) return;
+	FirstDayOrdersServed = GetFirstDayOrdersServed() + 1;
+	if (UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetGameInstance()))
+	{
+		if (GI->curSaveGameData)
+		{
+			GI->curSaveGameData->FirstDayOrdersServed = FirstDayOrdersServed;
+			GI->SaveGameData();
+		}
+	}
+	ATutorialTaskManager::NotifyAction(GetWorld(), ETutorialTaskType::ServeGuests, -1);
 }
 
 UOrderHandle* AOrderSystem::RequestOrderForGuest(AGuestCharacter* Guest)
@@ -863,6 +1041,11 @@ UOrderHandle* AOrderSystem::RequestOrderForGuest(AGuestCharacter* Guest)
 			TutorialSeqDay = Today;
 			TutorialSeqCursor = 0;
 		}
+		// 目标制试营业持续使用教学菜，直到完成目标；客人离场后的补位也能正常点单。
+		if (GetFirstDayServiceTarget() > 0 && TutorialSeqCursor >= DaySeq->FoodIDs.Num())
+		{
+			TutorialSeqCursor = 0;
+		}
 		// 序列里今天还发不了的菜（未到 UnlockDay / 缺食材）跳过，避免引导单绕过当天过滤
 		while (TutorialSeqCursor < DaySeq->FoodIDs.Num())
 		{
@@ -900,7 +1083,12 @@ UOrderHandle* AOrderSystem::RequestOrderForGuest(AGuestCharacter* Guest)
 			WildOrdersIssuedToday++;
 			bUseRandomPool = false;
 		}
-		else if (!DaySeq && bUseConfigOrderSequence && orderCfg && orderCfg->Orders.Num() > 0)
+		else if (TryBuildTastingOrder(OrderData))
+		{
+			bUseRandomPool = false;
+		}
+		else if (!DaySeq && bUseConfigOrderSequence && orderCfg && orderCfg->Orders.Num() > 0
+			&& (!orderCfg->bEnableDailyMenu || Today <= orderCfg->FixedTutorialThroughDay))
 		{
 			bool bNoneServable = false;
 			if (GetNextConfigOrder(OrderData, &bNoneServable))
@@ -944,6 +1132,7 @@ UOrderHandle* AOrderSystem::RequestOrderForGuest(AGuestCharacter* Guest)
 	orderHandle->InitializePatience(orderCfg, Today);
 
 	waitList.Add(orderHandle);
+	ATutorialTaskManager::NotifyAction(GetWorld(), ETutorialTaskType::AcceptOrder, -1, Guest);
 	OnStartOrder.Broadcast(orderHandle, orderHandle->OrderData);
 
 	if (bWildOrder)
@@ -1067,6 +1256,7 @@ bool AOrderSystem::PushFoods(const TArray<int>& FoodIDs)
 	{
 		OrderedGuest->OnOrderServed();
 	}
+	RecordFirstDayOrderServed();
 	return true;
 }
 
@@ -1152,6 +1342,7 @@ bool AOrderSystem::PushFoodsForGuest(const TArray<int>& FoodIDs, AGuestCharacter
 	{
 		OrderedGuest->OnOrderServed();
 	}
+	RecordFirstDayOrderServed();
 	return true;
 }
 
@@ -1240,7 +1431,8 @@ int32 UOrderHandle::GetOrderPrice() const
 
 void UOrderHandle::SetPrepWindowGraceSeconds(float Seconds)
 {
-	PrepWindowGraceSeconds = FMath::Max(0.f, Seconds);
+	// 已授予本单的截止时间不回退；关窗只停止给新单授予宽限。
+	PrepWindowGraceSeconds = FMath::Max(PrepWindowGraceSeconds, FMath::Max(0.f, Seconds));
 }
 
 void UOrderHandle::SetWildOrder(float InPriceMultiplier)

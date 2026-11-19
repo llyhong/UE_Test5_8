@@ -2,6 +2,9 @@
 
 
 #include "Machine/CookingMachine.h"
+#include "Game/TutorialTaskManager.h"
+#include "Game/BusinessSimulation.h"
+#include "Game/BusinessTime.h"
 #include "Components/BoxComponent.h"
 #include "Components/SceneComponent.h"
 #include "Components/WidgetComponent.h"
@@ -128,6 +131,7 @@ void ACookingMachine::ResetFoodData()
 	FoodMaterial.Empty(6);
 	// 新的一锅：复位"没碟子"提示，允许再次提示
 	bNoPlateNotified = false;
+	bAttentionPerformed = false;
 	// 状态复位后卡片立即隐藏，不等下一帧 Tick
 	if (ProgressWidgetComp)
 	{
@@ -152,7 +156,9 @@ void ACookingMachine::UpdateProgressWidget()
 	}
 
 	const float ElapsedTime = CurCookingTime + OverCookTime;
-	ProgressWidget->SetProgress(FMath::Max(0.f, RequiredTime - ElapsedTime), RequiredTime, TEXT("烹饪中"));
+	const FString Verb = IsAttentionAvailable() ? TEXT("按 E 翻面 · 可获佳品")
+		: bAttentionPerformed ? TEXT("已翻面 · 佳品烹饪中") : TEXT("烹饪中");
+	ProgressWidget->SetProgress(FMath::Max(0.f, RequiredTime - ElapsedTime), RequiredTime, Verb);
 	ProgressWidget->SetIngredientCounts(FoodMaterial);
 	// 带食材图标行时卡片会变高，世界空间控件不会自动跟着长
 	ProgressWidgetComp->SetDrawSize(ProgressWidget->GetCardDrawSize());
@@ -396,6 +402,29 @@ float ACookingMachine::GetRequiredCookTime() const
 	return TargetMenuData.CookingTime * GetCookSpeedMultiplier();
 }
 
+bool ACookingMachine::UsesAttention() const
+{
+	const UBaseGameInstance* GI = GetWorld() ? Cast<UBaseGameInstance>(GetWorld()->GetGameInstance()) : nullptr;
+	const UTimeSystem* TS = GI && GI->businessSimulation ? GI->businessSimulation->TimeSystem.Get() : nullptr;
+	return TargetMenuData.bRequiresAttention && TS && TS->Day >= TargetMenuData.AttentionUnlockDay;
+}
+
+bool ACookingMachine::IsAttentionAvailable() const
+{
+	if (!UsesAttention() || !IsCooking || !IsFull || IsFinish || OnFire || bAttentionPerformed) return false;
+	const float Start = GetRequiredCookTime() * FMath::Clamp(TargetMenuData.AttentionProgress, 0.1f, 0.8f);
+	const float Elapsed = CurCookingTime + OverCookTime;
+	return Elapsed >= Start && Elapsed <= Start + FMath::Max(1.f, TargetMenuData.AttentionWindowSeconds);
+}
+
+bool ACookingMachine::PerformAttention()
+{
+	if (!IsAttentionAvailable()) return false;
+	bAttentionPerformed = true;
+	UpdateProgressWidget();
+	return true;
+}
+
 /** 取 Actor 的世界包围盒高度（Extent 为半高，乘 2 得到实际高度） */
 static float GetActorHeight(AActor* InActor)
 {
@@ -518,6 +547,8 @@ void ACookingMachine::SpawnCookedActor()
 				DishQuality = MinQuality(DishQuality, FoodActor->GetIngredientQuality());
 			}
 		}
+		if (UsesAttention() && DishQuality != EIngredientQuality::Inferior)
+			DishQuality = bAttentionPerformed ? EIngredientQuality::Premium : EIngredientQuality::Normal;
 		Item->SetIngredientQuality(DishQuality);
 
 		// 启用成品腐烂：未被玩家拾取的成品会自动销毁（放下后重新计时）
@@ -568,6 +599,7 @@ bool ACookingMachine::AddFoodMateral(int32 FoodMaterialID)
 			IsFull = true;
 		}
 		OnAddFoodMateiral();//添加食材回调
+		ATutorialTaskManager::NotifyAction(GetWorld(), ETutorialTaskType::AddToCooker, FoodMaterialID, this);
 		if (!IsCooking  && tmpMenu.CookingTime>0.0f)
 		{
 			IsCooking = true;
@@ -669,6 +701,7 @@ void ACookingMachine::Tick(float DeltaTime)
 			if ((CurCookingTime + OverCookTime) >= GetRequiredCookTime() && !IsFinish && IsFull) //熟了（含灶台加速）
 			{
 				IsFinish = true;
+				ATutorialTaskManager::NotifyAction(GetWorld(), ETutorialTaskType::CookDish, TargetMenuData.FoodID, this);
 				if (!TargetMenuData.CanOverCook)
 				{
 					IsCooking =  false;

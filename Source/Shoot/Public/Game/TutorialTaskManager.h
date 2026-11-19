@@ -12,6 +12,21 @@ class AShootCharacter;
 class UTimeSystem;
 class ADiningHygieneManager;
 
+USTRUCT(BlueprintType)
+struct SHOOT_API FTutorialChecklistEntry
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Tutorial")
+	FText Text;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Tutorial")
+	bool bCompleted = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Tutorial")
+	bool bNote = false;
+};
+
 /**
  * 新手任务管理器（关卡里放一个）：
  *  - 读取 FTutorialTaskRow 配置表，按 UTimeSystem::Day 自动切换当天的任务；
@@ -56,9 +71,8 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Tutorial")
 	TArray<int32> NoMessesDays = { 1 };
 
-	/** 任务清单文本（含进度），供 UI 显示 */
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Tutorial")
-	TArray<FString> GetChecklistLines() const;
+	TArray<FTutorialChecklistEntry> GetChecklistEntries() const;
 
 	/** 当前引导箭头应指向的文本；无指引返回空 */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Tutorial")
@@ -71,6 +85,10 @@ public:
 	/** 当天任务标题，如“第 1 天任务” */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Tutorial")
 	FText GetDayTitle() const;
+
+	/** 成功交互事件才推进对应步骤；投锅任务不再用拾取量代替。 */
+	static void NotifyAction(UWorld* World, ETutorialTaskType Type, int32 ItemID, AActor* Target = nullptr);
+	bool IsFirstServiceTutorialActive() const;
 
 private:
 	struct FActiveTask
@@ -97,6 +115,8 @@ private:
 
 	float PollAccum = 0.f;
 	float InitDelay = 0.4f;
+	bool bHoldingTutorialClock = false;
+	TWeakObjectPtr<class UMySaveGame> AppliedSave;
 
 	/** 每个角色上一帧手持物品的 ItemID，用于统计“新采到手上”的次数 */
 	TMap<TWeakObjectPtr<AShootCharacter>, int32> PrevHeldItemID;
@@ -106,6 +126,8 @@ private:
 	bool bHasFocusTarget = false;
 
 	UTimeSystem* GetTimeSystem() const;
+	/** 首日未开门时先引导营业，避免接单任务把箭头指向空餐桌。 */
+	bool NeedsOpeningGuidance() const;
 	ADiningHygieneManager* FindHygieneManager() const;
 	int32 GetCurrentDay() const;
 
@@ -121,6 +143,7 @@ private:
 	const class ABaseLevelBP* GetLevelBP() const;
 
 	void UpdateProgress();
+	void SaveCompletedTask(const FActiveTask& Task);
 	void UpdateFocusTarget();
 	void RefreshWidgets() const;
 

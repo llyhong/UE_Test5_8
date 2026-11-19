@@ -6,6 +6,7 @@
 #include "Data/ItemActorInfo.h"
 #include "Game/BaseGameInstance.h"
 #include "Game/BaseLevelBP.h"
+#include "Game/OrderSystem.h"
 #include "Game/BusinessSimulation.h"
 #include "Game/BusinessTime.h"
 #include "Dining/DiningHygieneManager.h"
@@ -15,6 +16,9 @@
 #include "Item/OutdoorBasket.h"
 #include "Machine/ResearchStove.h"
 #include "Machine/StorageWarehouse.h"
+#include "Machine/CookingMachine.h"
+#include "Machine/GateCounter.h"
+#include "MySaveGame.h"
 #include "NPC/GuestManager.h"
 #include "NPC/GuestCharacter.h"
 #include "NPC/ChairSeat.h"
@@ -107,20 +111,83 @@ void ATutorialTaskManager::Tick(float DeltaSeconds)
 	PollAccum = 0.f;
 
 	const int32 Today = GetCurrentDay();
-	if (Today != AppliedDay)
+	const UBaseGameInstance* CurrentGI = Cast<UBaseGameInstance>(GetGameInstance());
+	UMySaveGame* CurrentSave = CurrentGI ? CurrentGI->curSaveGameData.Get() : nullptr;
+	if (Today != AppliedDay || AppliedSave.Get() != CurrentSave)
 	{
 		ApplyDay(Today);
 	}
 
 	UpdateProgress();
+	if (UTimeSystem* TS = GetTimeSystem())
+	{
+		if (IsFirstServiceTutorialActive())
+		{
+			TS->SetPaused(true);
+			bHoldingTutorialClock = true;
+		}
+		else if (bHoldingTutorialClock)
+		{
+			TS->SetPaused(TS->IsEndOfDayReached());
+			bHoldingTutorialClock = false;
+			if (UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetGameInstance()))
+			{
+				// 释放暂停不等于完成教学（读档或重开也会释放）；只有首个上菜任务完成才保存。
+				bool bFirstServeDone = false;
+				for (const FActiveTask& Task : ActiveTasks)
+					if (Task.Row.TaskType == ETutorialTaskType::ServeGuests)
+					{
+						bFirstServeDone = AppliedDay == 1 && Task.bDone;
+						break;
+					}
+				if (GI->curSaveGameData && bFirstServeDone)
+				{
+					GI->curSaveGameData->bFirstServiceTutorialComplete = true;
+					GI->SaveGameData();
+				}
+			}
+		}
+	}
 	UpdateFocusTarget();
 	RefreshWidgets();
 }
 
 void ATutorialTaskManager::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	if (bHoldingTutorialClock)
+		if (UTimeSystem* TS = GetTimeSystem()) TS->SetPaused(false);
 	ActiveTasks.Reset();
 	Super::EndPlay(EndPlayReason);
+}
+
+bool ATutorialTaskManager::IsFirstServiceTutorialActive() const
+{
+	if (!bEnable || AppliedDay != 1) return false;
+	// 首单之后的备餐和两单练习不再阻止后续客人进场。
+	for (const FActiveTask& Task : ActiveTasks)
+		if (Task.Row.TaskType == ETutorialTaskType::ServeGuests) return !Task.bDone;
+	return false;
+}
+
+void ATutorialTaskManager::NotifyAction(UWorld* World, ETutorialTaskType Type, int32 ItemID, AActor* Target)
+{
+	if (!World) return;
+	for (TActorIterator<ATutorialTaskManager> It(World); It; ++It)
+	{
+		if (!It->bEnable) continue;
+		for (FActiveTask& Task : It->ActiveTasks)
+		{
+			if (Task.bDone) continue;
+			if (Task.Row.TaskType == Type && (Task.Row.TargetItemID < 0 || Task.Row.TargetItemID == ItemID)
+				&& (Task.Row.TargetActorTag.IsNone() || (Target && Target->ActorHasTag(Task.Row.TargetActorTag))))
+			{
+				Task.Progress++;
+				Task.bDone = Task.Progress >= Task.Row.TargetCount;
+				if (Task.bDone) It->SaveCompletedTask(Task);
+			}
+			break;
+		}
+	}
 }
 
 UTimeSystem* ATutorialTaskManager::GetTimeSystem() const
@@ -136,6 +203,13 @@ UTimeSystem* ATutorialTaskManager::GetTimeSystem() const
 		}
 	}
 	return nullptr;
+}
+
+bool ATutorialTaskManager::NeedsOpeningGuidance() const
+{
+	const UTimeSystem* TS = GetTimeSystem();
+	return bEnable && AppliedDay == 1 && ActiveTasks.Num() > 0 && TS
+		&& !TS->IsBusinessOpen() && !TS->IsEndOfDayReached();
 }
 
 int32 ATutorialTaskManager::GetCurrentDay() const
@@ -176,6 +250,8 @@ void ATutorialTaskManager::ResetRuntimeState()
 void ATutorialTaskManager::ApplyDay(int32 Day)
 {
 	AppliedDay = Day;
+	const UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetGameInstance());
+	AppliedSave = GI ? GI->curSaveGameData.Get() : nullptr;
 	ResetRuntimeState();
 
 	if (!TaskTable)
@@ -199,6 +275,22 @@ void ATutorialTaskManager::ApplyDay(int32 Day)
 	{
 		return A.Row.StepOrder < B.Row.StepOrder;
 	});
+	if (Day == 1)
+	{
+		// 订单数及旧布尔标记都不能证明操作教学做过，必须有逐步完成记录。
+		// 未做完首单就读档时，场景中的食材/锅已重置，重新引导这一整份料理。
+		const TArray<int32>* Completed = GI && GI->curSaveGameData
+			? &GI->curSaveGameData->FirstDayTutorialCompletedSteps : nullptr;
+		const FActiveTask* FirstServe = ActiveTasks.FindByPredicate([](const FActiveTask& Task)
+			{ return Task.Row.TaskType == ETutorialTaskType::ServeGuests; });
+		if (Completed && FirstServe && Completed->Contains(FirstServe->Row.StepOrder))
+			for (FActiveTask& Task : ActiveTasks)
+			{
+				if (!Completed->Contains(Task.Row.StepOrder)) break;
+				Task.bDone = true;
+				Task.Progress = Task.Row.TargetCount;
+			}
+	}
 
 	// 接待客人的基线：服务计数可能跨天累计，按当天起点做差
 	ServeBaseline = GetLevelBP() ? GetLevelBP()->GuestsServedThisLevel : 0;
@@ -402,6 +494,8 @@ void ATutorialTaskManager::UpdateProgress()
 	ADiningHygieneManager* Hygiene = FindHygieneManager();
 	const ABaseLevelBP* LevelBP = GetLevelBP();
 
+	const FActiveTask* FirstServe = ActiveTasks.FindByPredicate([](const FActiveTask& Task)
+		{ return Task.Row.TaskType == ETutorialTaskType::ServeGuests; });
 	for (FActiveTask& Task : ActiveTasks)
 	{
 		if (Task.bDone)
@@ -420,7 +514,12 @@ void ATutorialTaskManager::UpdateProgress()
 		case ETutorialTaskType::ServeGuests:
 			if (LevelBP)
 			{
-				Task.Progress = FMath::Max(0, LevelBP->GuestsServedThisLevel - ServeBaseline);
+				if (AppliedDay == 1 && LevelBP->orderSystem && LevelBP->orderSystem->GetFirstDayServiceTarget() > 0)
+				{
+					// 首单必须在轮到上菜这一步后真正交付；历史总单数不能完成这一步。
+					if (&Task != FirstServe) Task.Progress = LevelBP->orderSystem->GetFirstDayOrdersServed();
+				}
+				else Task.Progress = FMath::Max(0, LevelBP->GuestsServedThisLevel - ServeBaseline);
 			}
 			break;
 		case ETutorialTaskType::EarnMoney:
@@ -432,6 +531,15 @@ void ATutorialTaskManager::UpdateProgress()
 		case ETutorialTaskType::PickupItem:
 			Task.MaxSeen = FMath::Max(Task.MaxSeen, CountItemAcrossPlayers(Task.Row.TargetItemID));
 			Task.Progress = Task.MaxSeen;
+			break;
+		case ETutorialTaskType::CollectDish:
+			for (TActorIterator<AShootCharacter> It(GetWorld()); It; ++It)
+			{
+				const AItemActor* Held = It->GetPickingItem();
+				if (Held && Held->GetMenuFoodID() >= 0
+					&& (Task.Row.TargetItemID < 0 || Held->GetMenuFoodID() == Task.Row.TargetItemID))
+					Task.Progress = Task.Row.TargetCount;
+			}
 			break;
 		case ETutorialTaskType::HarvestQuest:
 			if (Task.Row.bRequireBasket)
@@ -464,8 +572,22 @@ void ATutorialTaskManager::UpdateProgress()
 		if (Task.Progress >= FMath::Max(1, Task.Row.TargetCount))
 		{
 			Task.bDone = true;
+			SaveCompletedTask(Task);
 		}
+		// 一次只学习当前一步，后续任务不提前偷计数。
+		break;
 	}
+}
+
+void ATutorialTaskManager::SaveCompletedTask(const FActiveTask& Task)
+{
+	if (AppliedDay != 1 || !Task.bDone) return;
+	if (UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetGameInstance()))
+		if (GI->curSaveGameData && !GI->curSaveGameData->FirstDayTutorialCompletedSteps.Contains(Task.Row.StepOrder))
+		{
+			GI->curSaveGameData->FirstDayTutorialCompletedSteps.Add(Task.Row.StepOrder);
+			GI->SaveGameData();
+		}
 }
 
 AActor* ATutorialTaskManager::FindTargetActor(const FActiveTask& Task) const
@@ -496,6 +618,24 @@ AActor* ATutorialTaskManager::FindTargetActor(const FActiveTask& Task) const
 	AActor* Best = nullptr;
 	switch (Task.Row.TaskType)
 	{
+	case ETutorialTaskType::AddToCooker:
+	case ETutorialTaskType::CookDish:
+	{
+		for (TActorIterator<ACookingMachine> It(World); It; ++It)
+		{
+			if (!Tag.IsNone() && !It->ActorHasTag(Tag)) continue;
+			if (It->MachineID == 1001) Best = Better(Best, *It);
+		}
+		break;
+	}
+	case ETutorialTaskType::CollectDish:
+	{
+		for (TActorIterator<AItemActor> It(World); It; ++It)
+			if (It->GetMenuFoodID() >= 0 && !It->GetAttachParentActor()
+				&& (Task.Row.TargetItemID < 0 || It->GetMenuFoodID() == Task.Row.TargetItemID))
+				Best = Better(Best, *It);
+		break;
+	}
 	case ETutorialTaskType::CleanTrash:
 	{
 		if (ADiningHygieneManager* Hygiene = FindHygieneManager())
@@ -508,6 +648,7 @@ AActor* ATutorialTaskManager::FindTargetActor(const FActiveTask& Task) const
 		break;
 	}
 	case ETutorialTaskType::ServeGuests:
+	case ETutorialTaskType::AcceptOrder:
 	{
 		// 箭头指向“有客人坐着的餐桌”（椅子），而不是跟着走动的客人一路跑
 		for (TActorIterator<AChairSeat> It(World); It; ++It)
@@ -623,6 +764,21 @@ void ATutorialTaskManager::UpdateFocusTarget()
 {
 	bHasFocusTarget = false;
 	FocusHint = FText::GetEmpty();
+	if (NeedsOpeningGuidance())
+	{
+		FocusHint = FText::FromString(TEXT("跟随箭头走到入口大门，靠近后按 E 开始试营业。今天完成 3 单即可，不限时。"));
+		const FVector Ref = GetLocalPlayerReferenceLocation(GetWorld());
+		AGateCounter* Gate = nullptr;
+		for (TActorIterator<AGateCounter> It(GetWorld()); It; ++It)
+			if (!Gate || FVector::DistSquared(It->GetActorLocation(), Ref) < FVector::DistSquared(Gate->GetActorLocation(), Ref))
+				Gate = *It;
+		if (Gate)
+		{
+			FocusLocation = Gate->GetActorLocation();
+			bHasFocusTarget = true;
+		}
+		return;
+	}
 
 	for (const FActiveTask& Task : ActiveTasks)
 	{
@@ -642,35 +798,47 @@ void ATutorialTaskManager::UpdateFocusTarget()
 		{
 			FocusHint = Task.Row.HintText.IsEmpty() ? Task.Row.Description : Task.Row.HintText;
 		}
+		return;
 	}
 }
 
-TArray<FString> ATutorialTaskManager::GetChecklistLines() const
+TArray<FTutorialChecklistEntry> ATutorialTaskManager::GetChecklistEntries() const
 {
-	TArray<FString> Lines;
+	TArray<FTutorialChecklistEntry> Entries;
+	if (NeedsOpeningGuidance())
+	{
+		FTutorialChecklistEntry& Entry = Entries.AddDefaulted_GetRef();
+		Entry.Text = NSLOCTEXT("Tutorial", "OpeningObjective", "走到入口大门，按 E 开始试营业");
+		return Entries;
+	}
 	for (const FActiveTask& Task : ActiveTasks)
 	{
 		const int32 Target = FMath::Max(1, Task.Row.TargetCount);
-		const FString Desc = Task.Row.Description.IsEmpty()
-			? (Task.Row.HintText.IsEmpty() ? TEXT("任务") : Task.Row.HintText.ToString())
-			: Task.Row.Description.ToString();
-		Lines.Add(FString::Printf(TEXT("%s %s  %d/%d"),
-			Task.bDone ? TEXT("[√]") : TEXT("[ ]"), *Desc, FMath::Min(Task.Progress, Target), Target));
+		const FText Description = Task.Row.Description.IsEmpty()
+			? (Task.Row.HintText.IsEmpty() ? NSLOCTEXT("Tutorial", "DefaultObjective", "任务") : Task.Row.HintText)
+			: Task.Row.Description;
+		FTutorialChecklistEntry& Entry = Entries.AddDefaulted_GetRef();
+		Entry.Text = FText::Format(NSLOCTEXT("Tutorial", "ObjectiveProgress", "{0}  {1}/{2}"),
+			Description, FText::AsNumber(FMath::Min(Task.Progress, Target)), FText::AsNumber(Target));
+		Entry.bCompleted = Task.bDone;
+		if (!Task.bDone) break;
 	}
 
-	// 按天追加的提示行（如第 3 天提醒客人耐心值恢复限制）
 	if (const FText* Note = DayExtraNotes.Find(AppliedDay))
 	{
 		if (!Note->IsEmpty())
 		{
-			Lines.Add(FString::Printf(TEXT("※ %s"), *Note->ToString()));
+			FTutorialChecklistEntry& Entry = Entries.AddDefaulted_GetRef();
+			Entry.Text = *Note;
+			Entry.bNote = true;
 		}
 	}
-	return Lines;
+	return Entries;
 }
 
 FText ATutorialTaskManager::GetDayTitle() const
 {
+	if (NeedsOpeningGuidance()) return FText::FromString(TEXT("第 1 天 · 准备开门"));
 	return FText::FromString(FString::Printf(TEXT("第 %d 天任务"), FMath::Max(1, AppliedDay)));
 }
 

@@ -42,6 +42,7 @@ void UTimeSystem::Init()
 	bIsBusinessOpen = false;
 	bBusinessClosedForDay = false;
 	bEndOfDayReached = false;
+	bGoalDrivenBusiness = false;
 	bNightVisualsForced = false;
 	UpdateSun();
 }
@@ -66,6 +67,7 @@ void UTimeSystem::AdvanceOneDay(bool bResetDayProgress)
 	CloseBusiness();
 	if (bResetDayProgress)
 	{
+		bGoalDrivenBusiness = false;
 		Accum = 0.0;
 		DayProgress = 0.f;
 	}
@@ -112,7 +114,8 @@ void UTimeSystem::Tick(float DeltaTime)
 	const float SafeDeltaTime = FMath::Max(0.f, DeltaTime);
 	UpdateBusinessState();
 
-	if (!bPausedState && bAutoAdvance && RealSecondsPerDay > 0.f)
+	const bool bPreparing = bPauseBeforeOpening && !bAutoOpenBusiness && !bIsBusinessOpen && !bBusinessClosedForDay;
+	if (!bPausedState && !bPreparing && !bGoalDrivenBusiness && bAutoAdvance && RealSecondsPerDay > 0.f)
 	{
 		const double DaySeconds = RealSecondsPerDay;
 		double RemainingSeconds = SafeDeltaTime;
@@ -204,6 +207,7 @@ bool UTimeSystem::IsWithinBusinessHours() const
 
 bool UTimeSystem::OpenBusiness()
 {
+	if (bEndOfDayReached) return false;
 	if (bIsBusinessOpen)
 	{
 		bBusinessClosedForDay = false;
@@ -236,7 +240,7 @@ void UTimeSystem::CloseBusiness()
 
 	// huanglily：到点打烊后暂停时钟并广播“营业日结束”，让经营模拟在此刻结算、
 	// 日结卡停留到玩家点“进入下一天”，而不是午夜自动跳天。
-	bEndOfDayReached = (GetCurrentHour() >= CloseHour - 0.01f);
+	bEndOfDayReached = bEndOfDayReached || (GetCurrentHour() >= CloseHour - 0.01f);
 	bNightVisualsForced = true;
 	if (bEndOfDayReached)
 	{
@@ -250,6 +254,14 @@ void UTimeSystem::CloseBusiness()
 	{
 		OnBusinessDayEnded.Broadcast();
 	}
+}
+
+bool UTimeSystem::FinishBusinessDayEarly()
+{
+	if (!bIsBusinessOpen || bEndOfDayReached) return false;
+	bEndOfDayReached = true;
+	CloseBusiness();
+	return true;
 }
 
 void UTimeSystem::BeginNextBusinessDay()

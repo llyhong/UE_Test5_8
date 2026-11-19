@@ -40,7 +40,7 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Shoot|Order")
 	int32 GetBaseOrderPrice() const;
 
-	/** 备料窗口内追加的超时宽限（秒）：由 AOrderSystem::SetPrepWindowGrace 统一下发，窗口结束归零 */
+	/** 给已有订单授予额外时间；关窗不会收回已给出的宽限。 */
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Order|PrepWindow")
 	void SetPrepWindowGraceSeconds(float Seconds);
 
@@ -91,10 +91,11 @@ public:
 	void SetCoopWaitTimeScale(float Scale) { CoopWaitTimeScale = FMath::Clamp(Scale, 0.5f, 1.f); }
 
 private:
+	friend class FPrepDeadlineTest;
 	float NormalWaitTime = 0.f;
 	float LateServeGraceSeconds = 0.f;
 	float LateServePriceMultiplier = 1.f;
-	/** 备料窗口追加宽限（不写进存档、不进 InitializePatience，窗口结束由订单系统清零） */
+	/** 本单已授予的备料宽限，只增加，不倒退。 */
 	float PrepWindowGraceSeconds = 0.f;
 	/** 限时野味订单价格倍率（1=普通单） */
 	float WildPriceMultiplier = 1.f;
@@ -179,6 +180,20 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Shoot|Order")
 	bool CanAcceptNewOrder() const;
+
+	UFUNCTION(BlueprintPure, Category = "Shoot|Order|Tutorial")
+	int32 GetFirstDayServiceTarget() const;
+	UFUNCTION(BlueprintPure, Category = "Shoot|Order|Tutorial")
+	int32 GetFirstDayOrdersServed() const;
+
+	UFUNCTION(BlueprintPure, Category = "Shoot|Order|Menu")
+	TArray<int32> GetDailyMenu() const { return DailyMenuIDs; }
+	UFUNCTION(BlueprintPure, Category = "Shoot|Order|Menu")
+	bool IsDailyMenuEditable() const;
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Order|Menu")
+	bool ToggleDailyMenuDish(int32 FoodID);
+	UFUNCTION(BlueprintPure, Category = "Shoot|Order|Menu")
+	TArray<int32> GetAvailableDailyDishes() const;
 
 	/** 取消某客人尚未完成的订单（客人提前离场时调用），返回是否取消了订单 */
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Order")
@@ -288,6 +303,17 @@ public:
 	AGuestCharacter* GetLastServedGuest() const { return LastServedGuest; }
 
 private:
+	UPROPERTY(Transient)
+	TArray<int32> DailyMenuIDs;
+	TArray<int32> PendingTastingIDs;
+	TSet<int32> KnownAvailableDishes;
+	bool bDailyMenuInitialized = false;
+	void RefreshDailyMenu();
+	void SaveDailyMenu() const;
+	bool TryBuildTastingOrder(FOrderData& OutOrder);
+	int32 LastDailyMenuDish = INDEX_NONE;
+	int32 FirstDayOrdersServed = 0;
+	void RecordFirstDayOrderServed();
 	/** 订单 ID 自增器（原先是文件作用域全局变量，改为成员以避免多实例/多世界共享状态与外部链接污染） */
 	int32 OrderID = 0;
 
