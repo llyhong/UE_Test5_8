@@ -824,6 +824,7 @@ bool AGuestCharacter::TryServeDish(AShootCharacter* Player, AItemActor* Dish)
 	else
 	{
 		Dish->SetActorLocation(GetActorLocation() + FVector(0.f, 0.f, 30.f));
+		Dish->ClearPremiumDishFeedback();
 	}
 
 	// 桌上成品：不可被普通拾取、不会腐烂消失、停留在桌上
