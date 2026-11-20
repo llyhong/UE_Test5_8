@@ -24,7 +24,6 @@ class AFoodSpawnOther;
 class ACookingMachine;
 class UHUDWidget;
 class UInventoryWidget;
-class UShopWidget;
 class AAnimalCharacter;
 class UShootAnimInstance;
 class APlant;
@@ -226,14 +225,6 @@ private:
 	// 当前打开的背包 Widget 实例(仅持有一个，关闭时不销毁，再次打开复用)
 	UPROPERTY()
 	TObjectPtr<UInventoryWidget> InventoryWidget;
-
-	// 商店界面 Widget 类(蓝图继承 UShopWidget)
-	UPROPERTY(EditAnywhere, Category = "Shoot|Shop")
-	TSubclassOf<UUserWidget> ShopWidgetClass;
-
-	// 当前打开的商店 Widget 实例(仅持有一个，关闭时不销毁，再次打开复用)
-	UPROPERTY()
-	TObjectPtr<UShopWidget> ShopWidget;
 
 	UPROPERTY(EditAnywhere, Category = "Shoot|Weapon")
 	AWeapon* EquippedWeapon;
@@ -670,7 +661,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Character")
 	FORCEINLINE UInteractionDialogueComponent* GetOverlappingDialogue() const { return OverlappingDialogue; }
 
-	FORCEINLINE void SetPickingItem(AItemActor* Item){PickingItem = Item;}
+	void SetPickingItem(AItemActor* Item);
 
 	/** 交出/放下手上物品后复位手持状态（清空 PickingItem、动作状态与手部 IK）。
 	 *  上菜成功等"物品已交给别人"的分支统一调用，避免各处重复写一长串复位。 */
@@ -879,6 +870,7 @@ protected:
 	void PushFoodComplete(const FInputActionValue& Value);
 	
 	/** 打开/关闭商店界面 (P 键) */
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Shop")
 	void ToggleShop();
 
 	void OnMouseWheelAxis(const FInputActionValue& Value);
