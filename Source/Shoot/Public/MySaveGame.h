@@ -6,6 +6,7 @@
 #include "GameFramework/SaveGame.h"
 #include "Game/StaffSystem.h"
 #include "Game/SeasonSystem.h"
+#include "Data/TutorialSaveData.h"
 #include "MySaveGame.generated.h"
 
 /**
@@ -68,6 +69,11 @@ class SHOOT_API UMySaveGame : public USaveGame
 	/** 只有实际依序完成的教学步骤才入档，不能从订单总数推断。 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Shoot|Tutorial")
 	TArray<int32> FirstDayTutorialCompletedSteps;
+
+	UPROPERTY(SaveGame)
+	TMap<int32, FTutorialDaySave> TutorialDays;
+	UPROPERTY(SaveGame)
+	FTutorialWorldSave TutorialWorld;
 
 	/** 食物箱剩余数量持久化：键 = 箱子 ActorGuid 字符串，值 = 剩余可生成数量。跨存档持久化。 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Shoot|Spawner")
