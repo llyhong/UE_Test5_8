@@ -37,6 +37,19 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Components")
 	UStaticMeshComponent* CounterMesh;
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Shoot|Serve")
+	bool bStageFinishedDish = false;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Components")
+	TObjectPtr<USceneComponent> DishPoint;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Serve")
+	TObjectPtr<AItemActor> StagedDish;
+
+	bool CanStageDish(const AItemActor* Dish) const;
+	bool TryStageDish(AShootCharacter& Player);
+	bool TryTakeStagedDish(AShootCharacter& Player);
+
 	/** 交互范围：玩家进入后注册为可提交菜品的上菜台 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Components")
 	USphereComponent* InteractionSphere;
@@ -102,6 +115,7 @@ public:
 		UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
 
 protected:
+	bool bStagedDishWasPickable = false;
 	/** 校验菜品 ID 是否存在于菜单数据表中 */
 	bool IsFoodInMenu(int32 FoodID) const;
 

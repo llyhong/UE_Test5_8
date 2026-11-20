@@ -13,6 +13,7 @@ class UWidgetComponent;
 class ULocalPlayer;
 class AItemActor;
 class APlateSystem;
+class APlateCollectionTray;
 class AShootCharacter;
 
 /**
@@ -79,6 +80,11 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Dishwasher")
 	bool SubmitPlate(AItemActor* Plate);
 
+	bool UnlockCollectionTray();
+	bool HasDockedTray() const;
+	bool TakeCollectionTray(AShootCharacter& Player);
+	bool ReturnCollectionTray(AShootCharacter& Player);
+
 	/** 当前可用碟子数（读取盘子系统） */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Dishwasher")
 	int32 GetAvailablePlates() const;
@@ -110,4 +116,10 @@ protected:
 	/** 当前占用提示控件的本地玩家（多人分屏隔离用，避免提示被其它玩家误显示） */
 	UPROPERTY()
 	TObjectPtr<ULocalPlayer> LocalPlayer;
+
+private:
+	void DockCollectionTray();
+
+	UPROPERTY()
+	TObjectPtr<APlateCollectionTray> CollectionTray;
 };
