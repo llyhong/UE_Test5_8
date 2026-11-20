@@ -1,6 +1,8 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 #include "Machine/StorageWarehouse.h"
+#include "Game/TutorialTaskManager.h"
+#include "Data/ItemActorInfo.h"
 #include "Components/SphereComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/WidgetComponent.h"
@@ -176,6 +178,8 @@ int32 AStorageWarehouse::DepositFromInventory(AShootCharacter* Player)
 		}
 
 		Player->RemoveItemFromInventory(0);
+		const int32 ID = FItemActorInfo::GetItemIDFromRowName(Slot.ItemInfoRow.RowName);
+		ATutorialTaskManager::NotifyAction(GetWorld(), ETutorialTaskType::StoreToWarehouse, ID, this, Slot.Quantity);
 		Deposited++;
 	}
 
@@ -278,8 +282,11 @@ int32 AStorageWarehouse::DepositSlots(TArray<FInventorySlot>& InOutSlots)
 			RestockSpawnersFor(Slot.ItemClass, Slot.Quantity);
 		}
 
-		Deposited += Slot.Quantity;
+		const int32 ID = FItemActorInfo::GetItemIDFromRowName(Slot.ItemInfoRow.RowName);
+		const int32 Count = Slot.Quantity;
+		Deposited += Count;
 		InOutSlots.RemoveAt(Index);
+		ATutorialTaskManager::NotifyAction(GetWorld(), ETutorialTaskType::StoreToWarehouse, ID, this, Count);
 	}
 
 	if (Deposited > 0)
