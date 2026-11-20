@@ -2,6 +2,7 @@
 
 
 #include "Game/BaseLevelBP.h"
+#include "Game/TutorialTaskManager.h"
 
 #include "Game/BaseGameInstance.h"
 #include "NPC/GuestManager.h"
@@ -11,6 +12,7 @@
 #include "Blueprint/UserWidget.h"
 #include "UI/OrderWidget.h"
 #include "UI/HUDWidget.h"
+#include "UI/DiscoveryToastWidget.h"
 #include "UI/SeasonDailyCardWidget.h"
 #include "UI/SeasonWarningWidget.h"
 #include "UI/SeasonEndingWidget.h"
@@ -233,6 +235,7 @@ else
 				TS->OpenHour, TS->CloseHour, TS->DayStartHour, TS->DayEndHour,
 				TS->DayProgress, TS->GetCurrentHour(), TS->bIsBusinessOpen,
 				*GI->businessSimulation->GetClass()->GetName());
+			RefreshKitchenPlateFlow(*TS);
 			GetWorld()->GetTimerManager().SetTimer(ClockTimerHandle, this, &ABaseLevelBP::RefreshClock, 1.f, true);
 
 			// 自动绑定太阳：若 TimeSystem 未指定 SunLight，则按标签"Sun"优先、否则首个 DirectionalLight 绑定，并立即应用一次
@@ -264,6 +267,11 @@ else
 
 void ABaseLevelBP::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	// 关卡结束时先取消延迟弹卡，避免结算卡跨关卡弹出
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(DailyCardTimerHandle);
+	}
 	// 关卡结束时移除订单 UI（其 NativeDestruct 会自行解绑订单系统），避免残留 widget 跨关卡滞留
 	if (OrderWidget)
 	{
@@ -288,6 +296,10 @@ void ABaseLevelBP::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		}
 		// 退出关卡时统一落盘：箱内剩余数量等已在内存中更新，这里一次性写入存档（避免每次摘取都写盘）
 		GI->SaveGameData();
+		if (UGameplayStatics::GetCurrentLevelName(this) == TEXT("Kitchen_New"))
+		{
+			GI->SetDirtyPlateFlow(false);
+		}
 		GI->curLevelBP = nullptr;
 		// 解除太阳引用，避免关卡卸载后悬空指针跨关残留
 		if (GI->businessSimulation && GI->businessSimulation->TimeSystem)
@@ -307,6 +319,46 @@ UBusinessSimulation* ABaseLevelBP::GetBusinessSimulation() const
 	return nullptr;
 }
 
+void ABaseLevelBP::RefreshKitchenPlateFlow(const UTimeSystem& TimeSystem)
+{
+	if (!PlateSystem || UGameplayStatics::GetCurrentLevelName(this) != TEXT("Kitchen_New"))
+	{
+		return;
+	}
+
+	UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetGameInstance());
+	if (!GI)
+	{
+		return;
+	}
+
+	const bool bAfterFirstMonth = TimeSystem.Year > TimeSystem.StartYear || TimeSystem.Month > TimeSystem.StartMonth;
+	ADishwasher* Washer = Cast<ADishwasher>(UGameplayStatics::GetActorOfClass(this, ADishwasher::StaticClass()));
+	const bool bEnable = Washer != nullptr;
+	const bool bUseLimitedSupply = bEnable && (bAfterFirstMonth || TimeSystem.Day >= 4);
+	GI->SetDirtyPlateFlow(bEnable);
+	if (bUseLimitedSupply)
+	{
+		if (PlateSystem->IsInfinitePlates())
+		{
+			PlateSystem->SetTotalCount(5);
+		}
+		PlateSystem->bAutoRegenPlates = false;
+	}
+	if (PlateSystem->IsInfinitePlates() == bUseLimitedSupply)
+	{
+		PlateSystem->SetInfinite(!bUseLimitedSupply);
+	}
+	if (bEnable && (bAfterFirstMonth || TimeSystem.Day >= 5) && Washer->UnlockCollectionTray())
+	{
+		if (APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0))
+		{
+			UDiscoveryToastWidget::ShowMessage(PC, TEXT("收碟托盘已解锁"),
+				TEXT("在洗碗机旁按 E 拿取，一趟可收 3 只盘子。"), FLinearColor(0.95f, 0.7f, 0.3f));
+		}
+	}
+}
+
 void ABaseLevelBP::RefreshClock()
 {
 	if (UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetGameInstance()))
@@ -315,6 +367,8 @@ void ABaseLevelBP::RefreshClock()
 		{
 			UTimeSystem* TS = GI->businessSimulation->TimeSystem;
 			HUDWidget->SetClock(TS->GetCurrentHour(), TS->IsBusinessOpen());
+			const bool bShowPlateSupply = PlateSystem && !PlateSystem->IsInfinitePlates() && TS->IsBusinessOpen();
+			HUDWidget->SetKitchenPlateHint(bShowPlateSupply ? PlateSystem->GetAvailablePlates() : INDEX_NONE);
 		}
 	}
 }
@@ -904,6 +958,9 @@ void ABaseLevelBP::HandleOrderFinished(const UOrderHandle* Handle, const FOrderD
 {
 	// 每完成一单视为服务了一位客人，累计用于关卡目标判定
 	GuestsServedThisLevel++;
+	if (UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetGameInstance()))
+		if (GI->businessSimulation && GI->businessSimulation->TimeSystem && GI->businessSimulation->TimeSystem->Day > 1)
+			ATutorialTaskManager::NotifyAction(GetWorld(), ETutorialTaskType::ServeGuests, -1);
 	CheckLevelGoal();
 
 	if (UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetGameInstance()))
@@ -949,6 +1006,33 @@ void ABaseLevelBP::HandleSeasonDailyGrade(ESeasonGrade Grade, int32 GradeScore, 
 		*GI->seasonSystem->GetGradeName(Grade), GradeScore, Served, Failed);
 
 	// 营业结束触发的日结卡要停留等“进入下一天”；其它来源仍按原样自动淡出
+	const bool bAwaitNextDay = GI->businessSimulation && GI->businessSimulation->TimeSystem
+		&& GI->businessSimulation->TimeSystem->IsEndOfDayReached();
+
+	// 打烊演出：先让玩家看到打烊后的夜色场景与打烊时刻，停留 EndOfDayCardDelay 秒后再弹结算卡
+	if (bAwaitNextDay)
+	{
+		RefreshClock();
+		if (EndOfDayCardDelay > 0.f && GetWorld()
+			&& !GetWorldTimerManager().IsTimerActive(DailyCardTimerHandle))
+		{
+			GetWorldTimerManager().SetTimer(DailyCardTimerHandle, this, &ABaseLevelBP::ShowDailyCardToLocalPlayers,
+				EndOfDayCardDelay, false);
+			return;
+		}
+	}
+
+	ShowDailyCardToLocalPlayers();
+}
+
+void ABaseLevelBP::ShowDailyCardToLocalPlayers()
+{
+	UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetGameInstance());
+	if (!GI || !GI->seasonSystem || !GetWorld())
+	{
+		return;
+	}
+
 	const bool bAwaitNextDay = GI->businessSimulation && GI->businessSimulation->TimeSystem
 		&& GI->businessSimulation->TimeSystem->IsEndOfDayReached();
 
