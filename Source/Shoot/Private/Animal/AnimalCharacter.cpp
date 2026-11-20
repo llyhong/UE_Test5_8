@@ -18,6 +18,7 @@
 #include "Engine/Engine.h"
 #include "TimerManager.h"
 #include "Kismet/GameplayStatics.h"
+#include "EngineUtils.h"
 #include "UObject/EnumProperty.h"
 #include "DrawDebugHelpers.h"
 #include "Perception/AIPerceptionComponent.h"
@@ -118,6 +119,10 @@ AAnimalCharacter::AAnimalCharacter()
 		DamageBox->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);   // 供武器 BoxTrace(Visibility) 命中
 		DamageBox->SetGenerateOverlapEvents(true);
 	}
+
+	// 需求源默认标签：关卡里给水槽/食槽等 Actor 加上同名 Tag 即可被动物使用
+	WaterSourceTags.Add(TEXT("AnimalWater"));
+	FoodSourceTags.Add(TEXT("AnimalFood"));
 }
 
 void AAnimalCharacter::BeginPlay()
@@ -133,6 +138,13 @@ void AAnimalCharacter::BeginPlay()
 	if (bAutoSpawn)
 	{
 		StartSpawning();
+	}
+
+	// 下蛋循环：首次下蛋时间在半个到一个间隔之间随机，避免所有鸡同时下蛋
+	if (bLayEggs)
+	{
+		const float Base = FMath::Max(1.f, LayEggInterval);
+		LayEggRemaining = FMath::FRandRange(Base * 0.5f, Base);
 	}
 
 	// 广播一次当前需求状态，便于合并 Widget 绑定后对齐初始贴图/显隐
@@ -175,6 +187,9 @@ void AAnimalCharacter::Tick(float DeltaTime)
 		return;
 	}
 
+	// 下蛋独立于 AI 距离剔除：玩家不在附近时也照常累积(受附近蛋数上限约束)
+	UpdateEggLaying(DeltaTime);
+
 	UpdateAIDistanceCull();
 	if (!bAIActive)
 	{
@@ -192,17 +207,6 @@ void AAnimalCharacter::Tick(float DeltaTime)
 	UpdateDayNight(bIsNight);
 
 	UpdateNeeds(DeltaTime);
-
-	// 进食动画计时
-	if (EatRemaining > 0.f)
-	{
-		EatRemaining -= DeltaTime;
-		if (EatRemaining <= 0.f)
-		{
-			EatRemaining = 0.f;
-			bIsEating = false;
-		}
-	}
 
 	UpdateBehavior(DeltaTime);
 
@@ -606,14 +610,18 @@ void AAnimalCharacter::UpdateBehavior(float DeltaTime)
 	if (bSeekingNeed)
 	{
 		CurrentBehavior = EAnimalActiveBehavior::SeekNeed;
-		// TODO: 在关卡中查找最近的食物/水源 Actor 并移动; 此处退化为前往 Homebase
-		if (!bHasDestination || FVector::DistSquared(GetActorLocation(), CurrentDestination) > ArriveThreshold * ArriveThreshold)
-		{
-			CurrentDestination = HomeLocation;
-			bHasDestination = true;
-			MoveToLocation(CurrentDestination, MoveSpeed);
-		}
+		UpdateSeekNeed(DeltaTime);
 		return;
+	}
+
+	// 需求已解除：清掉残留的吃喝状态与目标(吃喝动画/计时只在需求流程内有效)
+	if (bIsEating || bIsDrinking || NeedSourceActor.IsValid())
+	{
+		bIsEating = false;
+		bIsDrinking = false;
+		EatRemaining = 0.f;
+		DrinkRemaining = 0.f;
+		NeedSourceActor = nullptr;
 	}
 
 	CurrentBehavior = ActiveBehavior;
@@ -723,12 +731,186 @@ void AAnimalCharacter::ExecuteActiveBehavior(float DeltaTime)
 		break;
 
 	case EAnimalActiveBehavior::GoToPOI:
+		// TODO: 查找 POI 后移动(暂保持当前目标)
+		break;
+
 	case EAnimalActiveBehavior::SeekNeed:
-		// TODO: 查找 POI / 食物水源后移动(暂保持当前目标)
+		// 需求驱动的寻源由 UpdateSeekNeed 处理；走到这里仅表示没有可用目标
 		break;
 
 	default:
 		break;
+	}
+}
+
+// ============================================================
+//  需求：寻找水源/食物源并吃喝
+// ============================================================
+AActor* AAnimalCharacter::FindNearestNeedSource(EAnimalNeed Need) const
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return nullptr;
+	}
+	const TArray<FName>& SourceTags = (Need == EAnimalNeed::Water) ? WaterSourceTags : FoodSourceTags;
+	if (SourceTags.Num() == 0)
+	{
+		return nullptr;
+	}
+
+	AActor* Best = nullptr;
+	float BestDistSq = NeedSearchRadius * NeedSearchRadius;
+	for (TActorIterator<AActor> It(World); It; ++It)
+	{
+		AActor* Candidate = *It;
+		if (!Candidate || Candidate == this)
+		{
+			continue;
+		}
+		bool bHasTag = false;
+		for (const FName& Tag : SourceTags)
+		{
+			if (Candidate->ActorHasTag(Tag))
+			{
+				bHasTag = true;
+				break;
+			}
+		}
+		if (!bHasTag)
+		{
+			continue;
+		}
+		const float DistSq = FVector::DistSquared(Candidate->GetActorLocation(), GetActorLocation());
+		if (DistSq <= BestDistSq)
+		{
+			BestDistSq = DistSq;
+			Best = Candidate;
+		}
+	}
+	return Best;
+}
+
+void AAnimalCharacter::StartConsumingNeed(EAnimalNeed Need)
+{
+	ActiveNeed = Need;
+	if (AAIController* AIC = GetAnimalController())
+	{
+		AIC->StopMovement();
+	}
+	bHasDestination = false;
+
+	if (Need == EAnimalNeed::Water)
+	{
+		bIsDrinking = true;
+		DrinkRemaining = FMath::Max(0.1f, DrinkDuration);
+		if (bEnableDebugLog)
+		{
+			UE_LOG(LogTemp, Log, TEXT("[%s] 到达水源，开始喝水 %.1f 秒"), *GetName(), DrinkRemaining);
+		}
+	}
+	else
+	{
+		bIsEating = true;
+		EatRemaining = FMath::Max(0.1f, EatDuration);
+		if (bEnableDebugLog)
+		{
+			UE_LOG(LogTemp, Log, TEXT("[%s] 到达食物源，开始进食 %.1f 秒"), *GetName(), EatRemaining);
+		}
+	}
+}
+
+void AAnimalCharacter::UpdateSeekNeed(float DeltaTime)
+{
+	// ---- 正在吃喝：原地计时，完成后把对应需求清零 ----
+	if (bIsDrinking || bIsEating)
+	{
+		if (AAIController* AIC = GetAnimalController())
+		{
+			AIC->StopMovement();
+		}
+		if (bIsDrinking)
+		{
+			DrinkRemaining -= DeltaTime;
+			if (DrinkRemaining <= 0.f)
+			{
+				Thirst = 0.f;
+				bIsDrinking = false;
+				DrinkRemaining = 0.f;
+				NeedSourceActor = nullptr;
+				bHasDestination = false;
+				OnNeedSatisfied(EAnimalNeed::Water);
+			}
+		}
+		else
+		{
+			EatRemaining -= DeltaTime;
+			if (EatRemaining <= 0.f)
+			{
+				Hunger = 0.f;
+				bIsEating = false;
+				EatRemaining = 0.f;
+				NeedSourceActor = nullptr;
+				bHasDestination = false;
+				OnNeedSatisfied(EAnimalNeed::Food);
+			}
+		}
+		return;
+	}
+
+	// ---- 选择最紧迫的需求(两者共用同一阈值，直接比较数值) ----
+	const EAnimalNeed Need = (Thirst >= Hunger) ? EAnimalNeed::Water : EAnimalNeed::Food;
+
+	// 需求类型切换(先解渴后解饿)或目标失效 -> 重新找源
+	if (NeedSourceActor.IsValid() && ActiveNeed != Need)
+	{
+		NeedSourceActor = nullptr;
+	}
+	if (!NeedSourceActor.IsValid())
+	{
+		ActiveNeed = Need;
+		const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
+		if (Now >= NextNeedSearchTime)
+		{
+			NextNeedSearchTime = Now + 2.0;
+			NeedSourceActor = FindNearestNeedSource(Need);
+			if (NeedSourceActor.IsValid())
+			{
+				CurrentDestination = NeedSourceActor->GetActorLocation();
+				bHasDestination = true;
+				MoveToLocation(CurrentDestination, MoveSpeed);
+			}
+			else if (bEnableDebugLog)
+			{
+				UE_LOG(LogTemp, Log, TEXT("[%s] 未找到%s源(半径 %.0f)，退化为游荡"), *GetName(),
+					Need == EAnimalNeed::Water ? TEXT("水") : TEXT("食物"), NeedSearchRadius);
+			}
+		}
+		if (!NeedSourceActor.IsValid())
+		{
+			// 没有可用需求源：退化为在出生点附近游荡，避免站着不动
+			if (!bHasDestination)
+			{
+				CurrentDestination = GetRandomPointInNavMesh(WanderRadius);
+				bHasDestination = true;
+				MoveToLocation(CurrentDestination, MoveSpeed);
+			}
+		}
+		return;
+	}
+
+	const FVector SourceLoc = NeedSourceActor->GetActorLocation();
+	if (FVector::DistSquared(GetActorLocation(), SourceLoc) <= NeedInteractDistance * NeedInteractDistance)
+	{
+		StartConsumingNeed(Need);
+		return;
+	}
+
+	// 移动被中断(导航失败/被挤开)则重新下达移动
+	AAIController* AIC = GetAnimalController();
+	if (!AIC || AIC->GetMoveStatus() == EPathFollowingStatus::Idle)
+	{
+		MoveToLocation(SourceLoc, MoveSpeed);
 	}
 }
 
@@ -859,12 +1041,9 @@ void AAnimalCharacter::OnPerceiveThreat_Implementation(AActor* Threat)
 
 void AAnimalCharacter::OnNeedSatisfied_Implementation(EAnimalNeed Need)
 {
+	// 默认实现只负责把需求清零；吃喝动画与计时由 UpdateSeekNeed 在过程中驱动
 	if (Need == EAnimalNeed::Food) { Hunger = 0.f; }
 	else { Thirst = 0.f; }
-
-	// 触发进食动画
-	bIsEating = true;
-	EatRemaining = EatDuration;
 }
 
 // ============================================================
@@ -996,6 +1175,35 @@ AActor* AAnimalCharacter::DoSpawn()
 		return nullptr;
 	}
 
+	TSubclassOf<AActor> ClassToSpawn = PickSpawnClass();
+	if (!ClassToSpawn) { return nullptr; }
+
+	USkeletalMeshComponent* MeshComp = GetMesh();
+	FVector SpawnLocation = GetActorLocation();
+	FRotator SpawnRotation = GetActorRotation();
+	if (MeshComp && !SpawnSocketName.IsNone() && MeshComp->DoesSocketExist(SpawnSocketName))
+	{
+		SpawnLocation = MeshComp->GetSocketLocation(SpawnSocketName);
+		SpawnRotation = MeshComp->GetSocketRotation(SpawnSocketName);
+	}
+	else if (!SpawnSocketName.IsNone())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("AAnimalCharacter::DoSpawn: Socket '%s' 不存在于 Mesh，回退到 Actor 位置"), *SpawnSocketName.ToString());
+	}
+
+	UWorld* World = GetWorld();
+	if (!World) { return nullptr; }
+
+	FActorSpawnParameters Params;
+	Params.Owner = this;
+	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
+	AActor* Spawned = World->SpawnActor<AActor>(ClassToSpawn, SpawnLocation, SpawnRotation, Params);
+	if (Spawned) { SpawnedCount++; }
+	return Spawned;
+}
+
+TSubclassOf<AActor> AAnimalCharacter::PickSpawnClass()
+{
 	TSubclassOf<AActor> ClassToSpawn;
 	if (bUseWeightedSpawn)
 	{
@@ -1035,31 +1243,116 @@ AActor* AAnimalCharacter::DoSpawn()
 			if (Entry.Class) { ClassToSpawn = Entry.Class; break; }
 		}
 	}
+	return ClassToSpawn;
+}
 
-	if (!ClassToSpawn) { return nullptr; }
-
-	USkeletalMeshComponent* MeshComp = GetMesh();
-	FVector SpawnLocation = GetActorLocation();
-	FRotator SpawnRotation = GetActorRotation();
-	if (MeshComp && !SpawnSocketName.IsNone() && MeshComp->DoesSocketExist(SpawnSocketName))
-	{
-		SpawnLocation = MeshComp->GetSocketLocation(SpawnSocketName);
-		SpawnRotation = MeshComp->GetSocketRotation(SpawnSocketName);
-	}
-	else if (!SpawnSocketName.IsNone())
-	{
-		UE_LOG(LogTemp, Warning, TEXT("AAnimalCharacter::DoSpawn: Socket '%s' 不存在于 Mesh，回退到 Actor 位置"), *SpawnSocketName.ToString());
-	}
-
+int32 AAnimalCharacter::CountNearbyEggs() const
+{
 	UWorld* World = GetWorld();
-	if (!World) { return nullptr; }
+	if (!World)
+	{
+		return 0;
+	}
+	int32 Count = 0;
+	const FVector Loc = GetActorLocation();
+	const float RadiusSq = NearbyEggCheckRadius * NearbyEggCheckRadius;
+	for (const FSpawnClassEntry& Entry : SpawnActorClasses)
+	{
+		if (!Entry.Class) { continue; }
+		TArray<AActor*> Found;
+		UGameplayStatics::GetAllActorsOfClass(World, Entry.Class, Found);
+		for (AActor* A : Found)
+		{
+			if (A && FVector::DistSquared(A->GetActorLocation(), Loc) <= RadiusSq)
+			{
+				Count++;
+			}
+		}
+	}
+	return Count;
+}
+
+AActor* AAnimalCharacter::LayEggOnGround()
+{
+	UWorld* World = GetWorld();
+	if (!World || SpawnActorClasses.Num() == 0)
+	{
+		return nullptr;
+	}
+	if (MaxSpawnCount >= 0 && SpawnedCount >= MaxSpawnCount)
+	{
+		return nullptr;
+	}
+
+	TSubclassOf<AActor> ClassToSpawn = PickSpawnClass();
+	if (!ClassToSpawn)
+	{
+		return nullptr;
+	}
+
+	// 落在脚边地面(不用骨骼 Socket)：胶囊底部略上方，带一点前后/左右随机
+	const float HalfHeight = GetCapsuleComponent() ? GetCapsuleComponent()->GetScaledCapsuleHalfHeight() : 90.f;
+	const FVector Forward = GetActorForwardVector().GetSafeNormal2D();
+	const FVector Right = FVector::CrossProduct(FVector::UpVector, Forward);
+	const FVector Offset = Forward * FMath::FRandRange(20.f, 70.f) + Right * FMath::FRandRange(-40.f, 40.f);
+	FVector SpawnLocation = GetActorLocation() + Offset;
+	SpawnLocation.Z = GetActorLocation().Z - HalfHeight + 10.f;
 
 	FActorSpawnParameters Params;
 	Params.Owner = this;
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
-	AActor* Spawned = World->SpawnActor<AActor>(ClassToSpawn, SpawnLocation, SpawnRotation, Params);
-	if (Spawned) { SpawnedCount++; }
+	AActor* Spawned = World->SpawnActor<AActor>(ClassToSpawn, SpawnLocation, FRotator(0.f, FMath::FRandRange(0.f, 360.f), 0.f), Params);
+	if (Spawned)
+	{
+		SpawnedCount++;
+	}
 	return Spawned;
+}
+
+void AAnimalCharacter::UpdateEggLaying(float DeltaTime)
+{
+	if (!bLayEggs || bDie || SpawnActorClasses.Num() == 0)
+	{
+		return;
+	}
+
+	// 逃跑/警觉中不下蛋(这期间由逃跑掉落负责)，跑完再继续计时
+	if (bFleeing || bAlerting)
+	{
+		LayEggRemaining = FMath::Max(LayEggRemaining, 3.f);
+		return;
+	}
+
+	if (LayEggRemaining > 0.f)
+	{
+		LayEggRemaining -= DeltaTime;
+		if (LayEggRemaining > 0.f)
+		{
+			return;
+		}
+	}
+
+	NearbyEggCount = CountNearbyEggs();
+	if (MaxNearbyEggs >= 0 && NearbyEggCount >= MaxNearbyEggs)
+	{
+		// 周围蛋数已到上限：暂停，等玩家捡走后再下
+		LayEggRemaining = 10.f;
+		return;
+	}
+
+	if (LayEggOnGround())
+	{
+		const float Jitter = FMath::FRandRange(-LayEggIntervalJitter, LayEggIntervalJitter);
+		LayEggRemaining = FMath::Max(5.f, LayEggInterval + Jitter);
+		if (bEnableDebugLog)
+		{
+			UE_LOG(LogTemp, Log, TEXT("[%s] 下蛋(周围已有 %d 颗)，下次约 %.1f 秒后"), *GetName(), NearbyEggCount, LayEggRemaining);
+		}
+	}
+	else
+	{
+		LayEggRemaining = 10.f;
+	}
 }
 
 void AAnimalCharacter::SpawnTick()
