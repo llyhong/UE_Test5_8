@@ -766,6 +766,7 @@ AGuestCharacter* AGuestManager::SpawnGuest()
 	// 首单教学期间只留一位客人，玩家可先学会流程再面对波峰。
 	for (TActorIterator<ATutorialTaskManager> It(GetWorld()); It; ++It)
 	{
+		if (It->IsFirstDayPlateLessonActive()) return nullptr;
 		if (It->IsFirstServiceTutorialActive() && ActiveGuests.Num() >= 1) return nullptr;
 	}
 	UWorld* World = GetWorld();
@@ -1155,13 +1156,15 @@ void AGuestManager::ResumeSpawning()
 	}
 
 	bCustomerPacingStarted = true;
+	const bool bWaitingForFirstGuest = ActiveGuests.IsEmpty();
+	const float InitialDelay = FMath::Max(FirstGuestArrivalDelay, 0.1f);
 	if (EarlyArrivalPattern.Num() > 0)
 	{
 		// 先按前期节奏逐位来客；第一次波峰等表走完后由 TickSpawn 启动
-		ScheduleNextSpawn(FMath::Max(EarlyArrivalInterval, 0.1f) / GetCoopPressureScale());
+		ScheduleNextSpawn(bWaitingForFirstGuest ? InitialDelay : FMath::Max(EarlyArrivalInterval, 0.1f) / GetCoopPressureScale());
 		return;
 	}
-	ScheduleNextSpawn(GetEffectiveSpawnInterval());
+	ScheduleNextSpawn(bWaitingForFirstGuest ? InitialDelay : GetEffectiveSpawnInterval());
 	World->GetTimerManager().SetTimer(RushPhaseTimerHandle,
 		this, &AGuestManager::AdvanceRushPhase, FMath::Max(FirstRushDelay, 0.1f), false);
 }
@@ -1283,6 +1286,8 @@ void AGuestManager::OnBusinessOpenChanged(bool bOpen)
 	ShowBusinessSign(bOpen);
 	if (bOpen)
 	{
+		// 新一次营业的首客不应被上一日离场冷却延后。
+		LastGuestLeaveWorldTime = -1.0;
 		// 开门营业：恢复自动生成客人（前提是 bAutoSpawn 开启）
 		ResumeSpawning();
 		// 新一天开始：清掉上一日残留的打烊收尾状态
