@@ -89,6 +89,7 @@ void UOrderWidget::BindOrderSystem(AOrderSystem* InOrderSystem)
 		OrderSystem->OnFinishOrder.AddDynamic(this, &UOrderWidget::HandleOrderFinished);
 		OrderSystem->OnFailOrder.AddDynamic(this, &UOrderWidget::HandleOrderFailed);
 		OrderSystem->OnOrderCanceled.AddDynamic(this, &UOrderWidget::HandleOrderCanceled);
+		OrderSystem->OnTimeStreakChanged.AddUObject(this, &UOrderWidget::HandleOnTimeStreakChanged);
 	}
 
 	RebuildWaitingOrders();
@@ -102,6 +103,8 @@ void UOrderWidget::UnbindOrderSystem()
 		OrderSystem->OnFinishOrder.RemoveDynamic(this, &UOrderWidget::HandleOrderFinished);
 		OrderSystem->OnFailOrder.RemoveDynamic(this, &UOrderWidget::HandleOrderFailed);
 		OrderSystem->OnOrderCanceled.RemoveDynamic(this, &UOrderWidget::HandleOrderCanceled);
+		OrderSystem->OnTimeStreakChanged.RemoveAll(this);
+		HandleOnTimeStreakChanged(0);
 	}
 
 	OrderSystem = nullptr;
