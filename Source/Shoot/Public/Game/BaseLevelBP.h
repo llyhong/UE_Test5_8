@@ -102,6 +102,8 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Plate")
 	void ApplyDishwasherPlateConfig();
 
+	void RefreshKitchenPlateFlow(const class UTimeSystem& TimeSystem);
+
 	/** 每秒把当前时间与营业状态推给 HUD（白天/傍晚/打烊一目了然） */
 	UFUNCTION()
 	void RefreshClock();
@@ -285,6 +287,9 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "Shoot|UI|HUD")
 	TObjectPtr<UHUDWidget> HUDWidget;
 
+	/** 当前常驻 HUD（尚未创建时为空）。每日任务面板由 HUD 统一持有。 */
+	UHUDWidget* GetHUDWidget() const { return HUDWidget; }
+
 	UPROPERTY(BlueprintAssignable, Category = "Shoot|Events")
 	FSocceEvent LevelUpdateScore;
 	UPROPERTY(BlueprintAssignable, Category = "Shoot|Events")
@@ -309,6 +314,16 @@ public:
 	// —— 赛季 UI 事件（转给各本地玩家的日结卡 / 警告条 / 结局界面） ——
 	UFUNCTION()
 	void HandleSeasonDailyGrade(ESeasonGrade Grade, int32 GradeScore, int32 Served, int32 Failed);
+
+	/** 营业结束日结卡的延迟秒数：先让场景停在“已打烊 + 夜色 + 打烊时刻”，再弹结算卡（0 = 立即弹出） */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|UI")
+	float EndOfDayCardDelay = 3.f;
+
+	/** 给所有本地玩家弹出日结卡（延迟到打烊演出结束后调用） */
+	void ShowDailyCardToLocalPlayers();
+
+	/** 营业结束日结卡的延迟句柄 */
+	FTimerHandle DailyCardTimerHandle;
 
 	UFUNCTION()
 	void HandleSeasonWarning(FString Reason, int32 StreakDays, int32 DaysLeft);

@@ -14,6 +14,13 @@ namespace EconomyShopItemIDs
 	constexpr int32 ExtraTable = 1001;    // 新餐桌：提升店铺可容纳顾客数
 	constexpr int32 AdvancedStove = 1002; // 高级灶台：加快烹饪速度
 	constexpr int32 NeonSign = 1003;      // 霓虹招牌：提升招揽顾客数量
+
+	// ===== 田园杂货铺（UShopScreenWidget）=====
+	constexpr int32 TraySmall = 2001;  // 托盘·小：一次收纳 4 个空碟
+	constexpr int32 TrayMedium = 2002; // 托盘·中：一次收纳 6 个空碟
+	constexpr int32 TrayLarge = 2003;  // 托盘·大：一次收纳 8 个空碟
+	constexpr int32 PanUpgrade = 2004; // 煎锅升级：每级所有灶台烹饪速度 +10%（可买 3 次）
+	constexpr int32 Juicer = 2005;     // 榨汁机：解锁榨汁机设备与果汁菜品
 }
 
 /**

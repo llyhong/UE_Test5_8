@@ -289,6 +289,8 @@ private:
 	void AdvanceOneDay(bool bResetDayProgress = false);
 	void UpdateBusinessState();
 	bool HasPendingClosingGuests() const;
+	/** 进入当日营业结束时把经营时钟拨到打烊时刻（如 22:00），让场景与 HUD 同步显示“已打烊”。 */
+	void SnapClockToClosingHour();
 
 	double Accum = 0.0;
 	bool bPausedState = false;

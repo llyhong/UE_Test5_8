@@ -11,6 +11,8 @@ class UDataTable;
 class AShootCharacter;
 class UTimeSystem;
 class ADiningHygieneManager;
+class AOutdoorBasket;
+class AItemActor;
 
 USTRUCT(BlueprintType)
 struct SHOOT_API FTutorialChecklistEntry
@@ -67,12 +69,20 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Tutorial")
 	TMap<int32, FText> DayExtraNotes;
 
-	/** 这些天全场不出现垃圾/积水（暂停卫生管理器自动撒点并清空现有散落物），如 {1} */
+	/** 前三天不出现垃圾/积水，第四天开始清理教学；可追加其他无垃圾日。 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Tutorial")
-	TArray<int32> NoMessesDays = { 1 };
+	TArray<int32> NoMessesDays = { 1, 2, 3 };
 
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Tutorial")
 	TArray<FTutorialChecklistEntry> GetChecklistEntries() const;
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Tutorial")
+	TArray<FTutorialChecklistEntry> GetVisibleChecklistEntries() const;
+
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Tutorial")
+	bool CanOpenForTutorial(FText& OutReason);
+
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Tutorial")
+	void CaptureTutorialState();
 
 	/** 当前引导箭头应指向的文本；无指引返回空 */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Tutorial")
@@ -87,8 +97,9 @@ public:
 	FText GetDayTitle() const;
 
 	/** 成功交互事件才推进对应步骤；投锅任务不再用拾取量代替。 */
-	static void NotifyAction(UWorld* World, ETutorialTaskType Type, int32 ItemID, AActor* Target = nullptr);
+	static void NotifyAction(UWorld* World, ETutorialTaskType Type, int32 ItemID, AActor* Target = nullptr, int32 Quantity = 1);
 	bool IsFirstServiceTutorialActive() const;
+	bool IsFirstDayPlateLessonActive() const;
 
 private:
 	struct FActiveTask
@@ -124,6 +135,21 @@ private:
 	FText FocusHint;
 	FVector FocusLocation = FVector::ZeroVector;
 	bool bHasFocusTarget = false;
+	bool bRestoring = false;
+	bool bSavePending = false;
+	UPROPERTY()
+	TSubclassOf<AItemActor> PracticePlateClass;
+
+	float SnapshotAccum = 0.f;
+	void RestoreTutorialState();
+	int32 GetPhase(const FActiveTask& Task) const;
+	int32 GetServedToday() const;
+	int32 GetSupplyRequirement(int32 ItemID) const;
+	int32 CountReadyStock(int32 ItemID) const;
+	int32 CountAvailableSupply(int32 ItemID) const;
+	bool ResolveIngredientRoute(int32 ItemID, bool bMustStore, int32 RemainingToStore = 0);
+	FText FormatObjectiveProgress(const FActiveTask& Task) const;
+	AActor* FindIngredientSource(int32 ItemID, bool bHarvestOnly) const;
 
 	UTimeSystem* GetTimeSystem() const;
 	/** 首日开门前、第二天完成备料后，引导到入口营业。 */
@@ -137,7 +163,7 @@ private:
 
 	/** 统计某个 ItemID 在玩家背包+手上+篮子里的总持有量 */
 	int32 CountItemAcrossPlayers(int32 ItemID) const;
-	int32 CountItemInBaskets(int32 ItemID) const;
+	int32 CountItemInBaskets(int32 ItemID, const AOutdoorBasket* OnlyBasket = nullptr) const;
 	int32 CountItemInStorages(int32 ItemID, FName ActorTag) const;
 	int32 CountItemInResearch(int32 ItemID, FName ActorTag) const;
 	const class ABaseLevelBP* GetLevelBP() const;
@@ -146,6 +172,8 @@ private:
 	void SaveCompletedTask(const FActiveTask& Task);
 	void UpdateFocusTarget();
 	void RefreshWidgets() const;
+	void EnsureFirstDayPracticePlate();
+	bool HasDirtyPlateInHand() const;
 
 	AActor* FindTargetActor(const FActiveTask& Task) const;
 };
