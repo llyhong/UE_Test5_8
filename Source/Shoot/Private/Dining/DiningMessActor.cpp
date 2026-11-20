@@ -1,6 +1,7 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 #include "Dining/DiningMessActor.h"
+#include "Dining/DiningHygieneManager.h"
 
 #include "Components/SceneComponent.h"
 #include "Components/SphereComponent.h"
@@ -62,6 +63,12 @@ void ADiningMessActor::OnConstruction(const FTransform& Transform)
 void ADiningMessActor::BeginPlay()
 {
 	Super::BeginPlay();
+	// Also cover level-placed messes or spawns that bypass the hygiene manager.
+	if (!ADiningHygieneManager::IsMessDayAllowed(this))
+	{
+		Destroy();
+		return;
+	}
 
 	InteractionSphere->SetSphereRadius(InteractionRadius);
 	InteractionSphere->OnComponentBeginOverlap.AddDynamic(this, &ADiningMessActor::OnInteractionOverlap);
@@ -71,6 +78,11 @@ void ADiningMessActor::BeginPlay()
 void ADiningMessActor::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	if (!ADiningHygieneManager::IsMessDayAllowed(this))
+	{
+		Destroy();
+		return;
+	}
 
 	// DeltaSeconds 仍是距上次 Tick 的真实时长（TickInterval 只改变调用频率）
 	AgeSeconds += FMath::Max(0.f, DeltaSeconds);
