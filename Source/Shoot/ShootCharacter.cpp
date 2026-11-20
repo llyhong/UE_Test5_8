@@ -1,8 +1,10 @@
  // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "ShootCharacter.h"
+#include "Game/TutorialTaskManager.h"
 #include "Engine/LocalPlayer.h"
 #include "InventoryWidget.h"
+#include "UI/ShopScreenWidget.h"
 #include "UI/ShopWidget.h"
 #include "Machine/CookingMachine.h"
 #include "Machine/ServingCounter.h"
@@ -19,6 +21,7 @@
 #include "Item/Desk.h"
 #include "Item/FoodSpawnOther.h"
 #include "Item/OutdoorBasket.h"
+#include "Item/PlateCollectionTray.h"
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/BoxComponent.h"
@@ -283,11 +286,15 @@ bool AShootCharacter::IsSpawner()
 
  bool AShootCharacter::NeedDropDown()
  {
- 	return PickingItem != nullptr;
+	return PickingItem != nullptr && !Cast<APlateCollectionTray>(PickingItem);
  }
 
  bool AShootCharacter::CanThrowToMachine()
  {
+	if (Cast<APlateCollectionTray>(PickingItem))
+	{
+		return false;
+	}
 	return CharacterState == ECharacterState::ECS_Holding && CookingMachine!= nullptr &&
 			CharacterState != ECharacterState::ECS_Repairing &&
 				Cast<ADish>(PickingItem) == nullptr;//碟子不能丢进机器
@@ -312,7 +319,7 @@ bool AShootCharacter::IsSpawner()
 	// return CharacterState == ECharacterState::ECS_Holding && CookingMachine!= nullptr && CookingMachine->IsFinish;
 
  	//快速验证
- 	return CookingMachine!= nullptr && CookingMachine->IsFinish;
+	return CookingMachine != nullptr && CookingMachine->IsFinish && !CookingMachine->IsWaitingForPlate();
  }
 
  bool AShootCharacter::CanGiveDishToGuest()
@@ -1638,6 +1645,65 @@ void AShootCharacter::BuildInteractionOptions(TArray<FInteractOption, TInlineAll
 		OutOptions.Add(MoveTemp(Option));
 	};
 
+	if (APlateCollectionTray* Tray = Cast<APlateCollectionTray>(PickingItem))
+	{
+		const int32 Count = Tray->GetPlateCount();
+		if (OverlappingDishwasher && Count > 0)
+		{
+			ADishwasher* Washer = OverlappingDishwasher;
+			const FString Action = FString::Printf(TEXT("清洗 %d 只盘子"), Count);
+			AddOption(TierHandover, DistTo(Washer), *Action, Washer, [Tray, Washer]()
+			{
+				return Tray->WashPlates(*Washer) > 0;
+			});
+		}
+		else if (OverlappingDishwasher && Tray->GetOwner() == OverlappingDishwasher)
+		{
+			ADishwasher* Washer = OverlappingDishwasher;
+			AddOption(TierWorld, DistTo(Washer), TEXT("放回收碟托盘"), Washer, [this, Washer]()
+			{
+				return Washer->ReturnCollectionTray(*this);
+			});
+		}
+
+		const FString Action = Tray->HasRoom()
+			? FString::Printf(TEXT("收碟到托盘  %d/%d"), Count, Tray->Capacity)
+			: FString::Printf(TEXT("托盘已满  %d/%d · 去洗碗机"), Count, Tray->Capacity);
+		if (AItemActor* Plate = OverlappingEmptyPlate)
+		{
+			AddOption(TierWorld, DistTo(Plate), *Action, Plate, [this, Tray, Plate]()
+			{
+				if (!Tray->HasRoom())
+				{
+					return true;
+				}
+				if (Plate->PickUpByPlayer(this))
+				{
+					RemoveOverlappingEmptyPlate(Plate);
+					return true;
+				}
+				return false;
+			});
+		}
+		else if (AChairSeat* Seat = OverlappingChairSeat; Seat && IsValid(Seat->DirtyPlate))
+		{
+			AddOption(TierWorld, DistTo(Seat), *Action, Seat, [this, Tray, Seat]()
+			{
+				return !Tray->HasRoom() || Seat->TryCollectPlateByPlayer(this);
+			});
+		}
+		return;
+	}
+
+	if (!PickingItem && OverlappingDishwasher && OverlappingDishwasher->HasDockedTray())
+	{
+		ADishwasher* Washer = OverlappingDishwasher;
+		AddOption(TierWorld, DistTo(Washer), TEXT("拿收碟托盘"), Washer, [this, Washer]()
+		{
+			return Washer->TakeCollectionTray(*this);
+		});
+	}
+
 	// ---------------- Tier 0：必须响应 ----------------
 	// 手上拿着脏碟：唯一出路是走到洗碗机按 E 交还（可用碟子数 +1）。
 	// 禁止放下/丢弃/拿去做菜，否则碟子会丢失导致可用碟子数永远无法恢复，
@@ -1649,6 +1715,7 @@ void AShootCharacter::BuildInteractionOptions(TArray<FInteractOption, TInlineAll
 			if (OverlappingDishwasher && OverlappingDishwasher->SubmitPlate(PickingItem))
 			{
 				ClearHeldItemState();
+				ATutorialTaskManager::NotifyAction(GetWorld(), ETutorialTaskType::ReturnPlate, INDEX_NONE, OverlappingDishwasher);
 				return true;
 			}
 			if (GEngine)
@@ -1696,7 +1763,20 @@ void AShootCharacter::BuildInteractionOptions(TArray<FInteractOption, TInlineAll
 			});
 		}
 
-		if (OverlappingCounter)
+		if (OverlappingCounter && OverlappingCounter->bStageFinishedDish)
+		{
+			AServingCounter* Counter = OverlappingCounter;
+			if (Counter->CanStageDish(PickingItem))
+			{
+				const bool bOccupied = IsValid(Counter->StagedDish);
+				AddOption(TierHandover, DistTo(Counter),
+					bOccupied ? TEXT("出餐台已满") : TEXT("把菜放到出餐台"), Counter, [this, Counter, bOccupied]()
+				{
+					return bOccupied || Counter->TryStageDish(*this);
+				});
+			}
+		}
+		else if (OverlappingCounter)
 		{
 			AddOption(TierHandover, DistTo(OverlappingCounter), TEXT("提交上菜台"), OverlappingCounter, [this]()
 			{
@@ -1725,6 +1805,16 @@ void AShootCharacter::BuildInteractionOptions(TArray<FInteractOption, TInlineAll
 		ACookingMachine* Pan = CookingMachine;
 		AddOption(TierWorld, DistTo(Pan), TEXT("翻面 · 佳品奖励"), Pan,
 			[Pan]() { return Pan->PerformAttention(); });
+	}
+
+	if (!PickingItem && OverlappingCounter && OverlappingCounter->bStageFinishedDish
+		&& IsValid(OverlappingCounter->StagedDish))
+	{
+		AServingCounter* Counter = OverlappingCounter;
+		AddOption(TierWorld, DistTo(Counter), TEXT("从出餐台取菜"), Counter, [this, Counter]()
+		{
+			return Counter->TryTakeStagedDish(*this);
+		});
 	}
 
 	// 植物：浇水 / 驱虫 / 收获
@@ -1799,6 +1889,14 @@ void AShootCharacter::BuildInteractionOptions(TArray<FInteractOption, TInlineAll
 		AddOption(TierWorld, DistTo(OverlappingChairSeat), SeatAction, OverlappingChairSeat, [this]()
 		{
 			return OverlappingChairSeat->TryInteractByPlayer(this);
+		});
+	}
+	else if (!PickingItem && OverlappingChairSeat && OverlappingChairSeat->CanPlayerServeDish(this))
+	{
+		AChairSeat* Seat = OverlappingChairSeat;
+		AddOption(TierAmbient, DistTo(Seat), TEXT("查看订单"), Seat, [this, Seat]()
+		{
+			return Seat->TryInteractByPlayer(this);
 		});
 	}
 
@@ -2842,7 +2940,7 @@ void AShootCharacter::DoPick()
 
  void AShootCharacter::OnPushFoodComplete()
  {
-	if (!PickingItem)
+	if (!NeedDropDown())
 	{
 		return;
 	}
@@ -2871,28 +2969,45 @@ void AShootCharacter::DoPick()
 
  void AShootCharacter::SetPickingItemStatus()
 {
-	if (!IsValid(OverlappingItem)) return;
- 	AActor* PreAttachActor = OverlappingItem->GetAttachParentActor();
+	// Attaching disables overlap and may clear OverlappingItem synchronously.
+	// Keep the selected item stable throughout the pickup operation.
+	AItemActor* Item = OverlappingItem;
+	if (!IsValid(Item)) return;
+	AActor* PreAttachActor = Item->GetAttachParentActor();
  	if (PreAttachActor != nullptr)
  	{
- 		OverlappingItem->PreAttachActor = PreAttachActor; //FChangeAttachActorEvent
- 		OverlappingItem->OnChangeAttachActorEvent.Broadcast();//广播出去，切换了
+		Item->PreAttachActor = PreAttachActor; //FChangeAttachActorEvent
+			Item->OnChangeAttachActorEvent.Broadcast();//广播出去，切换了
  	}
 	//OverlappingItem->AttachMeshToSocket(GetMesh(), ItemSocketName);
-	OverlappingItem->AttachMeshToSocket(RetargetMesh, ItemSocketName);
+	if (!IsValid(Item)) return;
+	Item->AttachMeshToSocket(RetargetMesh, ItemSocketName);
 
-	OverlappingItem->SetItemState(EItemState::EIS_Equipped);//这里经常闪退
-	SetPickingItem(OverlappingItem);
+	if (!IsValid(Item)) return;
+	Item->SetItemState(EItemState::EIS_Equipped);
+	SetPickingItem(Item);
 	OnPickEvent();
 	CharacterActionState = ECharacterActionState::EAS_Picking;
 	CharacterState = ECharacterState::ECS_Holding;
 
 	//设置ik
-	if (OverlappingItem->HandIK_LPoint != nullptr)
+	if (Item->HandIK_LPoint != nullptr)
 	{
 		FBIK_Alpha = 1;
-		HandIK_LPoint = OverlappingItem->HandIK_LPoint;
-		HandIK_RPoint = OverlappingItem->HandIK_RPoint;
+		HandIK_LPoint = Item->HandIK_LPoint;
+		HandIK_RPoint = Item->HandIK_RPoint;
+	}
+}
+
+void AShootCharacter::SetPickingItem(AItemActor* Item)
+{
+	const bool bNewItem = Item && PickingItem != Item;
+	PickingItem = Item;
+	if (bNewItem && !Cast<AOutdoorBasket>(Item) && !Cast<APlateCollectionTray>(Item))
+	{
+		ATutorialTaskManager::NotifyAction(GetWorld(), ETutorialTaskType::PickupItem, Item->GetItemID(), Item);
+		if (Item->GetMenuFoodID() >= 0)
+			ATutorialTaskManager::NotifyAction(GetWorld(), ETutorialTaskType::CollectDish, Item->GetMenuFoodID(), Item);
 	}
 }
 
@@ -3100,6 +3215,7 @@ bool AShootCharacter::StoreHarvestInBasket(AItemActor* Fruit, int32 Quantity)
 		return false;
 	}
 
+	const int32 HarvestedID = Fruit->GetItemID();
 	if (!Basket->TryAddItem(Fruit, Quantity))
 	{
 		if (GEngine)
@@ -3109,6 +3225,7 @@ bool AShootCharacter::StoreHarvestInBasket(AItemActor* Fruit, int32 Quantity)
 		}
 		return false;
 	}
+	ATutorialTaskManager::NotifyAction(GetWorld(), ETutorialTaskType::HarvestQuest, HarvestedID, Basket, Quantity);
 	return true;
 }
 
@@ -3167,7 +3284,7 @@ bool AShootCharacter::IsInventoryFull() const
 
 void AShootCharacter::StoreHeldItemToInventory()
 {
-	if (!PickingItem)
+	if (!PickingItem || PickingItem->bIsDirtyPlate || Cast<APlateCollectionTray>(PickingItem))
 	{
 		return;
 	}
@@ -3191,7 +3308,7 @@ void AShootCharacter::StoreHeldItemToInventory()
 
 AItemActor* AShootCharacter::TakeOutInventoryItem(int32 SlotIndex)
 {
-	if (!InventoryItems.IsValidIndex(SlotIndex))
+	if (Cast<APlateCollectionTray>(PickingItem) || !InventoryItems.IsValidIndex(SlotIndex))
 	{
 		return nullptr;
 	}
@@ -3308,47 +3425,10 @@ void AShootCharacter::ToggleInventory()
 
 void AShootCharacter::ToggleShop()
 {
-	if (!ShopWidgetClass)
+	// 田园杂货铺：纯 C++ 控件（画风对齐选角界面），每位本地玩家独立一份
+	if (APlayerController* PC = Cast<APlayerController>(GetController()))
 	{
-		UE_LOG(LogShoot, Warning, TEXT("[%s] 未配置 ShopWidgetClass，无法打开商店"), *GetName());
-		return;
-	}
-
-	// 已打开则关闭
-	if (ShopWidget && ShopWidget->IsInViewport())
-	{
-		ShopWidget->RemoveFromParent();
-		return;
-	}
-
-	// 首次打开：创建并绑定经济系统(只创建一次，关闭后复用)
-	if (!ShopWidget)
-	{
-		APlayerController* PC = Cast<APlayerController>(GetController());
-		if (PC)
-		{
-			ShopWidget = CreateWidget<UShopWidget>(PC, ShopWidgetClass);
-		}
-		else
-		{
-			ShopWidget = CreateWidget<UShopWidget>(GetWorld(), ShopWidgetClass);
-		}
-		if (ShopWidget)
-		{
-			ShopWidget->OwnerCharacter = this;
-			// 设为不可聚焦，避免抢占键盘焦点导致再次按 P 失灵
-			ShopWidget->SetIsFocusable(false);
-			if (UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetGameInstance()))
-			{
-				ShopWidget->BindEconomy(GI->GetEconomySystem());
-			}
-		}
-	}
-
-	if (ShopWidget)
-	{
-		ShopWidget->AddToViewport(20);
-		ShopWidget->RefreshShop();
+		UShopScreenWidget::ToggleForPlayer(PC, this);
 	}
 }
 
