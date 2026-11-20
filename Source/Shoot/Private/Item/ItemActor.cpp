@@ -1,8 +1,12 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 #include "Item/ItemActor.h"
+#include "Item/PlateCollectionTray.h"
 #include "Data/ItemActorInfo.h"
 #include "Components/SphereComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Components/WidgetComponent.h"
+#include "Engine/StaticMesh.h"
 #include "Interfaces/PickupInterface.h"
 #include "ShootCharacter.h"
 #include "NPC/ChairSeat.h"
@@ -12,6 +16,7 @@
 #include "Game/BaseGameInstance.h"
 #include "Kismet/GameplayStatics.h"
 #include "DrawDebugHelpers.h"
+#include "UI/PremiumDishFeedbackWidget.h"
 
 AItemActor::AItemActor()
 {
@@ -345,6 +350,10 @@ FString AItemActor::GetItemDisplayName() const
 
 void AItemActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	if (EndPlayReason == EEndPlayReason::Destroyed)
+	{
+		ReturnServingPlate();
+	}
 	// 安全兜底：若空碟在未被玩家收走的情况下被销毁（如关卡卸载），
 	// 释放其占据的座位，避免座位残留“幽灵占用”导致新客人无法入座。
 	if (OwningSeat && OwningSeat->DirtyPlate.Get() == this)
@@ -353,6 +362,27 @@ void AItemActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		OwningSeat = nullptr;
 	}
 	Super::EndPlay(EndPlayReason);
+}
+
+void AItemActor::ReserveServingPlate(APlateSystem& PlateSystem)
+{
+	if (!PlateSystem.IsInfinitePlates() && !ReservedPlateSystem.IsValid())
+	{
+		PlateSystem.RemovePlate();
+		ReservedPlateSystem = &PlateSystem;
+	}
+}
+
+bool AItemActor::ReturnServingPlate()
+{
+	APlateSystem* PlateSystem = ReservedPlateSystem.Get();
+	ReservedPlateSystem.Reset();
+	if (!PlateSystem)
+	{
+		return false;
+	}
+	PlateSystem->AddPlate();
+	return true;
 }
 
 void AItemActor::OnSphereOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
@@ -477,8 +507,45 @@ void AItemActor::SetActorsOutline(AActor* actor, bool bEnable)
 	}
 }
 
+void AItemActor::ShowPremiumDishFeedback()
+{
+	if (IngredientQuality != EIngredientQuality::Premium || MenuFoodID < 0
+		|| bIsEmptyPlate || bIsDirtyPlate || PremiumDishFeedback || GetNetMode() == NM_DedicatedServer)
+	{
+		return;
+	}
+
+	PremiumDishFeedback = NewObject<UWidgetComponent>(this, TEXT("PremiumDishFeedback"));
+	PremiumDishFeedback->SetupAttachment(ItemMesh);
+	PremiumDishFeedback->SetWidgetSpace(EWidgetSpace::Screen);
+	PremiumDishFeedback->SetWidgetClass(UPremiumDishFeedbackWidget::StaticClass());
+	PremiumDishFeedback->SetDrawSize(FVector2D(104.f, 64.f));
+	PremiumDishFeedback->SetPivot(FVector2D(0.5f, 1.f));
+	PremiumDishFeedback->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	PremiumDishFeedback->SetWindowFocusable(false);
+	FVector Anchor(0.f, 0.f, 10.f);
+	if (const UStaticMesh* Mesh = ItemMesh->GetStaticMesh())
+	{
+		const FBoxSphereBounds MeshBounds = Mesh->GetBounds();
+		Anchor = MeshBounds.Origin;
+		Anchor.Z += MeshBounds.BoxExtent.Z;
+	}
+	PremiumDishFeedback->SetRelativeLocation(Anchor);
+	PremiumDishFeedback->RegisterComponent();
+}
+
+void AItemActor::ClearPremiumDishFeedback()
+{
+	if (PremiumDishFeedback)
+	{
+		PremiumDishFeedback->DestroyComponent();
+		PremiumDishFeedback = nullptr;
+	}
+}
+
 void AItemActor::OnClear()
 {
+	ClearPremiumDishFeedback();
 	FoodIdArray.Empty();
 	for (int32 i = 0; i < FoodArray.Num(); i++)
 	{
@@ -649,17 +716,15 @@ bool AItemActor::PickUpByPlayer(AShootCharacter* Player)
 		return false;
 	}
 	// 手上已有东西则无法再收走空碟（一只手只能拿一个）
-	if (Player->GetPickingItem() != nullptr)
+	APlateCollectionTray* Tray = Cast<APlateCollectionTray>(Player->GetPickingItem());
+	if (Player->GetPickingItem() && (!Tray || !Tray->HasRoom()))
 	{
 		return false;
 	}
 
 	// 碟子离开桌面 → 座位立即释放（下一位客人可以入座）
-	if (OwningSeat)
-	{
-		OwningSeat->ClearDirtyPlate();
-		OwningSeat = nullptr;
-	}
+	AChairSeat* Seat = OwningSeat.Get();
+	OwningSeat = nullptr;
 
 	// 不再是“桌上空碟”，改为玩家手上的“脏碟”，需交给洗碗机清洗
 	bIsEmptyPlate = false;
@@ -673,6 +738,17 @@ bool AItemActor::PickUpByPlayer(AShootCharacter* Player)
 	}
 
 	// 拿在手上（挂到手部插槽并设为主手持物）
-	Player->HoldItemInHand(this, true);
+	if (Tray)
+	{
+		Tray->AddPlate(this);
+	}
+	else
+	{
+		Player->HoldItemInHand(this, true);
+	}
+	if (IsValid(Seat))
+	{
+		Seat->ClearDirtyPlate();
+	}
 	return true;
 }
