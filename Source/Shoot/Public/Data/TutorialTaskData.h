@@ -28,6 +28,11 @@ enum class ETutorialTaskType : uint8
 	AddToCooker UMETA(DisplayName = "投入锅中"),
 	CookDish UMETA(DisplayName = "完成烹饪"),
 	CollectDish UMETA(DisplayName = "端起成品"),
+	EquipBasket UMETA(DisplayName = "拿起篮子"),
+	ResearchRecipe UMETA(DisplayName = "研究解锁菜谱"),
+	OpenBusiness UMETA(DisplayName = "开门营业"),
+	StockSupplies UMETA(DisplayName = "检查备料"),
+	ReturnPlate UMETA(DisplayName = "归还空碟"),
 };
 
 /**
@@ -70,6 +75,17 @@ public:
 	/** 目标物件标签：打在研究炉 / 冰箱仓库 / 植株区域等 Actor 上 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Tutorial")
 	FName TargetActorTag = NAME_None;
+
+	/** 投锅和烹饪任务指定设备；0 时按菜谱推断，旧煎蛋任务使用煎锅。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Tutorial")
+	int32 TargetMachineID = 0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Tutorial")
+	bool bShowNavigation = true;
+
+	/** 显示时扣除之前已完成的单数，例如累计 3 单显示剩下两单的 0/2。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Tutorial", meta = (ClampMin = "0"))
+	int32 DisplayProgressOffset = 0;
 
 	/** 任务列表文案，如“清理地板上的垃圾” */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Tutorial")
