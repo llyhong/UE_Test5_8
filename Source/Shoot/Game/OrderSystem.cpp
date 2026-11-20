@@ -5,6 +5,7 @@
 
 #include "BaseGameInstance.h"
 #include "NPC/GuestCharacter.h"
+#include "NPC/ChairSeat.h"
 #include "Game/FoodSystem.h"
 #include "Game/BusinessTime.h"
 #include "Game/BusinessSimulation.h"
@@ -139,6 +140,7 @@ void AOrderSystem::Tick(float DeltaTime)
 			{
 				// 野味订单有价格倍率，但超时惩罚仍按基础价，避免"只奖励不惩罚"被放大
 				ABaseLevelBP::AddScore(this, -orderHandle->GetBaseOrderPrice());
+				ResetOnTimeStreak();
 				OnFailOrder.Broadcast(orderHandle, orderHandle->OrderData);
 				GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, TEXT("订单超时"));
 
@@ -234,6 +236,7 @@ void AOrderSystem::RebuildOrderPool()
 	int32 BadWait = 0;
 
 	// 本关能拿到的食材来源：没有来源的食材不进订单，杜绝“表里加了菜但没摆箱子”的无解订单
+	CollectPreparedFoodIDs(CachedPreparedFoodIDs);
 	CollectSuppliedItemIDs(CachedSuppliedItemIDs);
 	// 本关实际存在的加工机器：菜谱指定的机器不在场，同样做不出来
 	CollectAvailableMachineIDs(CachedAvailableMachineIDs);
@@ -624,6 +627,43 @@ void AOrderSystem::CollectSuppliedItemIDs(TSet<int32>& OutItemIDs) const
 	}
 }
 
+void AOrderSystem::CollectPreparedFoodIDs(TSet<int32>& OutFoodIDs) const
+{
+	OutFoodIDs.Reset();
+	TMap<int32, int32> Available;
+	// The last ingredient may already be in the pan when the guest orders.
+	for (TActorIterator<ACookingMachine> It(GetWorld()); It; ++It)
+	{
+		const ACookingMachine* Machine = *It;
+		const int32 FoodID = Machine->TargetMenuData.FoodID;
+		if (Machine->IsFull && (Machine->IsCooking || Machine->IsFinish)
+			&& !Machine->OnFire && !Machine->Repairing && FoodID >= 0)
+		{
+			++Available.FindOrAdd(FoodID);
+		}
+	}
+	for (TActorIterator<AItemActor> It(GetWorld()); It; ++It)
+	{
+		const AItemActor* Dish = *It;
+		if (!Dish->bPickable || Dish->bIsDirtyPlate || Dish->bIsEmptyPlate
+			|| Dish->GetItemState() == EItemState::EIS_Cooking) continue;
+		// A plated child is counted by its containing plate; served plates belong to a seat.
+		const AActor* Parent = Dish->GetAttachParentActor();
+		if (Parent && (Parent->IsA<AItemActor>() || Parent->IsA<AChairSeat>() || Parent->IsA<AGuestCharacter>())) continue;
+		if (!Dish->FoodIdArray.IsEmpty())
+		{
+			for (int32 ID : Dish->FoodIdArray) if (ID >= 0) ++Available.FindOrAdd(ID);
+		}
+		else if (Dish->GetMenuFoodID() >= 0) ++Available.FindOrAdd(Dish->GetMenuFoodID());
+	}
+	// Reserve existing orders first, so the same last dish cannot promise another order.
+	for (const UOrderHandle* Handle : waitList)
+		if (Handle)
+			for (int32 ID : Handle->OrderData.FoodIDs) --Available.FindOrAdd(ID);
+	for (const TPair<int32, int32>& Pair : Available)
+		if (Pair.Value > 0) OutFoodIDs.Add(Pair.Key);
+}
+
 bool AOrderSystem::IsMenuServable(int32 FoodID, const TSet<int32>& SuppliedItemIDs, FString& OutReason) const
 {
 	UBaseGameInstance* GI = GetWorld() ? Cast<UBaseGameInstance>(GetWorld()->GetGameInstance()) : nullptr;
@@ -651,6 +691,7 @@ bool AOrderSystem::IsMenuServable(int32 FoodID, const TSet<int32>& SuppliedItemI
 		OutReason = FString::Printf(TEXT("未到可点天数（第 %d 天开放）"), Menu.UnlockDay);
 		return false;
 	}
+	if (CachedPreparedFoodIDs.Contains(FoodID)) return true;
 	if (Menu.MenuItems.Num() == 0)
 	{
 		OutReason = TEXT("菜品没配食材");
@@ -697,7 +738,8 @@ void AOrderSystem::CollectAvailableMachineIDs(TSet<int32>& OutMachineIDs) const
 	}
 	for (TActorIterator<ACookingMachine> It(World); It; ++It)
 	{
-		if (It->MachineID > 0)
+		// 商店未解锁的设备（如未购买的榨汁机）不算“本关存在的机器”，否则会出无解订单
+		if (It->MachineID > 0 && It->IsShopUnlocked())
 		{
 			OutMachineIDs.Add(It->MachineID);
 		}
@@ -711,6 +753,7 @@ void AOrderSystem::StartSystem()
 void AOrderSystem::StopSystem()
 {
 	IsStarted = false;
+	ResetOnTimeStreak();
 	// for (int i = 0; i < waitList.Num(); i++)
 	// {
 	// 	auto handle = waitList[i];
@@ -720,6 +763,7 @@ void AOrderSystem::StopSystem()
 }
 void AOrderSystem::ClearAllOrders()
 {
+	ResetOnTimeStreak();
 	// 静默清空：不广播 OnFailOrder，避免切换关卡时误扣分数/声誉。
 	// 句柄为本 Actor 创建的 UObject，随 waitList 清空后被 GC 回收。
 	waitList.Empty();
@@ -727,6 +771,7 @@ void AOrderSystem::ClearAllOrders()
 
 void AOrderSystem::FailAllPendingOrders()
 {
+	ResetOnTimeStreak();
 	if (waitList.Num() == 0)
 	{
 		return;
@@ -1024,8 +1069,22 @@ UOrderHandle* AOrderSystem::RequestOrderForGuest(AGuestCharacter* Guest)
 	FOrderData OrderData;
 	bool bWildOrder = false;
 
-	// 跨天后 Tick 还没来得及重建时，先按今天的条件刷新食材 / 机器缓存，下面的过滤才准确
-	if (PoolBuiltDay != Today)
+	// Preparation can refill an empty box after the daily pool was built.
+	// Compare live sources before validating the next teaching/configured order;
+	// otherwise yesterday's empty egg box can block day two even after restocking.
+	TSet<int32> CurrentSuppliedItemIDs;
+	TSet<int32> CurrentAvailableMachineIDs;
+	TSet<int32> CurrentPreparedFoodIDs;
+	CollectSuppliedItemIDs(CurrentSuppliedItemIDs);
+	CollectAvailableMachineIDs(CurrentAvailableMachineIDs);
+	CollectPreparedFoodIDs(CurrentPreparedFoodIDs);
+	if (PoolBuiltDay != Today
+		|| !CachedSuppliedItemIDs.Includes(CurrentSuppliedItemIDs)
+		|| !CurrentSuppliedItemIDs.Includes(CachedSuppliedItemIDs)
+		|| !CachedAvailableMachineIDs.Includes(CurrentAvailableMachineIDs)
+		|| !CurrentAvailableMachineIDs.Includes(CachedAvailableMachineIDs)
+		|| !CachedPreparedFoodIDs.Includes(CurrentPreparedFoodIDs)
+		|| !CurrentPreparedFoodIDs.Includes(CachedPreparedFoodIDs))
 	{
 		RebuildOrderPool();
 	}
@@ -1040,6 +1099,11 @@ UOrderHandle* AOrderSystem::RequestOrderForGuest(AGuestCharacter* Guest)
 		{
 			TutorialSeqDay = Today;
 			TutorialSeqCursor = 0;
+			if (Today == 2 || Today == 3)
+				if (const UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetGameInstance()))
+					if (GI->curSaveGameData)
+						if (const FTutorialDaySave* Saved = GI->curSaveGameData->TutorialDays.Find(Today))
+							TutorialSeqCursor = FMath::Clamp(Saved->Served, 0, DaySeq->FoodIDs.Num());
 		}
 		// 目标制试营业持续使用教学菜，直到完成目标；客人离场后的补位也能正常点单。
 		if (GetFirstDayServiceTarget() > 0 && TutorialSeqCursor >= DaySeq->FoodIDs.Num())
@@ -1051,16 +1115,24 @@ UOrderHandle* AOrderSystem::RequestOrderForGuest(AGuestCharacter* Guest)
 		{
 			FOrderData Candidate;
 			Candidate.FoodIDs = { DaySeq->FoodIDs[TutorialSeqCursor] };
-			++TutorialSeqCursor;
 
 			FString Reason;
 			if (!IsOrderServableToday(Candidate, Reason))
 			{
+				// Keep the promised teaching dish at the front until it is available.
+				if (Today == 2 || Today == 3)
+				{
+					UE_LOG(LogTemp, Warning, TEXT("[OrderSystem] 第 %d 天教学单 %d 暂不可接：%s"),
+						Today, TutorialSeqCursor + 1, *Reason);
+					return nullptr;
+				}
+				++TutorialSeqCursor;
 				UE_LOG(LogTemp, Log, TEXT("[OrderSystem] 新手引导序列跳过第 %d 单：%s"), TutorialSeqCursor, *Reason);
 				continue;
 			}
 
 			OrderData = MoveTemp(Candidate);
+			++TutorialSeqCursor;
 			bTutorialOrder = true;
 			UE_LOG(LogTemp, Log, TEXT("[OrderSystem] 新手引导顺序出单：第 %d/%d 单（第 %d 天）"),
 				TutorialSeqCursor, DaySeq->FoodIDs.Num(), Today);
@@ -1246,6 +1318,7 @@ bool AOrderSystem::PushFoods(const TArray<int>& FoodIDs)
 	AGuestCharacter* OrderedGuest = BestHandle->Guest;
 
 	ABaseLevelBP::AddScore(this, BestHandle->GetOrderSettlementPrice());
+	RecordOrderTiming(*BestHandle);
 	OnFinishOrder.Broadcast(BestHandle, BestHandle->OrderData);
 	waitList.Remove(BestHandle);
 	GEngine->AddOnScreenDebugMessage(-1, 2, FColor::Red, TEXT("完成订单(优先最短剩余时间)"));
@@ -1332,6 +1405,7 @@ bool AOrderSystem::PushFoodsForGuest(const TArray<int>& FoodIDs, AGuestCharacter
 	AGuestCharacter* OrderedGuest = BestHandle->Guest;
 
 	ABaseLevelBP::AddScore(this, BestHandle->GetOrderSettlementPrice());
+	RecordOrderTiming(*BestHandle);
 	OnFinishOrder.Broadcast(BestHandle, BestHandle->OrderData);
 	waitList.Remove(BestHandle);
 	GEngine->AddOnScreenDebugMessage(-1, 2, FColor::Red, TEXT("完成订单(针对性上菜)"));
@@ -1344,6 +1418,25 @@ bool AOrderSystem::PushFoodsForGuest(const TArray<int>& FoodIDs, AGuestCharacter
 	}
 	RecordFirstDayOrderServed();
 	return true;
+}
+
+void AOrderSystem::RecordOrderTiming(const UOrderHandle& Order)
+{
+	if (Order.IsLate())
+	{
+		ResetOnTimeStreak();
+		return;
+	}
+	OnTimeStreakChanged.Broadcast(++OnTimeStreak);
+}
+
+void AOrderSystem::ResetOnTimeStreak()
+{
+	if (OnTimeStreak != 0)
+	{
+		OnTimeStreak = 0;
+		OnTimeStreakChanged.Broadcast(0);
+	}
 }
 
 float UOrderHandle::GetPercent()
