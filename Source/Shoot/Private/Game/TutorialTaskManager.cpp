@@ -12,23 +12,27 @@
 #include "Dining/DiningHygieneManager.h"
 #include "Dining/DiningMessActor.h"
 #include "Item/ItemActor.h"
+#include "Item/FoodSpawner.h"
+#include "Game/FoodSystem.h"
 #include "Item/Plant.h"
 #include "Item/OutdoorBasket.h"
 #include "Machine/ResearchStove.h"
 #include "Machine/StorageWarehouse.h"
 #include "Machine/CookingMachine.h"
 #include "Machine/GateCounter.h"
+#include "Machine/Dishwasher.h"
 #include "MySaveGame.h"
-#include "NPC/GuestManager.h"
 #include "NPC/GuestCharacter.h"
 #include "NPC/ChairSeat.h"
 #include "ShootCharacter.h"
 #include "UI/TutorialGuideWidget.h"
+#include "UI/HUDWidget.h"
 #include "EngineUtils.h"
 #include "Engine/World.h"
 #include "Engine/DataTable.h"
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
+#include "UObject/ConstructorHelpers.h"
 
 namespace
 {
@@ -67,11 +71,15 @@ namespace
 ATutorialTaskManager::ATutorialTaskManager()
 {
 	PrimaryActorTick.bCanEverTick = true;
+	static ConstructorHelpers::FClassFinder<AItemActor> PlateFinder(TEXT("/Game/_Demo/Blueprints/Pickable/Plate/BP_Plate"));
+	PracticePlateClass = PlateFinder.Class;
 }
 
 void ATutorialTaskManager::BeginPlay()
 {
 	Super::BeginPlay();
+	// Merge old map/Blueprint overrides that still serialize only day one.
+	for (int32 Day : {1, 2, 3}) NoMessesDays.AddUnique(Day);
 
 	if (!TaskTable)
 	{
@@ -148,8 +156,18 @@ void ATutorialTaskManager::Tick(float DeltaSeconds)
 			}
 		}
 	}
+
 	UpdateFocusTarget();
 	RefreshWidgets();
+	SnapshotAccum += PollInterval;
+	if (bSavePending || (AppliedDay >= 2 && AppliedDay <= 3 && SnapshotAccum >= 2.f))
+	{
+		SnapshotAccum = 0.f;
+		bSavePending = false;
+		if (AppliedDay >= 1 && AppliedDay <= 3)
+			if (UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetGameInstance())) GI->SaveGameData();
+	}
+
 }
 
 void ATutorialTaskManager::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -163,30 +181,69 @@ void ATutorialTaskManager::EndPlay(const EEndPlayReason::Type EndPlayReason)
 bool ATutorialTaskManager::IsFirstServiceTutorialActive() const
 {
 	if (!bEnable || AppliedDay != 1) return false;
+	if (IsFirstDayPlateLessonActive()) return true;
 	// 首单之后的备餐和两单练习不再阻止后续客人进场。
 	for (const FActiveTask& Task : ActiveTasks)
 		if (Task.Row.TaskType == ETutorialTaskType::ServeGuests) return !Task.bDone;
 	return false;
 }
 
-void ATutorialTaskManager::NotifyAction(UWorld* World, ETutorialTaskType Type, int32 ItemID, AActor* Target)
+bool ATutorialTaskManager::IsFirstDayPlateLessonActive() const
 {
-	if (!World) return;
+	if (!bEnable || AppliedDay != 1)
+	{
+		return false;
+	}
+	for (const FActiveTask& Task : ActiveTasks)
+	{
+		if (!Task.bDone)
+		{
+			return Task.Row.TaskType == ETutorialTaskType::ReturnPlate;
+		}
+	}
+	return false;
+}
+
+void ATutorialTaskManager::NotifyAction(UWorld* World, ETutorialTaskType Type, int32 ItemID, AActor* Target, int32 Quantity)
+{
+	if (!World || Quantity <= 0) return;
 	for (TActorIterator<ATutorialTaskManager> It(World); It; ++It)
 	{
-		if (!It->bEnable) continue;
+		if (!It->bEnable || It->bRestoring) continue;
+		if (It->AppliedDay != It->GetCurrentDay()) It->ApplyDay(It->GetCurrentDay());
+		const UTimeSystem* TS = It->GetTimeSystem();
+		if (It->AppliedDay >= 2 && It->AppliedDay <= 3 && Type == ETutorialTaskType::ServeGuests)
+			if (UBaseGameInstance* GI = Cast<UBaseGameInstance>(It->GetGameInstance()))
+				if (GI->curSaveGameData) GI->curSaveGameData->TutorialDays.FindOrAdd(It->AppliedDay).Served += Quantity;
 		for (FActiveTask& Task : It->ActiveTasks)
 		{
 			if (Task.bDone) continue;
-			if (Task.Row.TaskType == Type && (Task.Row.TargetItemID < 0 || Task.Row.TargetItemID == ItemID)
-				&& (Task.Row.TargetActorTag.IsNone() || (Target && Target->ActorHasTag(Task.Row.TargetActorTag))))
-			{
-				Task.Progress++;
-				Task.bDone = Task.Progress >= Task.Row.TargetCount;
-				if (Task.bDone) It->SaveCompletedTask(Task);
-			}
+			if (Type == ETutorialTaskType::ReturnPlate && Task.Row.TaskType != Type) break;
+			// Preparatory actions may be performed in either order. One event belongs to
+			// one matching objective; it never completes a chain of future objectives.
+			const bool bPreparation = Type == ETutorialTaskType::PickupItem || Type == ETutorialTaskType::HarvestQuest || Type == ETutorialTaskType::StoreToWarehouse
+				|| Type == ETutorialTaskType::ResearchItem;
+			if (!bPreparation && Type != ETutorialTaskType::ServeGuests && (!TS || !TS->IsBusinessOpen())) continue;
+			if (Task.Row.TaskType != Type || (Task.Row.TargetItemID >= 0 && Task.Row.TargetItemID != ItemID)) continue;
+			if (Task.Row.TargetMachineID > 0 && (!Cast<ACookingMachine>(Target)
+				|| Cast<ACookingMachine>(Target)->MachineID != Task.Row.TargetMachineID)) continue;
+			if (!Task.Row.TargetActorTag.IsNone() && (!Target || !Target->ActorHasTag(Task.Row.TargetActorTag))) continue;
+			if (Type == ETutorialTaskType::HarvestQuest && Task.Row.bRequireBasket && !Cast<AOutdoorBasket>(Target)) continue;
+			Task.Progress = FMath::Min(Task.Row.TargetCount, Task.Progress + Quantity);
+			Task.bDone = Task.Progress >= Task.Row.TargetCount;
+			It->SaveCompletedTask(Task);
+			// Using an ingredient successfully proves that this same ingredient was
+			// taken in hand, even if the player acted between two polling frames.
+			if (Type == ETutorialTaskType::ResearchItem || Type == ETutorialTaskType::AddToCooker)
+				for (FActiveTask& Earlier : It->ActiveTasks)
+					if (Earlier.Row.StepOrder < Task.Row.StepOrder && Earlier.Row.TaskType == ETutorialTaskType::PickupItem
+						&& Earlier.Row.TargetItemID == ItemID && !Earlier.bDone)
+					{
+						Earlier.Progress = Earlier.Row.TargetCount; Earlier.bDone = true; It->SaveCompletedTask(Earlier);
+					}
 			break;
 		}
+		It->bSavePending = true;
 	}
 }
 
@@ -210,9 +267,11 @@ bool ATutorialTaskManager::NeedsOpeningGuidance() const
 	const UTimeSystem* TS = GetTimeSystem();
 	if (!bEnable || ActiveTasks.IsEmpty() || !TS || TS->IsBusinessOpen() || TS->IsEndOfDayReached())
 		return false;
-	if (AppliedDay == 1) return true;
-	if (AppliedDay == 2)
+	if (AppliedDay == 1) return IsFirstServiceTutorialActive();
+	if (AppliedDay == 2 || AppliedDay == 3)
 	{
+		for (const FActiveTask& Task : ActiveTasks)
+			if (Task.Row.TaskType == ETutorialTaskType::OpenBusiness && Task.bDone) return true;
 		// 先完成篮子采集和入库，轮到接待时才引导开门。
 		for (const FActiveTask& Task : ActiveTasks)
 			if (!Task.bDone) return Task.Row.TaskType == ETutorialTaskType::ServeGuests;
@@ -257,6 +316,7 @@ void ATutorialTaskManager::ResetRuntimeState()
 
 void ATutorialTaskManager::ApplyDay(int32 Day)
 {
+	const bool bNewSave = AppliedSave.Get() != (Cast<UBaseGameInstance>(GetGameInstance()) ? Cast<UBaseGameInstance>(GetGameInstance())->curSaveGameData.Get() : nullptr);
 	AppliedDay = Day;
 	const UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetGameInstance());
 	AppliedSave = GI ? GI->curSaveGameData.Get() : nullptr;
@@ -273,16 +333,61 @@ void ATutorialTaskManager::ApplyDay(int32 Day)
 	{
 		if (Row && Row->Day == Day)
 		{
+			if (Row->TaskType == ETutorialTaskType::ReturnPlate
+				&& !UGameplayStatics::GetActorOfClass(this, ADishwasher::StaticClass()))
+			{
+				continue;
+			}
 			FActiveTask Task;
 			Task.Row = *Row;
 			ActiveTasks.Add(Task);
 		}
 	}
 
+
+	if (bNewSave) RestoreTutorialState();
+	if (Day == 3)
+	{
+		for (int32 ID : {0, 2})
+		{
+			FActiveTask Supply;
+			Supply.Row.Day = 3;
+			Supply.Row.StepOrder = ID == 0 ? -20 : -10;
+			Supply.Row.TaskType = ETutorialTaskType::StockSupplies;
+			Supply.Row.TargetItemID = ID;
+			Supply.Row.TargetCount = ID == 0 ? 4 : 5;
+			Supply.Row.Description = FText::FromString(ID == 0 ? TEXT("为研究和营业备好番茄") : TEXT("为研究和营业备好鸡蛋"));
+			ActiveTasks.Add(Supply);
+		}
+	}
 	ActiveTasks.Sort([](const FActiveTask& A, const FActiveTask& B)
 	{
 		return A.Row.StepOrder < B.Row.StepOrder;
 	});
+	if (Day == 2)
+		DayExtraNotes.Add(2, NSLOCTEXT("Tutorial", "Day2SuppliesNote", "煎鸡蛋用煎锅；炖番茄（番茄汤）用汤锅。备好鸡蛋和番茄后再开门。"));
+	if (Day == 3)
+	{
+		DayExtraNotes.Add(3, NSLOCTEXT("Tutorial", "Day3ResearchNote", "研究炉：番茄 + 鸡蛋，空手按 E 开始研究；解锁后用煎锅制作番茄炒鸡蛋。"));
+		// 已研究过的存档不应再要求向研究炉投入同一配方。
+		const FActiveTask* Research = ActiveTasks.FindByPredicate([](const FActiveTask& Task)
+			{ return Task.Row.TaskType == ETutorialTaskType::ResearchRecipe; });
+		if (Research && GI && GI->IsRecipeUnlocked(Research->Row.TargetItemID))
+			for (FActiveTask& Task : ActiveTasks)
+			{
+				Task.bDone = true;
+				Task.Progress = Task.Row.TargetCount;
+				if (Task.Row.TaskType == ETutorialTaskType::ResearchRecipe) break;
+			}
+	}
+
+	if (Day >= 2 && Day <= 3 && GI && GI->curSaveGameData)
+		if (const FTutorialDaySave* Saved = GI->curSaveGameData->TutorialDays.Find(Day))
+			for (FActiveTask& Task : ActiveTasks)
+			{
+				Task.Progress = FMath::Clamp(FMath::Max(Task.Progress, Saved->Steps.FindRef(Task.Row.StepOrder)), 0, Task.Row.TargetCount);
+				Task.bDone = Task.Progress >= Task.Row.TargetCount;
+			}
 	if (Day == 1)
 	{
 		// 订单数及旧布尔标记都不能证明操作教学做过，必须有逐步完成记录。
@@ -329,7 +434,7 @@ void ATutorialTaskManager::ApplyDay(int32 Day)
 		}
 		else if (NoMessesDays.Contains(Day))
 		{
-			// 配置的“无垃圾日”（第 1 天）：暂停自动撒点并清空现有散落物
+		// 前三天及额外配置的无垃圾日：暂停自动撒点并清空现有散落物
 			Hygiene->SetAutoSpawnEnabled(false);
 			Hygiene->ClearAllMesses();
 			bHygieneAutoSpawnOverridden = true;
@@ -387,7 +492,7 @@ int32 ATutorialTaskManager::CountItemAcrossPlayers(int32 ItemID) const
 	return Total;
 }
 
-int32 ATutorialTaskManager::CountItemInBaskets(int32 ItemID) const
+int32 ATutorialTaskManager::CountItemInBaskets(int32 ItemID, const AOutdoorBasket* OnlyBasket) const
 {
 	if (ItemID < 0)
 	{
@@ -402,7 +507,7 @@ int32 ATutorialTaskManager::CountItemInBaskets(int32 ItemID) const
 	}
 	for (TActorIterator<AOutdoorBasket> It(const_cast<UWorld*>(World)); It; ++It)
 	{
-		if (!IsValid(*It))
+		if (!IsValid(*It) || (OnlyBasket && *It != OnlyBasket))
 		{
 			continue;
 		}
@@ -513,6 +618,18 @@ void ATutorialTaskManager::UpdateProgress()
 
 		switch (Task.Row.TaskType)
 		{
+		case ETutorialTaskType::EquipBasket:
+			for (TActorIterator<AShootCharacter> It(GetWorld()); It; ++It)
+				if (It->GetEquippedBasket()) Task.Progress = Task.Row.TargetCount;
+			break;
+		case ETutorialTaskType::OpenBusiness:
+			if (const UTimeSystem* TS = GetTimeSystem())
+				if (TS->IsBusinessOpen()) Task.Progress = Task.Row.TargetCount;
+			break;
+		case ETutorialTaskType::ResearchRecipe:
+			if (const UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetGameInstance()))
+				if (GI->IsRecipeUnlocked(Task.Row.TargetItemID)) Task.Progress = Task.Row.TargetCount;
+			break;
 		case ETutorialTaskType::CleanTrash:
 			if (Hygiene)
 			{
@@ -527,6 +644,7 @@ void ATutorialTaskManager::UpdateProgress()
 					// 首单必须在轮到上菜这一步后真正交付；历史总单数不能完成这一步。
 					if (&Task != FirstServe) Task.Progress = LevelBP->orderSystem->GetFirstDayOrdersServed();
 				}
+				else if (AppliedDay == 2 || AppliedDay == 3) Task.Progress = GetServedToday();
 				else Task.Progress = FMath::Max(0, LevelBP->GuestsServedThisLevel - ServeBaseline);
 			}
 			break;
@@ -537,8 +655,9 @@ void ATutorialTaskManager::UpdateProgress()
 			}
 			break;
 		case ETutorialTaskType::PickupItem:
-			Task.MaxSeen = FMath::Max(Task.MaxSeen, CountItemAcrossPlayers(Task.Row.TargetItemID));
-			Task.Progress = Task.MaxSeen;
+			for (TActorIterator<AShootCharacter> It(GetWorld()); It; ++It)
+				if (const AItemActor* Held = It->GetPickingItem())
+					if (!Cast<AOutdoorBasket>(Held) && Held->GetItemID() == Task.Row.TargetItemID) Task.Progress = 1;
 			break;
 		case ETutorialTaskType::CollectDish:
 			for (TActorIterator<AShootCharacter> It(GetWorld()); It; ++It)
@@ -550,27 +669,22 @@ void ATutorialTaskManager::UpdateProgress()
 			}
 			break;
 		case ETutorialTaskType::HarvestQuest:
-			if (Task.Row.bRequireBasket)
-			{
-				const int32 Total = CountItemInBaskets(Task.Row.TargetItemID);
-				if (Total > Task.LastBasketTotal)
-				{
-					Task.Progress += Total - Task.LastBasketTotal;
-				}
-				Task.LastBasketTotal = Total;
-			}
-			else
-			{
-				Task.Progress += NewHandPicks.FindRef(Task.Row.TargetItemID);
-			}
-			break;
-		case ETutorialTaskType::ResearchItem:
-			Task.MaxSeen = FMath::Max(Task.MaxSeen, CountItemInResearch(Task.Row.TargetItemID, Task.Row.TargetActorTag));
-			Task.Progress = Task.MaxSeen;
+			if (!Task.Row.bRequireBasket) Task.Progress += NewHandPicks.FindRef(Task.Row.TargetItemID);
 			break;
 		case ETutorialTaskType::StoreToWarehouse:
-			Task.MaxSeen = FMath::Max(Task.MaxSeen, CountItemInStorages(Task.Row.TargetItemID, Task.Row.TargetActorTag));
-			Task.Progress = Task.MaxSeen;
+			// Successful transfers/harvests report their actual quantities through NotifyAction.
+			break;
+		case ETutorialTaskType::ReturnPlate:
+			EnsureFirstDayPracticePlate();
+			break;
+		case ETutorialTaskType::ResearchItem:
+			Task.Progress = FMath::Max(Task.Progress, CountItemInResearch(Task.Row.TargetItemID, Task.Row.TargetActorTag));
+			break;
+		case ETutorialTaskType::StockSupplies:
+			Task.Progress = FMath::Min(Task.Row.TargetCount, CountReadyStock(Task.Row.TargetItemID)
+				+ CountItemInResearch(Task.Row.TargetItemID, NAME_None));
+			if (const UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetGameInstance()))
+				if (GI->IsRecipeUnlocked(1003)) Task.Progress = Task.Row.TargetCount;
 			break;
 		default:
 			break;
@@ -587,14 +701,72 @@ void ATutorialTaskManager::UpdateProgress()
 	}
 }
 
+bool ATutorialTaskManager::HasDirtyPlateInHand() const
+{
+	for (TActorIterator<AShootCharacter> It(GetWorld()); It; ++It)
+	{
+		const AItemActor* Held = It->GetPickingItem();
+		if (IsValid(Held) && Held->bIsDirtyPlate)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+void ATutorialTaskManager::EnsureFirstDayPracticePlate()
+{
+	const UTimeSystem* Time = GetTimeSystem();
+	if (!PracticePlateClass || !Time || !Time->IsBusinessOpen() || !IsFirstDayPlateLessonActive()
+		|| HasDirtyPlateInHand())
+	{
+		return;
+	}
+	UWorld* World = GetWorld();
+	for (TActorIterator<AGuestCharacter> It(World); It; ++It)
+	{
+		if (It->GuestState == EGuestState::Eating && IsValid(It->PlateOnTable))
+		{
+			return;
+		}
+	}
+	AChairSeat* FreeSeat = nullptr;
+	const FVector PlayerLocation = GetLocalPlayerReferenceLocation(World);
+	for (TActorIterator<AChairSeat> It(World); It; ++It)
+	{
+		if (IsValid(It->DirtyPlate))
+		{
+			return;
+		}
+		if (!It->bIsOccupied && !It->HasPlateOnSeat()
+			&& (!FreeSeat || FVector::DistSquared(It->GetActorLocation(), PlayerLocation)
+				< FVector::DistSquared(FreeSeat->GetActorLocation(), PlayerLocation)))
+		{
+			FreeSeat = *It;
+		}
+	}
+	// The first order is saved, but its guest and plate are not restored on re-entry.
+	if (FreeSeat)
+	{
+		FActorSpawnParameters Params;
+		Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		if (AItemActor* Plate = World->SpawnActor<AItemActor>(PracticePlateClass, FreeSeat->GetPlateSocketTransform(), Params))
+		{
+			FreeSeat->SetDirtyPlate(Plate);
+		}
+	}
+}
+
 void ATutorialTaskManager::SaveCompletedTask(const FActiveTask& Task)
 {
-	if (AppliedDay != 1 || !Task.bDone) return;
 	if (UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetGameInstance()))
-		if (GI->curSaveGameData && !GI->curSaveGameData->FirstDayTutorialCompletedSteps.Contains(Task.Row.StepOrder))
+		if (GI->curSaveGameData)
 		{
-			GI->curSaveGameData->FirstDayTutorialCompletedSteps.Add(Task.Row.StepOrder);
-			GI->SaveGameData();
+			if (AppliedDay == 1 && Task.bDone)
+				GI->curSaveGameData->FirstDayTutorialCompletedSteps.AddUnique(Task.Row.StepOrder);
+			if (AppliedDay >= 2 && AppliedDay <= 3)
+				GI->curSaveGameData->TutorialDays.FindOrAdd(AppliedDay).Steps.Add(Task.Row.StepOrder, Task.Progress);
+			bSavePending = true;
 		}
 }
 
@@ -626,13 +798,36 @@ AActor* ATutorialTaskManager::FindTargetActor(const FActiveTask& Task) const
 	AActor* Best = nullptr;
 	switch (Task.Row.TaskType)
 	{
+	case ETutorialTaskType::ReturnPlate:
+		if (HasDirtyPlateInHand())
+		{
+			for (TActorIterator<ADishwasher> It(World); It; ++It) Best = Better(Best, *It);
+		}
+		else
+		{
+			for (TActorIterator<AChairSeat> It(World); It; ++It)
+				if (IsValid(It->DirtyPlate)) Best = Better(Best, It->DirtyPlate);
+		}
+		break;
+	case ETutorialTaskType::EquipBasket:
+		for (TActorIterator<AOutdoorBasket> It(World); It; ++It)
+			if (!It->GetAttachParentActor()) Best = Better(Best, *It);
+		break;
+	case ETutorialTaskType::OpenBusiness:
+		for (TActorIterator<AGateCounter> It(World); It; ++It) Best = Better(Best, *It);
+		break;
 	case ETutorialTaskType::AddToCooker:
 	case ETutorialTaskType::CookDish:
 	{
+		int32 MachineID = Task.Row.TargetMachineID;
+		if (MachineID <= 0 && Task.Row.TaskType == ETutorialTaskType::CookDish)
+			if (const UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetGameInstance()))
+				if (GI->foodSystem) MachineID = GI->foodSystem->GetMenuData(Task.Row.TargetItemID).MachineID;
+		if (MachineID <= 0) MachineID = 1001;
 		for (TActorIterator<ACookingMachine> It(World); It; ++It)
 		{
 			if (!Tag.IsNone() && !It->ActorHasTag(Tag)) continue;
-			if (It->MachineID == 1001) Best = Better(Best, *It);
+			if (It->MachineID == MachineID) Best = Better(Best, *It);
 		}
 		break;
 	}
@@ -666,15 +861,19 @@ AActor* ATutorialTaskManager::FindTargetActor(const FActiveTask& Task) const
 			{
 				continue;
 			}
+
+			AGuestCharacter* Guest = Seat->Occupant;
+			if (Task.Row.TaskType == ETutorialTaskType::AcceptOrder && !Guest->CanAcceptOrderByPlayer()) continue;
+			if (Task.Row.TaskType == ETutorialTaskType::ServeGuests)
+			{
+				if (!Guest->CanPlayerServeDish() || !Guest->CurrentOrder) continue;
+				const AShootCharacter* Player = Cast<AShootCharacter>(UGameplayStatics::GetPlayerPawn(World, 0));
+				const AItemActor* Held = Player ? Player->GetPickingItem() : nullptr;
+				if (Held && Held->GetMenuFoodID() >= 0 && !Guest->CurrentOrder->GetOrderData().FoodIDs.Contains(Held->GetMenuFoodID())) continue;
+			}
 			Best = Better(Best, Seat);
 		}
-		if (!Best)
-		{
-			if (AGuestManager* Mgr = Cast<AGuestManager>(UGameplayStatics::GetActorOfClass(this, AGuestManager::StaticClass())))
-			{
-				Best = Mgr;
-			}
-		}
+		// No actionable guest yet: leave the arrow hidden instead of pointing at the spawner.
 		break;
 	}
 	case ETutorialTaskType::EarnMoney:
@@ -696,7 +895,7 @@ AActor* ATutorialTaskManager::FindTargetActor(const FActiveTask& Task) const
 		for (TActorIterator<AItemActor> It(World); It; ++It)
 		{
 			AItemActor* Item = *It;
-			if (!IsValid(Item) || Item->GetAttachParentActor())
+			if (!IsValid(Item) || Item->GetAttachParentActor() || (Cast<AFoodSpawner>(Item) && !Cast<AFoodSpawner>(Item)->CanSpawn()))
 			{
 				continue;
 			}
@@ -717,6 +916,11 @@ AActor* ATutorialTaskManager::FindTargetActor(const FActiveTask& Task) const
 	}
 	case ETutorialTaskType::HarvestQuest:
 	{
+		// 鸡蛋是鸡舍地上的散落实例，不是植物。
+		if (Task.Row.TargetItemID == 2)
+			for (TActorIterator<AItemActor> It(World); It; ++It)
+				if (It->GetItemID() == 2 && !It->GetAttachParentActor()
+					&& (Tag.IsNone() || It->ActorHasTag(Tag))) Best = Better(Best, *It);
 		// 先找现在就能采的，没熟就退回到任意同种作物（箭头至少把人带到正确的田里）
 		for (int32 Pass = 0; Pass < 2 && !Best; ++Pass)
 		{
@@ -741,6 +945,7 @@ AActor* ATutorialTaskManager::FindTargetActor(const FActiveTask& Task) const
 		break;
 	}
 	case ETutorialTaskType::ResearchItem:
+	case ETutorialTaskType::ResearchRecipe:
 	{
 		for (TActorIterator<AResearchStove> It(World); It; ++It)
 		{
@@ -774,6 +979,14 @@ void ATutorialTaskManager::UpdateFocusTarget()
 	FocusHint = FText::GetEmpty();
 	if (NeedsOpeningGuidance())
 	{
+		FText Reason;
+		if (!CanOpenForTutorial(Reason))
+		{
+			FocusHint = Reason;
+			for (int32 ID : {0, 2})
+				if (CountAvailableSupply(ID) < GetSupplyRequirement(ID)) { ResolveIngredientRoute(ID, true); break; }
+			return;
+		}
 		FocusHint = AppliedDay == 1
 			? NSLOCTEXT("Tutorial", "FirstDayOpeningHint", "跟随箭头走到入口大门，靠近后按 E 开始试营业。今天完成 3 单即可，不限时。")
 			: NSLOCTEXT("Tutorial", "SecondDayOpeningHint", "备料完成！跟随箭头走到入口大门，靠近后按 E 开始营业，再接待今天的客人。");
@@ -795,6 +1008,72 @@ void ATutorialTaskManager::UpdateFocusTarget()
 		if (Task.bDone)
 		{
 			continue;
+		}
+
+		FocusHint = Task.Row.HintText.IsEmpty() ? Task.Row.Description : Task.Row.HintText;
+		if (Task.Row.TaskType == ETutorialTaskType::ReturnPlate)
+		{
+			if (AActor* Target = FindTargetActor(Task))
+			{
+				FocusHint = HasDirtyPlateInHand()
+					? NSLOCTEXT("Tutorial", "ReturnFirstPlate", "拿着空碟走到洗碗机旁，按 E 放回。")
+					: NSLOCTEXT("Tutorial", "CollectFirstPlate", "空手走到餐桌旁，按 E 拿起空碟。");
+				FocusLocation = Target->GetActorLocation();
+				bHasFocusTarget = true;
+			}
+			else
+			{
+				FocusHint = NSLOCTEXT("Tutorial", "WaitForFirstPlate", "等客人吃完，桌上会留下空碟。");
+			}
+			return;
+		}
+		if (Task.Row.TaskType == ETutorialTaskType::StoreToWarehouse && CountItemInBaskets(Task.Row.TargetItemID) == 0
+			&& CountItemAcrossPlayers(Task.Row.TargetItemID) == 0)
+		{
+			ResolveIngredientRoute(Task.Row.TargetItemID, true);
+			return;
+		}
+		if (Task.Row.TaskType == ETutorialTaskType::HarvestQuest && Task.Row.bRequireBasket)
+		{
+			const AShootCharacter* Player = Cast<AShootCharacter>(UGameplayStatics::GetPlayerPawn(GetWorld(), 0));
+			if (!Player || !Player->GetEquippedBasket() || Player->GetEquippedBasket()->IsBasketFull())
+			{
+				ResolveIngredientRoute(Task.Row.TargetItemID, true);
+				return;
+			}
+		}
+		if (Task.Row.TaskType == ETutorialTaskType::StockSupplies)
+		{
+			const int32 Missing = FMath::Max(0, Task.Row.TargetCount - Task.Progress);
+			ResolveIngredientRoute(Task.Row.TargetItemID, true, Missing);
+			return;
+		}
+		if (Task.Row.TaskType == ETutorialTaskType::OpenBusiness)
+		{
+			FText Reason;
+			if (!CanOpenForTutorial(Reason))
+			{
+				FocusHint = Reason;
+				for (int32 ID : {0, 2})
+					if (CountAvailableSupply(ID) < GetSupplyRequirement(ID)) { ResolveIngredientRoute(ID, true); break; }
+				return;
+			}
+		}
+		if (Task.Row.TaskType == ETutorialTaskType::PickupItem || Task.Row.TaskType == ETutorialTaskType::ResearchItem
+			|| Task.Row.TaskType == ETutorialTaskType::AddToCooker)
+		{
+			const AShootCharacter* Player = Cast<AShootCharacter>(UGameplayStatics::GetPlayerPawn(GetWorld(), 0));
+			const AItemActor* Held = Player ? Player->GetPickingItem() : nullptr;
+			if (!Held || Held->GetItemID() != Task.Row.TargetItemID || Cast<AOutdoorBasket>(Held))
+			{
+				ResolveIngredientRoute(Task.Row.TargetItemID, false);
+				return;
+			}
+		}
+		if (!Task.Row.bShowNavigation)
+		{
+			FocusHint = Task.Row.HintText.IsEmpty() ? Task.Row.Description : Task.Row.HintText;
+			return;
 		}
 		if (AActor* Target = FindTargetActor(Task))
 		{
@@ -834,13 +1113,8 @@ TArray<FTutorialChecklistEntry> ATutorialTaskManager::GetChecklistEntries() cons
 	}
 	for (const FActiveTask& Task : ActiveTasks)
 	{
-		const int32 Target = FMath::Max(1, Task.Row.TargetCount);
-		const FText Description = Task.Row.Description.IsEmpty()
-			? (Task.Row.HintText.IsEmpty() ? NSLOCTEXT("Tutorial", "DefaultObjective", "任务") : Task.Row.HintText)
-			: Task.Row.Description;
 		FTutorialChecklistEntry& Entry = Entries.AddDefaulted_GetRef();
-		Entry.Text = FText::Format(NSLOCTEXT("Tutorial", "ObjectiveProgress", "{0}  {1}/{2}"),
-			Description, FText::AsNumber(FMath::Min(Task.Progress, Target)), FText::AsNumber(Target));
+		Entry.Text = FormatObjectiveProgress(Task);
 		Entry.bCompleted = Task.bDone;
 		if (!Task.bDone) break;
 	}
@@ -881,10 +1155,21 @@ void ATutorialTaskManager::RefreshWidgets() const
 	{
 		return;
 	}
-	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+
+	// 每日任务面板整合在常驻 WBP_HUD 内：HUD 只有一份，分屏也不会按玩家复制。
+	if (const ABaseLevelBP* Level = GetLevelBP())
 	{
-		APlayerController* PC = It->Get();
-		if (PC && PC->IsLocalController())
+		if (UHUDWidget* HUD = Level->GetHUDWidget())
+		{
+			HUD->EnsureTutorialGuide(const_cast<ATutorialTaskManager*>(this));
+			return;
+		}
+	}
+
+	// HUD 尚未创建（例如自动化 UI 夹具）：只为 0 号本地玩家保留一份兜底实例。
+	if (APlayerController* PC = UGameplayStatics::GetPlayerController(World, 0))
+	{
+		if (PC->IsLocalController())
 		{
 			UTutorialGuideWidget::EnsureForPlayer(PC, const_cast<ATutorialTaskManager*>(this));
 		}
