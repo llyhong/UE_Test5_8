@@ -202,6 +202,33 @@ public:
 	float EatDuration = 3.f; // 进食动画持续时间(秒)
 	float EatRemaining = 0.f; // 进食剩余时间
 
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Animal|Needs")
+	bool bIsDrinking = false; // 是否正在喝水(供动画/UI 区分)
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Animal|Needs")
+	float DrinkDuration = 3.f; // 喝水持续时间(秒)
+	float DrinkRemaining = 0.f; // 喝水剩余时间
+
+	// 需求源查找：按 Actor Tag 搜索最近的水源/食物源，走过去吃喝，完成后需求清零。
+	// 关卡里给水槽/食槽等 Actor 打上对应 Tag 即可(编辑器默认标签见构造函数)。
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Animal|Needs", meta = (ClampMin = "0.0"))
+	float NeedSearchRadius = 3000.f; // 搜索需求源的最大半径(cm)
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Animal|Needs")
+	TArray<FName> WaterSourceTags; // 视为水源的 Actor 标签
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Animal|Needs")
+	TArray<FName> FoodSourceTags; // 视为食物源的 Actor 标签
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Animal|Needs", meta = (ClampMin = "0.0"))
+	float NeedInteractDistance = 180.f; // 距需求源多近开始吃喝
+
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Animal|Needs")
+	EAnimalNeed ActiveNeed = EAnimalNeed::Food; // 当前正在处理的需求
+
+	TWeakObjectPtr<AActor> NeedSourceActor; // 当前前往/使用的需求源(运行时)
+	double NextNeedSearchTime = 0.0; // 下次允许搜索需求源的时间(节流，运行时)
+
 	// 注：需求图标与气泡文本已合并到同一个 BubbleWidgetComp 中显示，
 	// 需求图标由 Widget 内部绑定 OwningAnimal 的 OnNeedStateChanged 自行切换，
 	// 气泡文本由 ShowBubble() -> ShowBubbleText() 驱动。不再单独使用 NeedWidgetComp。
@@ -342,6 +369,32 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Spawn")
 	int32 SpawnedCount = 0;
 
+	// ============================================================
+	//  自动下蛋（与逃跑掉落解耦的独立循环）
+	// ============================================================
+	/** 是否自动下蛋：生成物取 SpawnActorClasses，落在脚边；不需要玩家在场 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Animal|Egg")
+	bool bLayEggs = false;
+
+	/** 下蛋平均间隔(秒) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Animal|Egg", meta = (ClampMin = "1.0"))
+	float LayEggInterval = 60.f;
+
+	/** 间隔随机浮动(±秒) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Animal|Egg", meta = (ClampMin = "0.0"))
+	float LayEggIntervalJitter = 15.f;
+
+	/** 周围最多同时存在几颗蛋；达到上限后暂停下蛋，玩家捡走即恢复。<0 表示不限制 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Animal|Egg")
+	int32 MaxNearbyEggs = 2;
+
+	/** 统计"周围蛋数"的半径(cm) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Animal|Egg", meta = (ClampMin = "0.0"))
+	float NearbyEggCheckRadius = 600.f;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Animal|Egg")
+	int32 NearbyEggCount = 0; // 最近一次统计的周围蛋数(调试/UI)
+
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Spawn")
 	void StartSpawning();
 
@@ -394,6 +447,17 @@ protected:
 	void UpdateDayNight(bool bIsNight);
 	void UpdateAIDistanceCull();
 
+	// 需求：寻找最近的水源/食物源并走过去吃喝
+	void UpdateSeekNeed(float DeltaTime);
+	AActor* FindNearestNeedSource(EAnimalNeed Need) const;
+	void StartConsumingNeed(EAnimalNeed Need);
+
+	// 下蛋循环
+	void UpdateEggLaying(float DeltaTime);
+	AActor* LayEggOnGround();
+	int32 CountNearbyEggs() const;
+	TSubclassOf<AActor> PickSpawnClass();
+
 	// 工具：移动到目标点(通过 AIController)
 	bool MoveToLocation(const FVector& Goal, float Speed);
 	FVector GetRandomPointInNavMesh(float Radius) const;
@@ -426,6 +490,8 @@ protected:
 	float WaitAtPointTimeMax = 3.f; // 到达后停留最长时长(秒)，Min>=Max 则取 Min(不停留)
 
 	float WaitRemaining = 0.f; // 当前剩余停留时间
+
+	float LayEggRemaining = 0.f; // 下蛋倒计时(运行时)
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Animal|Debug")
 	bool bEnableDebugLog = false; // 是否输出状态日志(蓝图可在运行时开关)
