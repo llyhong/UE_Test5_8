@@ -21,6 +21,10 @@ AServingCounter::AServingCounter()
 	CounterMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("CounterMesh"));
 	RootComponent = CounterMesh;
 
+	DishPoint = CreateDefaultSubobject<USceneComponent>(TEXT("DishPoint"));
+	DishPoint->SetupAttachment(RootComponent);
+	DishPoint->SetRelativeLocation(FVector(0.f, 0.f, 90.f));
+
 	InteractionSphere = CreateDefaultSubobject<USphereComponent>(TEXT("InteractionSphere"));
 	InteractionSphere->SetupAttachment(RootComponent);
 	InteractionSphere->SetSphereRadius(InteractionRadius * InteractionScale::Get());
@@ -176,8 +180,53 @@ AGuestCharacter* AServingCounter::FindWaitingGuest() const
 	return nullptr;
 }
 
+bool AServingCounter::CanStageDish(const AItemActor* Dish) const
+{
+	return bStageFinishedDish && IsValid(Dish) && Dish->GetMenuFoodID() >= 0
+		&& !Dish->bIsDirtyPlate && !Dish->bIsEmptyPlate;
+}
+
+bool AServingCounter::TryStageDish(AShootCharacter& Player)
+{
+	AItemActor* Dish = Player.GetPickingItem();
+	if (!CanStageDish(Dish) || IsValid(StagedDish))
+	{
+		return false;
+	}
+	Dish->DeAttachMeshToSocket();
+	Dish->AttachMeshToSocket(DishPoint, NAME_None);
+	if (Dish->ItemMesh->GetStaticMesh())
+	{
+		const float Bottom = Dish->ItemMesh->CalcBounds(Dish->ItemMesh->GetComponentTransform()).GetBox().Min.Z;
+		Dish->AddActorWorldOffset(FVector(0.f, 0.f, DishPoint->GetComponentLocation().Z - Bottom));
+	}
+	bStagedDishWasPickable = Dish->bPickable;
+	Dish->bPickable = false;
+	Dish->SetItemState(EItemState::EIS_Idle);
+	StagedDish = Dish;
+	Player.ClearHeldItemState();
+	return true;
+}
+
+bool AServingCounter::TryTakeStagedDish(AShootCharacter& Player)
+{
+	if (!bStageFinishedDish || !IsValid(StagedDish) || Player.GetPickingItem())
+	{
+		return false;
+	}
+	AItemActor* Dish = StagedDish;
+	StagedDish = nullptr;
+	Dish->bPickable = bStagedDishWasPickable;
+	Player.HoldItemInHand(Dish);
+	return true;
+}
+
 bool AServingCounter::SubmitDish(AItemActor* Dish)
 {
+	if (bStageFinishedDish)
+	{
+		return false;
+	}
 	if (!Dish)
 	{
 		GEngine->AddOnScreenDebugMessage(-1, 3.f, FColor::Red, TEXT("[上菜台] 没有可提交的菜品"));
@@ -325,6 +374,7 @@ void AServingCounter::DeliverDishToSeat(AItemActor* Dish, AGuestCharacter* Guest
 	const FVector Dest = Guest->GetActorLocation() + FVector(0.f, 0.f, 30.f);
 	Dish->SetActorLocation(Dest);
 	Dish->SetActorEnableCollision(false);
+	Dish->ClearPremiumDishFeedback();
 
 	if (UWorld* W = GetWorld())
 	{
@@ -347,6 +397,10 @@ void AServingCounter::OnInteractionOverlap(UPrimitiveComponent* OverlappedCompon
 	if (AShootCharacter* Character = Cast<AShootCharacter>(OtherActor))
 	{
 		Character->AddOverlappingCounter(this);
+		if (bStageFinishedDish)
+		{
+			return;
+		}
 		UE_LOG(LogTemp, Log, TEXT("[ServingCounter] 玩家进入范围，注册 OverlappingCounter"));
 		GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Yellow, TEXT("[上菜台] 已进入范围"));
 	}
