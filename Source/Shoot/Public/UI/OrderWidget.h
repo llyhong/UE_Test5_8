@@ -106,6 +106,7 @@ protected:
 	virtual void NativeConstruct() override;
 	virtual void NativeDestruct() override;
 	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
+	virtual void HandleOnTimeStreakChanged(int32 Count) {}
 
 	/** 从订单系统重建本地订单缓存，并通知蓝图整表刷新 */
 	void RebuildWaitingOrders();

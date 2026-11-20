@@ -18,10 +18,10 @@ class USizeBox;
 class UTexture2D;
 
 /**
- * 新手任务引导 HUD（C++ 构建，无需 WBP）：
+ * 每日任务引导 HUD（C++ 构建，无需单独 WBP）：
  *  - 屏幕右侧任务清单（标题 + 每步完成状态与进度）；
  *  - 可见目标上方显示向下浮动的箭头，画面外目标使用方向引导；
- *  - 每个本地玩家独立投影目标，任务卡显示当前操作说明。
+ *  - 整局只保留一份实例，挂在 WBP_HUD 内；分屏时不复制给每个本地玩家。
  */
 UCLASS()
 class SHOOT_API UTutorialGuideWidget : public UUserWidget
@@ -31,8 +31,11 @@ class SHOOT_API UTutorialGuideWidget : public UUserWidget
 public:
 	UTutorialGuideWidget(const FObjectInitializer& ObjectInitializer);
 
-	/** 为本地玩家创建（幂等） */
+	/** 兜底入口：HUD 尚未创建时（如自动化 UI 夹具）为主本地玩家创建唯一实例 */
 	static void EnsureForPlayer(APlayerController* PC, ATutorialTaskManager* InManager);
+
+	/** 由 HUD 调用：绑定任务管理器；已存在时只更新绑定，不重建清单 */
+	void SetManager(ATutorialTaskManager* InManager);
 
 	ATutorialTaskManager* GetManager() const { return Manager.Get(); }
 

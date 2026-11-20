@@ -25,7 +25,7 @@ class SHOOT_API UResearchProgressWidget : public UUserWidget
 
 public:
 	/** Remaining/Total 单位为秒；Total<=0 时按 0% 显示。InVerb 为标题动词 */
-	void SetProgress(float Remaining, float Total, const FString& InVerb = TEXT("研究中"));
+	void SetProgress(float Remaining, float Total, const FString& InVerb = TEXT("研究中"), bool bConfirmed = false);
 
 	/** 备料阶段（还没开始计时）：显示"已投入 N 份 · InHint"，进度条归零 */
 	void SetPending(int32 IngredientCount, const FString& InHint = TEXT("凑齐后开始研究"));
@@ -44,6 +44,7 @@ protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
 
 private:
+	void SetConfirmedStyle(bool bConfirmed);
 	void ApplyIngredientEntries(const TArray<TPair<int32, int32>>& Entries);
 	UWidget* MakeIconSlot(int32 ItemID, int32 Count);
 
@@ -68,4 +69,5 @@ private:
 	FString IconSignature;
 
 	bool bHasIcons = false;
+	bool bConfirmedStyle = false;
 };

@@ -11,6 +11,7 @@
 class UBorder;
 class UTextBlock;
 class UButton;
+class USoundBase;
 class APlayerController;
 class SRevenueChart;
 
@@ -26,6 +27,8 @@ class SHOOT_API USeasonDailyCardWidget : public UUserWidget
 	GENERATED_BODY()
 
 public:
+	USeasonDailyCardWidget(const FObjectInitializer& ObjectInitializer);
+
 	/** 向指定本地玩家弹出一张日结卡（数据取自 SeasonSystem 的 Last* 快照）
 	 *  @param bAwaitNextDay true = 营业结束的日结卡：不自动淡出，显示“进入下一天”按钮 */
 	static void ShowForPlayer(APlayerController* PC, const USeasonSystem* Season, bool bAwaitNextDay = false);
@@ -48,6 +51,32 @@ private:
 	void Apply(const USeasonSystem* Season);
 	void SetUIInputEnabled(bool bEnabled);
 	void Dismiss();
+
+	// ---- 结算演出：明细逐行滚动 → 评级盖章 → 昨日对比 → 达标庆祝 ----
+	void StartReveal(const USeasonSystem* Season);
+	void UpdateReveal(float DeltaTime);
+	void FinishReveal();
+	void ApplyCompareVisual();
+	void ApplyBannerVisual();
+	void SetRollingValue(UTextBlock* Block, int64 Target, float Progress, bool bSigned) const;
+	void PlayRevealCue(USoundBase* Sound, float Volume, float Pitch = 1.f) const;
+
+	bool bRevealActive = false;
+	bool bRevealFinished = false;
+	float RevealTime = 0.f;
+	int32 RevealRowsSounded = 0;
+	int32 RevealTilesSounded = 0;
+	bool bRevealGradeShown = false;
+	bool bRevealCompareShown = false;
+	bool bRevealBannerShown = false;
+	int64 RowTargets[6] = {};
+	int64 TileTargets[4] = {};
+	ESeasonGrade RevealGrade = ESeasonGrade::Poor;
+	int32 RevealScore = 0;
+	bool bRevealHasPrevDay = false;
+	ESeasonGrade RevealPrevGrade = ESeasonGrade::Poor;
+	int32 RevealPrevScore = 0;
+	TWeakObjectPtr<USeasonSystem> RevealSeason;
 
 	/** 摆放卡片：营业结束结算卡居中放大，其它日结卡仍贴右侧 */
 	void ApplyLayout(bool bCentered);
@@ -106,6 +135,28 @@ private:
 
 	UPROPERTY()
 	UTextBlock* HintText = nullptr;
+
+	UPROPERTY()
+	UTextBlock* CompareText = nullptr;
+
+	UPROPERTY()
+	UBorder* BannerPanel = nullptr;
+
+	UPROPERTY()
+	UTextBlock* BannerText = nullptr;
+
+	UPROPERTY()
+	UBorder* GradePanel = nullptr;
+
+	/** 结算演出音效：明细滚动 / 评级盖章 / 达标庆祝 */
+	UPROPERTY()
+	USoundBase* RowTickSound = nullptr;
+
+	UPROPERTY()
+	USoundBase* StampSound = nullptr;
+
+	UPROPERTY()
+	USoundBase* WinSound = nullptr;
 
 	UPROPERTY()
 	UButton* NextDayButton = nullptr;

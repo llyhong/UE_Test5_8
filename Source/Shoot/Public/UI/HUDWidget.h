@@ -9,6 +9,8 @@
 #include "HUDWidget.generated.h"
 
 class ABaseLevelBP;
+class ATutorialTaskManager;
+class UTutorialGuideWidget;
 
 /**
  * 常驻 HUD 基类：在编辑器里用 WBP 继承它即可显示声誉/金钱。
@@ -28,6 +30,11 @@ public:
 	// 绑定关卡对象（ABaseLevelBP），用于自动刷新关卡目标 UI；由 Level 创建 HUD 后调用
 	UFUNCTION(BlueprintCallable, Category = "Shoot|HUD")
 	void BindLevel(ABaseLevelBP* Level);
+
+	/** 把每日任务面板挂进本 HUD：整局只创建一个实例，分屏时共用主 HUD 这一份。
+	 *  优先作为 WBP_HUD 画布的子控件（与 HUD 同层、同生命周期），失败时才退回主玩家屏幕。
+	 *  由 TutorialTaskManager 每次刷新任务时调用。 */
+	void EnsureTutorialGuide(ATutorialTaskManager* InManager);
 
 	// 强制刷新 HUD 全部内容（声誉 / 金钱 / 关卡目标：描述、进度比例、明细、是否达成）。
 	// 由经济、分数、声誉变化或关卡绑定/达成时自动调用。
@@ -55,6 +62,8 @@ public:
 	/** 刷新时钟显示：CurrentHour 为 0~24（由 DayProgress 映射），bIsOpen 为是否营业中 */
 	UFUNCTION(BlueprintCallable, Category = "Shoot|HUD")
 	void SetClock(float CurrentHour, bool bIsOpen);
+
+	void SetKitchenPlateHint(int32 CleanPlates);
 
 	/** 蓝图实现：显示当前时间（如 17:30）与营业状态（营业中 / 备货中 / 已打烊） */
 	UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|HUD")
