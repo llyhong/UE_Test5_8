@@ -285,6 +285,13 @@ public:
 	float CurTime = 0;
 	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Gameplay")
 	bool IsStarted = false;
+
+	UPROPERTY(BlueprintReadOnly, Transient, Category = "Shoot|Order")
+	int32 OnTimeStreak = 0;
+
+	DECLARE_MULTICAST_DELEGATE_OneParam(FOnTimeStreakChanged, int32);
+	FOnTimeStreakChanged OnTimeStreakChanged;
+	void ResetOnTimeStreak();
 	UPROPERTY(BlueprintAssignable, Category = "Shoot|Events")
 	FOrderEvent2 OnFinishOrder;
 	UPROPERTY(BlueprintAssignable, Category = "Shoot|Events")
@@ -303,6 +310,7 @@ public:
 	AGuestCharacter* GetLastServedGuest() const { return LastServedGuest; }
 
 private:
+	void RecordOrderTiming(const UOrderHandle& Order);
 	UPROPERTY(Transient)
 	TArray<int32> DailyMenuIDs;
 	TArray<int32> PendingTastingIDs;
@@ -341,6 +349,10 @@ private:
 
 	/** 一道菜能不能进订单池：菜谱已解锁，且全部食材在当前关卡有来源。OutReason 供日志排查 */
 	bool IsMenuServable(int32 FoodID, const TSet<int32>& SuppliedItemIDs, FString& OutReason) const;
+
+	/** Dishes being cooked or ready to serve can satisfy an order after the last raw ingredient is spent. */
+	void CollectPreparedFoodIDs(TSet<int32>& OutFoodIDs) const;
+	TSet<int32> CachedPreparedFoodIDs;
 
 	/** 本关是否摆了这道菜需要的机器（FMenuData::MachineID；0 = 通用，不检查）。OutReason 供日志排查 */
 	bool IsMenuMachinePresent(int32 FoodID, const TSet<int32>& AvailableMachineIDs, FString& OutReason) const;
