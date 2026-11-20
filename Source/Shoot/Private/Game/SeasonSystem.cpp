@@ -65,6 +65,11 @@ void USeasonSystem::ResetForNewGame()
 	LastReputation = 0;
 	LastStars = 0;
 	LastHint.Reset();
+	bHasPreviousDay = false;
+	PreviousGrade = ESeasonGrade::Poor;
+	PreviousGradeScore = 0;
+	PreviousDailyNet = 0;
+	bLastSnapshotValid = false;
 	DailyFinancialHistory.Reset();
 	ResetToday();
 	bCheckpointValid = false;
@@ -194,6 +199,12 @@ void USeasonSystem::EvaluateDay(int32 DailyNet, int32 Cash, int32 Reputation, in
 		CaptureCheckpoint();
 	}
 
+	// 先把上一份日结存进 Previous*，供日结卡做“比昨日”对比；再覆盖 Last*
+	bHasPreviousDay = bLastSnapshotValid;
+	PreviousGrade = LastGrade;
+	PreviousGradeScore = LastGradeScore;
+	PreviousDailyNet = LastDailyNet;
+
 	// ---- 日评级 ----
 	const int32 Total = TodayServed + TodayFailed;
 	const float Completion = Total > 0 ? static_cast<float>(TodayServed) / static_cast<float>(Total) : 0.f;
@@ -223,6 +234,7 @@ void USeasonSystem::EvaluateDay(int32 DailyNet, int32 Cash, int32 Reputation, in
 	LastMoney = Cash;
 	LastReputation = Reputation;
 	LastStars = Stars;
+	bLastSnapshotValid = true;
 	LastHint = TEXT("今天没有营业记录");
 	if (Total > 0)
 	{
@@ -376,6 +388,11 @@ void USeasonSystem::RetryAct()
 	LastGrade = ESeasonGrade::Poor;
 	LastGradeScore = 0;
 	LastHint.Reset();
+	bHasPreviousDay = false;
+	PreviousGrade = ESeasonGrade::Poor;
+	PreviousGradeScore = 0;
+	PreviousDailyNet = 0;
+	bLastSnapshotValid = false;
 	ResetToday();
 
 	// 回退后立即落盘：日结时刚保存过失败状态，不覆盖的话玩家回退后退出会读回失败档
@@ -528,5 +545,10 @@ void USeasonSystem::Load()
 	CheckpointYear = Data->CheckpointYear;
 	CheckpointMonth = Data->CheckpointMonth;
 	CheckpointDayOfMonth = Data->CheckpointDayOfMonth;
+	bHasPreviousDay = false;
+	PreviousGrade = ESeasonGrade::Poor;
+	PreviousGradeScore = 0;
+	PreviousDailyNet = 0;
+	bLastSnapshotValid = false;
 	ResetToday();
 }
