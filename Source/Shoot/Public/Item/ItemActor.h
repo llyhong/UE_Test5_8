@@ -13,7 +13,9 @@ class USphereComponent;
 class ABaseFoodActor;
 class AChairSeat;
 class AShootCharacter;
+class APlateSystem;
 class UTexture2D;
+class UWidgetComponent;
 
 UENUM(BlueprintType)
 enum class EItemState : uint8
@@ -155,6 +157,9 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Item")
 	FORCEINLINE void SetMenuFoodID(int32 InID) { MenuFoodID = InID; }
+
+	void ReserveServingPlate(APlateSystem& PlateSystem);
+	bool ReturnServingPlate();
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Item")
 	UStaticMeshComponent* ItemMesh;
@@ -314,6 +319,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Item|Quality")
 	void SetIngredientQuality(EIngredientQuality InQuality) { IngredientQuality = InQuality; }
 
+	void ShowPremiumDishFeedback();
+	void ClearPremiumDishFeedback();
+
 	// ========== 熟度（素材结果后的“成熟 / 熟过头”子阶段，按每个果实独立计时） ==========
 	/** 是否启用熟度：由植物在生成果实时按 PlantInfo 写入 */
 	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Item|Ripeness")
@@ -383,4 +391,10 @@ public:
 	UFUNCTION()
 	void OnCollectEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
 		UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
+
+private:
+	UPROPERTY(Transient)
+	TObjectPtr<UWidgetComponent> PremiumDishFeedback;
+
+	TWeakObjectPtr<APlateSystem> ReservedPlateSystem;
 };
