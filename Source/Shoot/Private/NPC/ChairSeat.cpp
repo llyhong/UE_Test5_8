@@ -1,6 +1,7 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 #include "NPC/ChairSeat.h"
+#include "Item/PlateCollectionTray.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/SphereComponent.h"
 #include "Components/WidgetComponent.h"
@@ -350,6 +351,7 @@ bool AChairSeat::PlacePlateOnSocket(AItemActor* Plate)
 	{
 		return false;
 	}
+	Plate->ClearPremiumDishFeedback();
 
 	// 先把物品网格从手上 / 其它挂点摘下，再把整个碟子吸附到本座位的挂点：
 	// 之后碟子跟随餐桌移动，摆放位置与朝向完全由蓝图里的 PlateSocket 决定。
@@ -564,8 +566,21 @@ bool AChairSeat::TryInteractByPlayer(AShootCharacter* Player)
 		return false;
 	}
 
+	AItemActor* Held = Player->GetPickingItem();
+	if (Cast<APlateCollectionTray>(Held))
+	{
+		return TryCollectPlateByPlayer(Player);
+	}
+	// Waiting guests take orders first, including when the player holds a dish.
+	// Keep the dish in hand; serving remains a separate press after the order appears.
+	if ((!Held || !Held->bIsDirtyPlate) && CanPlayerTakeOrder(Player))
+	{
+		TryTakeOrderByPlayer(Player);
+		return true;
+	}
+
 	// 1) 手上有物品：上菜（脏碟例外，脏碟只能拿去洗碗机交还）
-	if (AItemActor* Held = Player->GetPickingItem())
+	if (Held)
 	{
 		// 空座位（没客人也没碟子）不与手上的东西互动：不拦截，交给后续拾取/做菜等逻辑
 		if (!IsValid(Occupant) && !HasPlateOnSeat())
@@ -589,19 +604,14 @@ bool AChairSeat::TryInteractByPlayer(AShootCharacter* Player)
 		return true;
 	}
 
-	// 3) 空手 + 客人已坐下等待点单：给客人下单，并把菜单绑定到本餐桌
-	if (CanPlayerTakeOrder(Player))
+	// 空手查看等餐订单，不提交菜品。
+	if (CanPlayerServeDish(Player))
 	{
-		TryTakeOrderByPlayer(Player);
+		Player->ShowSimpleToast(TEXT("客人正在等餐"),
+			FString::Printf(TEXT("订单：%s。端好菜后按 E 上菜。"), *GetMenuSetName()), FLinearColor(0.3f, 0.8f, 1.f));
 		return true;
 	}
-
-	// 4) 其它状态：只给提示，不拦截后续交互逻辑
-	if (IsValid(Occupant) && Occupant->GuestState == EGuestState::WaitingFood)
-	{
-		SeatMessage(TEXT("[餐桌] 客人已点单，请把做好的菜拿过来按 E 上菜"), FColor::Cyan);
-	}
-	else if (IsValid(Occupant) && Occupant->GuestState == EGuestState::Eating)
+	if (IsValid(Occupant) && Occupant->GuestState == EGuestState::Eating)
 	{
 		SeatMessage(TEXT("[餐桌] 客人正在用餐"), FColor::Cyan);
 	}
@@ -668,7 +678,7 @@ bool AChairSeat::TryServeDishByPlayer(AShootCharacter* Player, AItemActor* Dish)
 	{
 		if (IsValid(Occupant) && Occupant->CanAcceptOrderByPlayer())
 		{
-			SeatMessage(TEXT("[餐桌] 客人还没点单，请先空手按 E 给客人下单"), FColor::Yellow);
+			SeatMessage(TEXT("[餐桌] 客人还没点单，请先按 E 给客人下单"), FColor::Yellow);
 		}
 		else
 		{
@@ -731,10 +741,13 @@ bool AChairSeat::TryServeDishByPlayer(AShootCharacter* Player, AItemActor* Dish)
 
 bool AChairSeat::CanPlayerCollectPlate(AShootCharacter* Player) const
 {
-	return Player != nullptr
-		&& IsValid(PlateOnSeat)
-		&& PlateOnSeat->bIsEmptyPlate
-		&& Player->GetPickingItem() == nullptr; // 一只手只能拿一个
+	if (!Player || !IsValid(PlateOnSeat) || !PlateOnSeat->bIsEmptyPlate)
+	{
+		return false;
+	}
+	const AItemActor* Held = Player->GetPickingItem();
+	const APlateCollectionTray* Tray = Cast<APlateCollectionTray>(Held);
+	return !Held || (Tray && Tray->HasRoom());
 }
 
 bool AChairSeat::TryCollectPlateByPlayer(AShootCharacter* Player)
@@ -751,10 +764,6 @@ bool AChairSeat::TryCollectPlateByPlayer(AShootCharacter* Player)
 	{
 		return false;
 	}
-
-	PlateOnSeat = nullptr;
-	DirtyPlate = nullptr;
-	bHasDirtyPlate = false;
 
 	// 碟子已在手上：从候选集注销该空碟，避免重复收走（不影响其它空碟目标）
 	if (Player->GetOverlappingEmptyPlate() == Plate)
