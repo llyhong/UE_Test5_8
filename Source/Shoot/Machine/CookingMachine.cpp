@@ -95,6 +95,7 @@ void ACookingMachine::BeginPlay()
 	Super::BeginPlay();
 
 	ApplyInteractionScale();
+	RefreshShopLock();
 
 	BoxCollision->OnComponentBeginOverlap.AddDynamic(this, &ACookingMachine::OnBoxOverlap);
 	BoxCollision->OnComponentEndOverlap.AddDynamic(this, &ACookingMachine::OnBoxEndOverlap);
@@ -131,6 +132,7 @@ void ACookingMachine::ResetFoodData()
 	FoodMaterial.Empty(6);
 	// 新的一锅：复位"没碟子"提示，允许再次提示
 	bNoPlateNotified = false;
+	bWaitingForPlate = false;
 	bAttentionPerformed = false;
 	// 状态复位后卡片立即隐藏，不等下一帧 Tick
 	if (ProgressWidgetComp)
@@ -157,8 +159,8 @@ void ACookingMachine::UpdateProgressWidget()
 
 	const float ElapsedTime = CurCookingTime + OverCookTime;
 	const FString Verb = IsAttentionAvailable() ? TEXT("按 E 翻面 · 可获佳品")
-		: bAttentionPerformed ? TEXT("已翻面 · 佳品烹饪中") : TEXT("烹饪中");
-	ProgressWidget->SetProgress(FMath::Max(0.f, RequiredTime - ElapsedTime), RequiredTime, Verb);
+		: bAttentionPerformed ? TEXT("✓ 已翻面") : TEXT("烹饪中");
+	ProgressWidget->SetProgress(FMath::Max(0.f, RequiredTime - ElapsedTime), RequiredTime, Verb, bAttentionPerformed);
 	ProgressWidget->SetIngredientCounts(FoodMaterial);
 	// 带食材图标行时卡片会变高，世界空间控件不会自动跟着长
 	ProgressWidgetComp->SetDrawSize(ProgressWidget->GetCardDrawSize());
@@ -328,6 +330,8 @@ bool ACookingMachine::CheckMenu(int32 FoodMaterialID,FMenuData& matchMenuData)
 }
 bool ACookingMachine::CanAddFoodMateral(int32 FoodMaterialID)
 {
+	if (!IsShopUnlocked())
+		return false;
 	if (OnFire || Repairing)
 		return false;
 
@@ -366,7 +370,7 @@ bool ACookingMachine::CanAddFoodMateral(int32 FoodMaterialID)
 
 int ACookingMachine::GetMenuFood()
 {
-	if (IsFinish)
+	if (IsFinish && !bWaitingForPlate)
 	{
 		int foodID = TargetMenuData.FoodID;
 		OnGetFood();
@@ -391,10 +395,42 @@ float ACookingMachine::GetCookSpeedMultiplier() const
 			if (GI->economySystem)
 			{
 				Bonus = GI->economySystem->GetOwnedItemCount(EconomyShopItemIDs::AdvancedStove) * CookSpeedBonusPerStove;
+				const int32 PanLevel = FMath::Clamp(
+					GI->economySystem->GetOwnedItemCount(EconomyShopItemIDs::PanUpgrade), 0, MaxPanUpgradeLevel);
+				Bonus += PanLevel * CookSpeedBonusPerPanLevel;
 			}
 		}
 	}
 	return FMath::Clamp(1.f - Bonus, MinCookSpeedMultiplier, 1.f);
+}
+
+bool ACookingMachine::IsShopUnlocked() const
+{
+	if (RequiredShopItemID <= 0)
+	{
+		return true;
+	}
+	const UBaseGameInstance* GI = GetWorld() ? Cast<UBaseGameInstance>(GetWorld()->GetGameInstance()) : nullptr;
+	if (!GI || !GI->economySystem)
+	{
+		// 经济系统还没就绪时不拦人，避免关卡加载早期把机器锁死
+		return true;
+	}
+	return GI->economySystem->GetOwnedItemCount(RequiredShopItemID) > 0;
+}
+
+void ACookingMachine::RefreshShopLock()
+{
+	if (RequiredShopItemID <= 0)
+	{
+		return;
+	}
+	const bool bUnlocked = IsShopUnlocked();
+	if (bHideUntilUnlocked)
+	{
+		SetActorHiddenInGame(!bUnlocked);
+		SetActorEnableCollision(bUnlocked);
+	}
 }
 
 float ACookingMachine::GetRequiredCookTime() const
@@ -442,9 +478,9 @@ void ACookingMachine::SpawnCookedActor()
 	// 没有空闲碟子 → 本次不出成品，直接 return 走回原始逻辑：
 	// 机器保持"完成/加热"状态并继续累计煮过头时间，最终煮糊/着火（OnFire）；
 	// 玩家把脏碟交还洗碗机后，下一次烹饪才能正常出菜。
+	APlateSystem* PlateSys = bConsumePlateOnFinish ? FindPlateSystem() : nullptr;
 	if (bConsumePlateOnFinish)
 	{
-		APlateSystem* PlateSys = FindPlateSystem();
 		if (!PlateSys)
 		{
 			// 场景/关卡里根本没有盘子系统：视为"没有碟子限制"，正常出成品（不消耗碟子），
@@ -458,6 +494,7 @@ void ACookingMachine::SpawnCookedActor()
 		}
 		else if (PlateSys->GetAvailablePlates() <= 0)
 		{
+			bWaitingForPlate = true;
 			if (!bNoPlateNotified)
 			{
 				bNoPlateNotified = true;
@@ -516,16 +553,6 @@ void ACookingMachine::SpawnCookedActor()
 	}
 
 	// 能走到这里说明确实有空闲碟子（前面已校验）：生成成品消耗 1 个
-	if (bConsumePlateOnFinish)
-	{
-		if (APlateSystem* PlateSys = FindPlateSystem())
-		{
-			PlateSys->RemovePlate();
-			UE_LOG(LogTemp, Log, TEXT("[CookingMachine] 生成成品消耗 1 个碟子，剩余可用碟子 %d/%d"),
-				PlateSys->CurOrderIndex, PlateSys->TotalCount);
-		}
-	}
-
 	const FVector SpawnLocation = BaseLocation + FVector(0.f, 0.f, StackHeight + StackSpacing * CookedActorStack.Num());
 	AActor* CookedActor = GetWorld()->SpawnActor<AActor>(ClassToSpawn, SpawnLocation, SpawnRotation, SpawnParams);
 	if (!CookedActor) return; // 生成失败，走原始逻辑
@@ -536,6 +563,10 @@ void ACookingMachine::SpawnCookedActor()
 	// 把成品对应的菜单菜品 ID 写到物品上，供上菜台校验“是否在菜单中”
 	if (AItemActor* Item = Cast<AItemActor>(CookedActor))
 	{
+		if (PlateSys)
+		{
+			Item->ReserveServingPlate(*PlateSys);
+		}
 		Item->SetMenuFoodID(TargetMenuData.FoodID);
 
 		// 成品品质 = 所有入锅食材中的最差品质（任一食材为次品则成品为次品；全为佳品才为佳品）
@@ -550,6 +581,7 @@ void ACookingMachine::SpawnCookedActor()
 		if (UsesAttention() && DishQuality != EIngredientQuality::Inferior)
 			DishQuality = bAttentionPerformed ? EIngredientQuality::Premium : EIngredientQuality::Normal;
 		Item->SetIngredientQuality(DishQuality);
+		Item->ShowPremiumDishFeedback();
 
 		// 启用成品腐烂：未被玩家拾取的成品会自动销毁（放下后重新计时）
 		if (bProductsDecay)
@@ -666,7 +698,16 @@ void ACookingMachine::Tick(float DeltaTime)
 			C, false, 0.f, 0, 1.5f);
 	}
 
-	if (OnFire && Repairing)//维修中
+	if (bWaitingForPlate)
+	{
+		const APlateSystem* Plates = FindPlateSystem();
+		if (Plates && Plates->GetAvailablePlates() > 0)
+		{
+			bWaitingForPlate = false;
+			SpawnCookedActor();
+		}
+	}
+	else if (OnFire && Repairing)//维修中
 	{
 		CurRepairTime += DeltaTime;
 		if (CurRepairTime >= TargetRepairTime)//完成维修
