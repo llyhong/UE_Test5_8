@@ -2,6 +2,7 @@
 
 
 #include "Game/BaseGameInstance.h"
+#include "Game/TutorialTaskManager.h"
 
 #include "MySaveGame.h"
 #include "Kismet/GameplayStatics.h"
@@ -478,7 +479,10 @@ void UBaseGameInstance::SaveGameData()
 				}
 			}
 		}
+
 		curSaveGameData->WildPlantRegrowRemaining = WildPlantRegrowRemaining;
+		if (UWorld* World = GetWorld())
+			for (TActorIterator<ATutorialTaskManager> It(World); It; ++It) It->CaptureTutorialState();
 
 		// 保存到指定插槽（SlotName为文件名，UserIndex通常为0）
 		if (!bUseTemporaryKitchenProgress)
