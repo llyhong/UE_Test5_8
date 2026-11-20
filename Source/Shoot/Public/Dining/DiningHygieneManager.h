@@ -33,6 +33,9 @@ public:
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
+	/** Cleaning is introduced on day four; all earlier days stay free of messes. */
+	static bool IsMessDayAllowed(const UObject* WorldContextObject);
+
 	// ==================== 生成配置 ====================
 	/** 撒点区域：只取这里的区域；为空时以本 Actor 位置为圆心、600cm 半径 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|DiningHygiene|Spawn")
