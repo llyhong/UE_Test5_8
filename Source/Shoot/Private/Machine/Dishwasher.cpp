@@ -1,6 +1,7 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 #include "Machine/Dishwasher.h"
+#include "Item/PlateCollectionTray.h"
 #include "Components/SphereComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/WidgetComponent.h"
@@ -110,9 +111,65 @@ APlateSystem* ADishwasher::FindPlateSystem() const
 	return nullptr;
 }
 
+bool ADishwasher::UnlockCollectionTray()
+{
+	if (IsValid(CollectionTray))
+	{
+		return false;
+	}
+	FActorSpawnParameters Params;
+	Params.Owner = this;
+	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	CollectionTray = GetWorld()->SpawnActor<APlateCollectionTray>(
+		APlateCollectionTray::StaticClass(), GetActorLocation(), GetActorRotation(), Params);
+	if (!CollectionTray)
+	{
+		return false;
+	}
+	DockCollectionTray();
+	return true;
+}
+
+void ADishwasher::DockCollectionTray()
+{
+	CollectionTray->DeAttachMeshToSocket();
+	CollectionTray->AttachMeshToSocket(DishwasherMesh, NAME_None);
+	const FBox Bounds = DishwasherMesh->Bounds.GetBox();
+	FVector Rest = Bounds.GetCenter() + GetActorForwardVector() * 19.f;
+	Rest.Z = Bounds.Max.Z;
+	CollectionTray->SetActorLocation(Rest);
+	CollectionTray->SetItemState(EItemState::EIS_Idle);
+}
+
+bool ADishwasher::HasDockedTray() const
+{
+	return IsValid(CollectionTray) && CollectionTray->GetAttachParentActor() == this;
+}
+
+bool ADishwasher::TakeCollectionTray(AShootCharacter& Player)
+{
+	if (!HasDockedTray() || Player.GetPickingItem())
+	{
+		return false;
+	}
+	Player.HoldItemInHand(CollectionTray);
+	return true;
+}
+
+bool ADishwasher::ReturnCollectionTray(AShootCharacter& Player)
+{
+	if (!IsValid(CollectionTray) || Player.GetPickingItem() != CollectionTray || CollectionTray->GetPlateCount() > 0)
+	{
+		return false;
+	}
+	DockCollectionTray();
+	Player.ClearHeldItemState();
+	return true;
+}
+
 bool ADishwasher::SubmitPlate(AItemActor* Plate)
 {
-	if (!Plate)
+	if (!IsValid(Plate) || Plate->IsActorBeingDestroyed())
 	{
 		OnPlateReturnFailed(TEXT("NoPlate"));
 		return false;
@@ -139,7 +196,10 @@ bool ADishwasher::SubmitPlate(AItemActor* Plate)
 	}
 
 	// 可用碟子数 +1（上限为碟子总数 TotalCount）
-	PS->AddPlate();
+	if (!Plate->ReturnServingPlate())
+	{
+		PS->AddPlate();
+	}
 	const int32 Available = PS->CurOrderIndex;
 
 	// 碟子消失
