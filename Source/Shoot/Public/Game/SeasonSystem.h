@@ -190,6 +190,13 @@ public:
 	/** 一句改进提示（指出最拖分的项），日结卡直接显示 */
 	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Season|Last") FString LastHint;
 
+	// ---- 昨日快照（日结卡做“比昨日进步 / 持平 / 落后”对比） ----
+	/** 是否存在可对比的上一份日结（新档第一天 / 读档后首日 / 回退重来后为 false） */
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Season|Last") bool bHasPreviousDay = false;
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Season|Last") ESeasonGrade PreviousGrade = ESeasonGrade::Poor;
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Season|Last") int32 PreviousGradeScore = 0;
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Season|Last") int32 PreviousDailyNet = 0;
+
 	// ---- 当日统计（日结后清零） ----
 	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Season|Today") int32 TodayServed = 0;
 	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Season|Today") int32 TodayFailed = 0;
@@ -287,6 +294,8 @@ public:
 	void Load();
 
 private:
+	/** Last* 快照是否来自一次真实日结（读档 / 重置后为 false，避免拿默认值做昨日对比） */
+	bool bLastSnapshotValid = false;
 	FName NewGameConfigRowName = NAME_None;
 	UPROPERTY(Transient)
 	TObjectPtr<UEconomySystem> Economy;
