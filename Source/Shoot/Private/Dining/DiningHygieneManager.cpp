@@ -7,6 +7,7 @@
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "Game/BaseGameInstance.h"
+#include "Game/BusinessTime.h"
 #include "Game/EconomySystem.h"
 #include "NPC/GuestCharacter.h"
 #include "Components/SceneComponent.h"
@@ -61,6 +62,11 @@ void ADiningHygieneManager::Tick(float DeltaSeconds)
 	EnsureTimeSystemBound();
 	EnsureRandomReady();
 	PruneMesses();
+	if (!IsMessDayAllowed(this))
+	{
+		ClearAllMesses();
+		return;
+	}
 
 	UWorld* World = GetWorld();
 	if (!World)
@@ -113,8 +119,17 @@ void ADiningHygieneManager::EnsureTimeSystemBound()
 	BoundTimeSystem = Current;
 }
 
+bool ADiningHygieneManager::IsMessDayAllowed(const UObject* WorldContextObject)
+{
+	const UWorld* World = WorldContextObject ? WorldContextObject->GetWorld() : nullptr;
+	const UBaseGameInstance* GI = World ? Cast<UBaseGameInstance>(World->GetGameInstance()) : nullptr;
+	const UTimeSystem* Time = GI && GI->businessSimulation ? GI->businessSimulation->TimeSystem.Get() : nullptr;
+	return Time && Time->Day >= 4;
+}
+
 bool ADiningHygieneManager::IsSpawningAllowed() const
 {
+	if (!IsMessDayAllowed(this)) return false;
 	if (!bOnlyWhenBusinessOpen || !BoundTimeSystem)
 	{
 		return true;
@@ -190,6 +205,8 @@ FVector ADiningHygieneManager::PickSpawnLocation() const
 
 ADiningMessActor* ADiningHygieneManager::SpawnMess(EDiningMessType Type, FVector Location)
 {
+	// Applies to initial, timed, tutorial and direct Blueprint spawns alike.
+	if (!IsMessDayAllowed(this)) return nullptr;
 	UWorld* World = GetWorld();
 	if (!World)
 	{
