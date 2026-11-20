@@ -19,6 +19,7 @@
 #include "Machine/FirstDiscoveryCelebration.h"
 #include "UI/DiscoveryToastWidget.h"
 #include "UI/ResearchProgressWidget.h"
+#include "Game/TutorialTaskManager.h"
 
 AResearchStove::AResearchStove()
 {
@@ -200,6 +201,7 @@ bool AResearchStove::AddFood(AItemActor* Food)
 	// 食材投入炉中即被消耗
 	StoredItemIDs.Add(ItemID);
 	Food->Destroy();
+	ATutorialTaskManager::NotifyAction(GetWorld(), ETutorialTaskType::ResearchItem, ItemID, this);
 
 	UE_LOG(LogTemp, Log, TEXT("[ResearchStove] 投入食材 ItemID=%d，炉内共 %d 份"), ItemID, StoredItemIDs.Num());
 	OnFoodAdded(ItemID, StoredItemIDs.Num());
