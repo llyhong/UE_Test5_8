@@ -2,6 +2,7 @@
 
 #include "Game/BusinessSimulation.h"
 #include "Game/BaseGameInstance.h"
+#include "Game/BaseLevelBP.h"
 #include "Game/SeasonSystem.h"
 #include "MySaveGame.h"
 #include "Engine/Engine.h"
@@ -186,6 +187,18 @@ void UBusinessSimulation::HandleBusinessDayEnded()
 
 void UBusinessSimulation::OnDay(int32 Y, int32 M, int32 D)
 {
+	if (UBaseGameInstance* GI = GetTypedOuter<UBaseGameInstance>())
+	{
+		if (GI->businessSimulation == this && GI->curLevelBP && TimeSystem)
+		{
+			if (AOrderSystem* Orders = GI->curLevelBP->orderSystem)
+			{
+				Orders->ResetOnTimeStreak();
+			}
+			GI->curLevelBP->RefreshKitchenPlateFlow(*TimeSystem);
+		}
+	}
+
 	// 打烊时已经结算过：这次只是“进入下一天”的日期推进，不能再扣一次被动收支 / 评级
 	if (bSkipNextDaySettlement)
 	{
