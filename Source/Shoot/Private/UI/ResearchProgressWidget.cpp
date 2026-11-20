@@ -24,6 +24,9 @@ namespace
 	constexpr float IconRowHeight = 26.f;
 	constexpr float IconSize = 22.f;
 	constexpr int32 MaxIconSlots = 4;
+	const FLinearColor DefaultCardColor(0.04f, 0.045f, 0.05f, 0.92f);
+	const FLinearColor DefaultLabelColor(0.95f, 0.9f, 0.78f, 1.f);
+	const FLinearColor DefaultFillColor(0.95f, 0.78f, 0.35f, 1.f);
 }
 
 TSharedRef<SWidget> UResearchProgressWidget::RebuildWidget()
@@ -43,7 +46,7 @@ TSharedRef<SWidget> UResearchProgressWidget::RebuildWidget()
 
 	CardBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Card"));
 	CardBorder->SetPadding(FMargin(10.f, 6.f, 10.f, 8.f));
-	CardBorder->SetBrushColor(FLinearColor(0.04f, 0.045f, 0.05f, 0.92f));
+	CardBorder->SetBrushColor(DefaultCardColor);
 
 	FSlateBrush Brush;
 	Brush.DrawAs = ESlateBrushDrawType::RoundedBox;
@@ -59,7 +62,7 @@ TSharedRef<SWidget> UResearchProgressWidget::RebuildWidget()
 
 	Label = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Label"));
 	Label->SetFont(FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 11));
-	Label->SetColorAndOpacity(FSlateColor(FLinearColor(0.95f, 0.9f, 0.78f, 1.f)));
+	Label->SetColorAndOpacity(FSlateColor(DefaultLabelColor));
 	if (UVerticalBoxSlot* PanelSlot = Column->AddChildToVerticalBox(Label))
 	{
 		PanelSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
@@ -79,15 +82,29 @@ TSharedRef<SWidget> UResearchProgressWidget::RebuildWidget()
 
 	Bar = WidgetTree->ConstructWidget<UProgressBar>(UProgressBar::StaticClass(), TEXT("Bar"));
 	Bar->SetPercent(0.f);
-	Bar->SetFillColorAndOpacity(FLinearColor(0.95f, 0.78f, 0.35f, 1.f));
+	Bar->SetFillColorAndOpacity(DefaultFillColor);
 	BarBox->SetContent(Bar);
 
 	return Super::RebuildWidget();
 }
 
-void UResearchProgressWidget::SetProgress(float Remaining, float Total, const FString& InVerb)
+void UResearchProgressWidget::SetConfirmedStyle(bool bConfirmed)
+{
+	if (!CardBorder || !Bar || !Label || bConfirmedStyle == bConfirmed)
+	{
+		return;
+	}
+
+	bConfirmedStyle = bConfirmed;
+	CardBorder->SetBrushColor(bConfirmed ? FLinearColor(0.88f, 0.51f, 0.10f, 0.98f) : DefaultCardColor);
+	Label->SetColorAndOpacity(FSlateColor(bConfirmed ? FLinearColor(0.11f, 0.05f, 0.02f) : DefaultLabelColor));
+	Bar->SetFillColorAndOpacity(bConfirmed ? FLinearColor(1.f, 0.93f, 0.70f) : DefaultFillColor);
+}
+
+void UResearchProgressWidget::SetProgress(float Remaining, float Total, const FString& InVerb, bool bConfirmed)
 {
 	Verb = InVerb;
+	SetConfirmedStyle(bConfirmed);
 
 	const float SafeTotal = FMath::Max(Total, KINDA_SMALL_NUMBER);
 	const float Remain = FMath::Clamp(Remaining, 0.f, SafeTotal);
@@ -105,6 +122,7 @@ void UResearchProgressWidget::SetProgress(float Remaining, float Total, const FS
 
 void UResearchProgressWidget::SetPending(int32 IngredientCount, const FString& InHint)
 {
+	SetConfirmedStyle(false);
 	if (Bar)
 	{
 		Bar->SetPercent(0.f);

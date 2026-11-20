@@ -25,12 +25,14 @@
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
 #include "SceneView.h"
+#include "UnrealClient.h"
 #include "Styling/CoreStyle.h"
 #include "UObject/ConstructorHelpers.h"
 
 namespace
 {
-	TMap<TWeakObjectPtr<APlayerController>, TWeakObjectPtr<UTutorialGuideWidget>> GPlayerGuides;
+	/** 每日任务面板整局唯一：挂在主 HUD 内，分屏不按玩家复制 */
+	TWeakObjectPtr<UTutorialGuideWidget> GSharedGuide;
 
 	FLinearColor TutorialColor(const TCHAR* Hex)
 	{
@@ -76,37 +78,15 @@ void UTutorialGuideWidget::EnsureForPlayer(APlayerController* PC, ATutorialTaskM
 		return;
 	}
 
-	for (auto It = GPlayerGuides.CreateIterator(); It; ++It)
+	// 已有实例时只更新绑定：分屏下第二个本地玩家不会复制出第二份每日任务 UI。
+	if (UTutorialGuideWidget* Existing = GSharedGuide.Get())
 	{
-		if (!It.Key().IsValid() || !It.Value().IsValid())
+		if (Existing->GetWorld() == PC->GetWorld())
 		{
-			It.RemoveCurrent();
-		}
-	}
-
-	if (TWeakObjectPtr<UTutorialGuideWidget>* Found = GPlayerGuides.Find(PC))
-	{
-		if (UTutorialGuideWidget* Existing = Found->Get())
-		{
-			if (Existing->Manager.Get() != InManager)
-			{
-				Existing->CachedEntries.Reset();
-				Existing->CachedDayTitle = FText::GetEmpty();
-				Existing->ScrollTargetIndex = INDEX_NONE;
-			}
-			Existing->Manager = InManager;
-			Existing->OwnerController = PC;
-			if (Existing->IsInViewport() || Existing->AddToPlayerScreen(60))
-			{
-				GPlayerGuides.Add(PC, Existing);
-			}
-			else
-			{
-				GPlayerGuides.Remove(PC);
-			}
+			Existing->SetManager(InManager);
 			return;
 		}
-		GPlayerGuides.Remove(PC);
+		GSharedGuide.Reset();
 	}
 
 	UTutorialGuideWidget* Guide = CreateWidget<UTutorialGuideWidget>(PC, UTutorialGuideWidget::StaticClass());
@@ -114,12 +94,38 @@ void UTutorialGuideWidget::EnsureForPlayer(APlayerController* PC, ATutorialTaskM
 	{
 		return;
 	}
-	Guide->Manager = InManager;
-	Guide->OwnerController = PC;
+	Guide->SetManager(InManager);
 	Guide->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
 	if (Guide->AddToPlayerScreen(60))
 	{
-		GPlayerGuides.Add(PC, Guide);
+		GSharedGuide = Guide;
+	}
+}
+
+void UTutorialGuideWidget::SetManager(ATutorialTaskManager* InManager)
+{
+	if (Manager.Get() != InManager)
+	{
+		CachedEntries.Reset();
+		CachedDayTitle = FText::GetEmpty();
+		ScrollTargetIndex = INDEX_NONE;
+	}
+	Manager = InManager;
+	GSharedGuide = this;
+
+	if (!OwnerController.IsValid())
+	{
+		if (APlayerController* PC = GetOwningPlayer())
+		{
+			OwnerController = PC;
+		}
+		else if (UWorld* World = GetWorld())
+		{
+			if (APlayerController* LocalPC = UGameplayStatics::GetPlayerController(World, 0))
+			{
+				OwnerController = LocalPC;
+			}
+		}
 	}
 }
 
@@ -241,7 +247,7 @@ void UTutorialGuideWidget::RebuildChecklist(float Width)
 		return;
 	}
 
-	TArray<FTutorialChecklistEntry> Entries = M->GetChecklistEntries();
+	TArray<FTutorialChecklistEntry> Entries = M->GetVisibleChecklistEntries();
 	const bool bLayoutChanged = !FMath::IsNearlyEqual(Width, CachedChecklistWidth);
 	while (TaskRows.Num() > Entries.Num())
 	{
@@ -403,7 +409,8 @@ void UTutorialGuideWidget::NativeTick(const FGeometry& MyGeometry, float InDelta
 		return;
 	}
 
-	FVector2D ViewSize = FVector2D::ZeroVector;
+	FIntRect PlayerViewRect(0, 0, 0, 0);
+	FIntPoint WindowSize(0, 0);
 	if (ULocalPlayer* LP = PC->GetLocalPlayer())
 	{
 		if (UGameViewportClient* VC = LP->ViewportClient)
@@ -411,12 +418,12 @@ void UTutorialGuideWidget::NativeTick(const FGeometry& MyGeometry, float InDelta
 			FSceneViewProjectionData ProjectionData;
 			if (VC->Viewport && LP->GetProjectionData(VC->Viewport, ProjectionData))
 			{
-				const FIntRect ViewRect = ProjectionData.GetConstrainedViewRect();
-				ViewSize = FVector2D(ViewRect.Width(), ViewRect.Height());
+				PlayerViewRect = ProjectionData.GetConstrainedViewRect();
+				WindowSize = VC->Viewport->GetSizeXY();
 			}
 		}
 	}
-	if (ViewSize.X <= 1.f || ViewSize.Y <= 1.f)
+	if (PlayerViewRect.Width() <= 1 || PlayerViewRect.Height() <= 1 || WindowSize.X <= 1 || WindowSize.Y <= 1)
 	{
 		if (ArrowImage)
 		{
@@ -426,17 +433,30 @@ void UTutorialGuideWidget::NativeTick(const FGeometry& MyGeometry, float InDelta
 		return;
 	}
 
+	// 面板挂在 WBP_HUD 内、铺满整个窗口；分屏时用该玩家自己的视口矩形换算，
+	// 保证单屏和分屏下箭头都落在玩家自己的画面区域内。
+	const FVector2D WindowScale(LocalSize.X / WindowSize.X, LocalSize.Y / WindowSize.Y);
+	auto PlayerViewToLocal = [&](const FVector2D& InViewPos)
+	{
+		return FVector2D((PlayerViewRect.Min.X + InViewPos.X) * WindowScale.X,
+			(PlayerViewRect.Min.Y + InViewPos.Y) * WindowScale.Y);
+	};
+	const FVector2D ViewMin = PlayerViewToLocal(FVector2D::ZeroVector);
+	const FVector2D ViewMax = PlayerViewToLocal(FVector2D(PlayerViewRect.Width(), PlayerViewRect.Height()));
+	const FVector2D ViewSize = ViewMax - ViewMin;
+	const FVector2D ViewCenterLocal = (ViewMin + ViewMax) * 0.5f;
+
 	FVector2D ScreenPos;
 	// 可见目标直接在物件上方标记，避免玩家把屏幕中心的方向箭头误认成目的地。
 	FVector2D MarkerPos = FVector2D::ZeroVector;
 	const FVector MarkerLocation = TargetLocation + FVector(0.f, 0.f, 160.f);
 	const bool bMarkerProjected = UGameplayStatics::ProjectWorldToScreen(PC, MarkerLocation, MarkerPos, true);
-	const FVector2D MarkerLocal(MarkerPos.X * LocalSize.X / ViewSize.X, MarkerPos.Y * LocalSize.Y / ViewSize.Y);
+	const FVector2D MarkerLocal = PlayerViewToLocal(MarkerPos);
 	const float Bob = FMath::Sin(GetWorld()->GetTimeSeconds() * (2.f * PI / 1.4f)) * 8.f;
 	const FVector2D MarkerCenter = MarkerLocal + FVector2D(0.f, -40.f + Bob);
 	const bool bMarkerOnScreen = bMarkerProjected
-		&& MarkerCenter.X >= 48.f && MarkerCenter.X <= LocalSize.X - 48.f
-		&& MarkerCenter.Y >= 48.f && MarkerCenter.Y <= LocalSize.Y - 48.f;
+		&& MarkerCenter.X >= ViewMin.X + 48.f && MarkerCenter.X <= ViewMax.X - 48.f
+		&& MarkerCenter.Y >= ViewMin.Y + 48.f && MarkerCenter.Y <= ViewMax.Y - 48.f;
 	if (ArrowImage && bMarkerOnScreen)
 	{
 		ArrowImage->SetVisibility(ESlateVisibility::HitTestInvisible);
@@ -449,7 +469,7 @@ void UTutorialGuideWidget::NativeTick(const FGeometry& MyGeometry, float InDelta
 	const bool bProjected = UGameplayStatics::ProjectWorldToScreen(PC, TargetLocation, ScreenPos, true);
 	if (bProjected)
 	{
-		const FVector2D Delta = ScreenPos - ViewSize * 0.5f;
+		const FVector2D Delta = PlayerViewToLocal(ScreenPos) - ViewCenterLocal;
 		if (Delta.SizeSquared() > 1.f)
 		{
 			ArrowDir = Delta.GetSafeNormal();
@@ -473,9 +493,9 @@ void UTutorialGuideWidget::NativeTick(const FGeometry& MyGeometry, float InDelta
 		ArrowImage->SetVisibility(bArrowVisible ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
 		if (bArrowVisible)
 		{
-			const FVector2D Size = MyGeometry.GetLocalSize();
-			const float Radius = FMath::Clamp(FMath::Min(Size.X, Size.Y) * 0.30f, 100.f, 320.f);
-			ArrowImage->SetRenderTranslation(ArrowDir * Radius);
+			const float Radius = FMath::Clamp(FMath::Min(ViewSize.X, ViewSize.Y) * 0.30f, 60.f, 320.f);
+			// 箭头槽位锚在窗口中心，先把圆心挪到该玩家画面中心，再按半径偏移。
+			ArrowImage->SetRenderTranslation((ViewCenterLocal - LocalSize * 0.5f) + ArrowDir * Radius);
 			// 贴图默认朝右：按目标方向的屏幕角度旋转（正值在 Slate 里为顺时针）
 			ArrowImage->SetRenderTransformAngle(FMath::RadiansToDegrees(FMath::Atan2(ArrowDir.Y, ArrowDir.X)));
 		}
@@ -484,12 +504,9 @@ void UTutorialGuideWidget::NativeTick(const FGeometry& MyGeometry, float InDelta
 
 void UTutorialGuideWidget::NativeDestruct()
 {
-	for (auto It = GPlayerGuides.CreateIterator(); It; ++It)
+	if (GSharedGuide.Get() == this)
 	{
-		if (It.Value().Get() == this || !It.Value().IsValid())
-		{
-			It.RemoveCurrent();
-		}
+		GSharedGuide.Reset();
 	}
 	Manager = nullptr;
 	Super::NativeDestruct();

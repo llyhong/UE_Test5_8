@@ -5,6 +5,7 @@
 #include "Blueprint/WidgetTree.h"
 #include "Blueprint/WidgetLayoutLibrary.h"
 #include "Brushes/SlateRoundedBoxBrush.h"
+#include "Components/BackgroundBlur.h"
 #include "Components/Border.h"
 #include "Components/Button.h"
 #include "Components/CanvasPanel.h"
@@ -21,7 +22,6 @@
 #include "Rendering/SlateRenderer.h"
 #include "Widgets/SLeafWidget.h"
 #include "Components/TextBlock.h"
-#include "Engine/Texture2D.h"
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
 #include "Game/BaseGameInstance.h"
@@ -31,6 +31,9 @@
 #include "Game/BusinessTime.h"
 #include "GameFramework/PlayerController.h"
 #include "Blueprint/GameViewportSubsystem.h"
+#include "Kismet/GameplayStatics.h"
+#include "Sound/SoundBase.h"
+#include "UObject/ConstructorHelpers.h"
 #include "UObject/UObjectIterator.h"
 #include "Styling/CoreStyle.h"
 
@@ -41,6 +44,18 @@ namespace
 	constexpr float CardFadeOutSeconds = 0.4f;
 	/** 结算期间多久重新扫一次视口控件（新弹出的 HUD 也要藏起来） */
 	constexpr float HudSuppressInterval = 0.25f;
+
+	/** 结算演出时间轴（秒）：明细逐行 → 四宫格汇总 → 评级盖章 → 昨日对比 → 庆祝收尾 */
+	constexpr float RevealRowStart = 0.35f;
+	constexpr float RevealRowStep = 0.22f;
+	constexpr float RevealRowRoll = 0.26f;
+	constexpr float RevealTileStart = 1.78f;
+	constexpr float RevealTileStep = 0.10f;
+	constexpr float RevealTileRoll = 0.32f;
+	constexpr float RevealGradeAt = 2.62f;
+	constexpr float RevealCompareAt = 2.92f;
+	constexpr float RevealBannerAt = 3.06f;
+	constexpr float RevealDoneAt = 3.60f;
 
 	/** 每个本地玩家只保留一张卡，避免多人同屏重复创建 */
 	TMap<TWeakObjectPtr<APlayerController>, TWeakObjectPtr<USeasonDailyCardWidget>> ActiveCards;
@@ -157,6 +172,32 @@ namespace
 		default:                      return TEXT("不佳");
 		}
 	}
+
+	/** 结算横幅文案与配色：评级揭晓时从“今日小结”翻成结果 */
+	struct FBannerStyle
+	{
+		FString Phrase;
+		FLinearColor Fill;
+		FLinearColor Rim;
+		FLinearColor Ink;
+	};
+
+	FBannerStyle MakeBannerStyle(ESeasonGrade Grade)
+	{
+		switch (Grade)
+		{
+		case ESeasonGrade::Excellent:
+			return { TEXT("S 极评 · 大丰收！"), DailyCardColor(TEXT("FFF0C4")), DailyCardColor(TEXT("F0B93F")), DailyCardColor(TEXT("A76513")) };
+		case ESeasonGrade::Great:
+			return { TEXT("A 优评 · 干得漂亮！"), DailyCardColor(TEXT("EAF3DE")), DailyCardColor(TEXT("B9CE93")), DailyCardColor(TEXT("527D32")) };
+		case ESeasonGrade::Good:
+			return { TEXT("B 良评 · 稳步前进"), DailyCardColor(TEXT("E2EDF8")), DailyCardColor(TEXT("A5BED4")), DailyCardColor(TEXT("28657F")) };
+		case ESeasonGrade::Fair:
+			return { TEXT("C 平评 · 还有提升空间"), DailyCardColor(TEXT("FBE8DB")), DailyCardColor(TEXT("D9B59A")), DailyCardColor(TEXT("A96B2D")) };
+		default:
+			return { TEXT("D 不佳 · 明日再战"), DailyCardColor(TEXT("F6DFE2")), DailyCardColor(TEXT("D8A8AF")), DailyCardColor(TEXT("A54351")) };
+		}
+	}
 }
 
 class SRevenueChart : public SLeafWidget
@@ -271,6 +312,18 @@ private:
 	FSlateRoundedBoxBrush PointBrush = FSlateRoundedBoxBrush(DailyCardColor(TEXT("A4BD79")), 6.f, DailyCardColor(TEXT("6D8B43")), 1.5f);
 };
 
+USeasonDailyCardWidget::USeasonDailyCardWidget(const FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer)
+{
+	// 结算演出音效：金币“嗒”声逐行累加、UI 盖章、A/S 评级胜利小段
+	static ConstructorHelpers::FObjectFinder<USoundBase> TickFinder(TEXT("/Game/StackOBot/Audio/SFX/Waves/SFX_Coin_Collect.SFX_Coin_Collect"));
+	static ConstructorHelpers::FObjectFinder<USoundBase> StampFinder(TEXT("/Game/Audio/SFX/MS_UI_Select.MS_UI_Select"));
+	static ConstructorHelpers::FObjectFinder<USoundBase> WinFinder(TEXT("/Game/Audio/MUSIC/Waves/MUS_Crop_Win_Long_All.MUS_Crop_Win_Long_All"));
+	RowTickSound = TickFinder.Object;
+	StampSound = StampFinder.Object;
+	WinSound = WinFinder.Object;
+}
+
 void USeasonDailyCardWidget::ShowForPlayer(APlayerController* PC, const USeasonSystem* Season, bool bAwaitNextDay)
 {
 	if (!PC || !PC->IsLocalController() || !Season)
@@ -301,6 +354,8 @@ void USeasonDailyCardWidget::ShowForPlayer(APlayerController* PC, const USeasonS
 	}
 
 	Card->bInteractive = bAwaitNextDay;
+	Card->bRevealFinished = false;
+	Card->bRevealActive = false;
 	Card->Apply(Season);
 	Card->Elapsed = 0.f;
 	Card->HudSuppressAccum = 0.f;
@@ -359,21 +414,21 @@ void USeasonDailyCardWidget::ApplyLayout(bool bCentered)
 	{
 		DailyCardWidth->SetWidthOverride(Width);
 	}
-	for (UTextBlock* Block : {StatsText, NetText, SeasonText, HintText})
+	for (UTextBlock* Block : {StatsText, NetText, SeasonText, HintText, CompareText})
 	{
-		Block->SetWrapTextAt(Width - 96.f);
+		if (Block)
+		{
+			Block->SetWrapTextAt(Width - 96.f);
+		}
 	}
 	for (const FName Name : {FName(TEXT("FinancialHeader")), FName(TEXT("FinancialBody"))})
 	{
 		WidgetTree->FindWidget(Name)->SetVisibility(bCentered ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
 	}
 	NetText->SetVisibility(bCentered ? ESlateVisibility::Collapsed : ESlateVisibility::HitTestInvisible);
-	for (const FName Name : {FName(TEXT("GardenBackdrop")), FName(TEXT("BackdropWash"))})
+	if (UWidget* Backdrop = WidgetTree->FindWidget(TEXT("BackdropBlur")))
 	{
-		if (UWidget* Backdrop = WidgetTree->FindWidget(Name))
-		{
-			Backdrop->SetVisibility(bCentered ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
-		}
+		Backdrop->SetVisibility(bCentered ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
 	}
 
 	ForceLayoutPrepass();
@@ -423,6 +478,8 @@ void USeasonDailyCardWidget::Dismiss()
 {
 	bShowing = false;
 	bInteractive = false;
+	bRevealActive = false;
+	bRevealFinished = false;
 	Elapsed = 0.f;
 	SetUIInputEnabled(false);
 	SetVisibility(ESlateVisibility::HitTestInvisible);
@@ -430,12 +487,9 @@ void USeasonDailyCardWidget::Dismiss()
 	{
 		CardBorder->SetVisibility(ESlateVisibility::Collapsed);
 	}
-	for (const FName Name : {FName(TEXT("GardenBackdrop")), FName(TEXT("BackdropWash"))})
+	if (UWidget* Backdrop = WidgetTree->FindWidget(TEXT("BackdropBlur")))
 	{
-		if (UWidget* Backdrop = WidgetTree->FindWidget(Name))
-		{
-			Backdrop->SetVisibility(ESlateVisibility::Collapsed);
-		}
+		Backdrop->SetVisibility(ESlateVisibility::Collapsed);
 	}
 }
 
@@ -443,6 +497,12 @@ void USeasonDailyCardWidget::HandleNextDayClicked()
 {
 	if (!IsAwaitingNextDay())
 	{
+		return;
+	}
+	// 演出还没放完：第一次点击先把账目全部亮出来，再点才进入下一天
+	if (bRevealActive)
+	{
+		FinishReveal();
 		return;
 	}
 	if (APlayerController* PC = OwnerController.Get())
@@ -492,11 +552,18 @@ FReply USeasonDailyCardWidget::NativeOnPreviewKeyDown(const FGeometry& InGeometr
 
 	FSlateApplication& Slate = FSlateApplication::Get();
 	const EUINavigationAction Action = Slate.GetNavigationActionFromKey(InKeyEvent);
-	if (Action == EUINavigationAction::Accept)
+	if (Action == EUINavigationAction::Accept || InKeyEvent.GetKey() == EKeys::SpaceBar)
 	{
 		if (!InKeyEvent.IsRepeat())
 		{
-			HandleNextDayClicked();
+			if (bRevealActive)
+			{
+				FinishReveal();
+			}
+			else
+			{
+				HandleNextDayClicked();
+			}
 		}
 		return FReply::Handled();
 	}
@@ -513,6 +580,10 @@ FReply USeasonDailyCardWidget::NativeOnMouseButtonDown(const FGeometry& InGeomet
 {
 	if (IsAwaitingNextDay())
 	{
+		if (bRevealActive)
+		{
+			FinishReveal();
+		}
 		return FReply::Handled().SetUserFocus(NextDayButton->TakeWidget(), EFocusCause::Mouse);
 	}
 	return Super::NativeOnMouseButtonDown(InGeometry, InMouseEvent);
@@ -535,19 +606,17 @@ TSharedRef<SWidget> USeasonDailyCardWidget::RebuildWidget()
 	UCanvasPanel* Root = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("Root"));
 	WidgetTree->RootWidget = Root;
 
-	UImage* Backdrop = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), TEXT("GardenBackdrop"));
-	Backdrop->SetBrushFromTexture(LoadObject<UTexture2D>(nullptr, TEXT("/Game/_Demo/Textures/Role/T_CharacterSelectGarden")));
-	Backdrop->SetVisibility(ESlateVisibility::Collapsed);
-	UCanvasPanelSlot* BackdropSlot = Root->AddChildToCanvas(Backdrop);
-	BackdropSlot->SetAnchors(FAnchors(0.f, 0.f, 1.f, 1.f));
-	BackdropSlot->SetOffsets(FMargin(0.f));
-
-	UBorder* Wash = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("BackdropWash"));
-	Wash->SetBrushColor(DailyCardColor(TEXT("FFF9E7")).CopyWithNewOpacity(0.28f));
-	Wash->SetVisibility(ESlateVisibility::Collapsed);
-	UCanvasPanelSlot* WashSlot = Root->AddChildToCanvas(Wash);
-	WashSlot->SetAnchors(FAnchors(0.f, 0.f, 1.f, 1.f));
-	WashSlot->SetOffsets(FMargin(0.f));
+	// 结算背景：实时模糊身后的场景（不再铺花园图 / 奶油蒙层）
+	UBackgroundBlur* BackdropBlur = WidgetTree->ConstructWidget<UBackgroundBlur>(UBackgroundBlur::StaticClass(), TEXT("BackdropBlur"));
+	BackdropBlur->SetBlurStrength(12.f);
+	BackdropBlur->SetApplyAlphaToBlur(false);
+	BackdropBlur->SetPadding(FMargin(0.f));
+	BackdropBlur->SetHorizontalAlignment(HAlign_Fill);
+	BackdropBlur->SetVerticalAlignment(VAlign_Fill);
+	BackdropBlur->SetVisibility(ESlateVisibility::Collapsed);
+	UCanvasPanelSlot* BlurSlot = Root->AddChildToCanvas(BackdropBlur);
+	BlurSlot->SetAnchors(FAnchors(0.f, 0.f, 1.f, 1.f));
+	BlurSlot->SetOffsets(FMargin(0.f));
 
 	CardBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Card"));
 	CardBorder->SetPadding(FMargin(9.f));
@@ -598,7 +667,16 @@ TSharedRef<SWidget> USeasonDailyCardWidget::RebuildWidget()
 
 	DayText = Text(WidgetTree, TEXT("Day"), FText(), 20, TEXT("966C43"));
 	DayText->SetJustification(ETextJustify::Center);
-	Column->AddChildToVerticalBox(DayText)->SetPadding(FMargin(0.f, 4.f, 0.f, 20.f));
+	Column->AddChildToVerticalBox(DayText)->SetPadding(FMargin(0.f, 4.f, 0.f, 12.f));
+
+	// 结算横幅：平时占位“今日小结”，评级揭晓时翻成结果文案并弹一下（预留高度，避免卡片重排）
+	BannerPanel = Panel(WidgetTree, TEXT("BannerPanel"), TEXT("F4EBCF"), TEXT("DECBA4"), 14.f);
+	BannerPanel->SetPadding(FMargin(16.f, 7.f));
+	BannerPanel->SetRenderTransformPivot(FVector2D(0.5f, 0.5f));
+	BannerText = Text(WidgetTree, TEXT("BannerText"), FText::FromString(TEXT("今日小结")), 25, TEXT("966C43"));
+	BannerText->SetJustification(ETextJustify::Center);
+	BannerPanel->SetContent(BannerText);
+	Column->AddChildToVerticalBox(BannerPanel)->SetPadding(FMargin(0.f, 0.f, 0.f, 16.f));
 
 	UHorizontalBox* Metrics = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("FinancialHeader"));
 	Column->AddChildToVerticalBox(Metrics)->SetPadding(FMargin(0.f, 0.f, 0.f, 18.f));
@@ -670,11 +748,12 @@ TSharedRef<SWidget> USeasonDailyCardWidget::RebuildWidget()
 	NetText->SetAutoWrapText(true);
 	Column->AddChildToVerticalBox(NetText)->SetPadding(FMargin(0.f, 0.f, 0.f, 12.f));
 
-	UBorder* GradePanel = Panel(WidgetTree, TEXT("GradePanel"), TEXT("F4EBCF"), TEXT("DECBA4"), 18.f);
+	GradePanel = Panel(WidgetTree, TEXT("GradePanel"), TEXT("F4EBCF"), TEXT("DECBA4"), 18.f);
 	UHorizontalBox* GradeRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("GradeRow"));
 	GradePanel->SetContent(GradeRow);
-	Column->AddChildToVerticalBox(GradePanel)->SetPadding(FMargin(0.f, 0.f, 0.f, 12.f));
+	Column->AddChildToVerticalBox(GradePanel)->SetPadding(FMargin(0.f, 0.f, 0.f, 8.f));
 	GradeText = Text(WidgetTree, TEXT("Grade"), FText(), 34, TEXT("A76513"));
+	GradeText->SetRenderTransformPivot(FVector2D(0.5f, 0.5f));
 	UHorizontalBoxSlot* GradeSlot = GradeRow->AddChildToHorizontalBox(GradeText);
 	GradeSlot->SetPadding(FMargin(4.f, 0.f, 16.f, 0.f));
 	GradeSlot->SetVerticalAlignment(VAlign_Center);
@@ -684,6 +763,13 @@ TSharedRef<SWidget> USeasonDailyCardWidget::RebuildWidget()
 	GradeMeta->AddChildToVerticalBox(ScoreText);
 	GradeLabelText = Text(WidgetTree, TEXT("GradeLabel"), FText(), 15, TEXT("75512C"));
 	GradeMeta->AddChildToVerticalBox(GradeLabelText);
+
+	// 昨日对比：进步 / 持平 / 落后，评级揭晓后再亮出
+	CompareText = Text(WidgetTree, TEXT("Compare"), FText::FromString(TEXT("昨日 —")), 18, TEXT("966C43"));
+	CompareText->SetJustification(ETextJustify::Center);
+	CompareText->SetAutoWrapText(true);
+	Column->AddChildToVerticalBox(CompareText)->SetPadding(FMargin(0.f, 0.f, 0.f, 10.f));
+
 	StatsText = Text(WidgetTree, TEXT("Stats"), FText(), 18, TEXT("75512C"));
 	StatsText->SetAutoWrapText(true);
 	UHorizontalBoxSlot* StatsSlot = GradeRow->AddChildToHorizontalBox(StatsText);
@@ -837,6 +923,300 @@ void USeasonDailyCardWidget::Apply(const USeasonSystem* Season)
 			HintPanel->SetVisibility(!bTrialComplete && Season->LastHint.IsEmpty() ? ESlateVisibility::Collapsed : ESlateVisibility::SelfHitTestInvisible);
 		}
 	}
+
+	// 评级 / 昨日对比 / 横幅：先按最终结果算好，演出时再逐段亮出
+	RevealSeason = const_cast<USeasonSystem*>(Season);
+	RevealGrade = Grade;
+	RevealScore = Season->LastGradeScore;
+	bRevealHasPrevDay = Season->bHasPreviousDay;
+	RevealPrevGrade = Season->PreviousGrade;
+	RevealPrevScore = Season->PreviousGradeScore;
+	ApplyCompareVisual();
+	ApplyBannerVisual();
+
+	if (bInteractive && !bRevealFinished)
+	{
+		StartReveal(Season);
+	}
+}
+
+void USeasonDailyCardWidget::PlayRevealCue(USoundBase* Sound, float Volume, float Pitch) const
+{
+	if (Sound)
+	{
+		UGameplayStatics::PlaySound2D(this, Sound, Volume, Pitch);
+	}
+}
+
+void USeasonDailyCardWidget::SetRollingValue(UTextBlock* Block, int64 Target, float Progress, bool bSigned) const
+{
+	if (!Block)
+	{
+		return;
+	}
+	const int64 Shown = static_cast<int64>(FMath::RoundToDouble(static_cast<double>(Target) * static_cast<double>(Progress)));
+	const FString Num = FText::AsNumber(Shown).ToString();
+	Block->SetText(FText::FromString(bSigned && Shown > 0 ? FString(TEXT("+")) + Num : Num));
+}
+
+void USeasonDailyCardWidget::StartReveal(const USeasonSystem* Season)
+{
+	if (!Season)
+	{
+		return;
+	}
+
+	const FDailyFinancialRecord* Record = Season->DailyFinancialHistory.IsEmpty() ? nullptr : &Season->DailyFinancialHistory.Last();
+	const int64 Revenue = Record ? Record->Revenue : 0;
+	const int64 OperatingExpense = Record ? Record->OperatingExpense : 0;
+	const int64 Investment = Record ? Record->Investment : Season->LastDailyInvestment;
+	const int64 Cash = Record ? Record->Cash : Season->LastMoney;
+	const int64 Profit = Revenue - OperatingExpense;
+	RowTargets[0] = Revenue;
+	RowTargets[1] = -OperatingExpense;
+	RowTargets[2] = Profit;
+	RowTargets[3] = -Investment;
+	RowTargets[4] = Profit - Investment;
+	RowTargets[5] = Record ? Record->UnpaidBills : 0;
+	TileTargets[0] = Revenue;
+	TileTargets[1] = OperatingExpense;
+	TileTargets[2] = Profit;
+	TileTargets[3] = Cash;
+
+	bRevealActive = true;
+	RevealTime = 0.f;
+	RevealRowsSounded = 0;
+	RevealTilesSounded = 0;
+	bRevealGradeShown = false;
+	bRevealCompareShown = false;
+	bRevealBannerShown = false;
+
+	// 全部归零：明细一行行滚出来，四宫格紧随其后汇总
+	for (UTextBlock* Value : DetailValues)
+	{
+		if (Value)
+		{
+			Value->SetText(FText::FromString(TEXT("0")));
+		}
+	}
+	for (UTextBlock* Tile : {RevenueText, ExpenseText, ProfitText, CashText})
+	{
+		if (Tile)
+		{
+			Tile->SetText(FText::FromString(TEXT("0")));
+		}
+	}
+	if (GradeText)
+	{
+		GradeText->SetText(FText::FromString(TEXT("？")));
+		GradeText->SetColorAndOpacity(FSlateColor(DailyCardColor(TEXT("966C43"))));
+		GradeText->SetRenderScale(FVector2D(1.f));
+	}
+	if (ScoreText)
+	{
+		ScoreText->SetText(FText::FromString(TEXT("— 分")));
+	}
+	if (GradeLabelText)
+	{
+		GradeLabelText->SetText(FText::FromString(TEXT("结算中…")));
+	}
+	if (CompareText)
+	{
+		CompareText->SetText(FText::FromString(TEXT("昨日 —")));
+		CompareText->SetColorAndOpacity(FSlateColor(DailyCardColor(TEXT("966C43"))));
+	}
+	if (BannerPanel)
+	{
+		BannerPanel->SetBrush(FSlateRoundedBoxBrush(DailyCardColor(TEXT("F4EBCF")), 14.f, DailyCardColor(TEXT("DECBA4")), 2.f));
+		BannerPanel->SetRenderScale(FVector2D(1.f));
+	}
+	if (BannerText)
+	{
+		BannerText->SetText(FText::FromString(TEXT("今日小结")));
+		BannerText->SetColorAndOpacity(FSlateColor(DailyCardColor(TEXT("966C43"))));
+	}
+	if (GradePanel)
+	{
+		GradePanel->SetBrush(FSlateRoundedBoxBrush(DailyCardColor(TEXT("F4EBCF")), 18.f, DailyCardColor(TEXT("DECBA4")), 2.f));
+	}
+	// 改进提示里包含“再 +N 分升 A”，先藏起来别剧透；收尾时由 Apply 恢复
+	if (UWidget* HintPanel = WidgetTree->FindWidget(TEXT("HintPanel")))
+	{
+		HintPanel->SetVisibility(ESlateVisibility::Hidden);
+	}
+}
+
+void USeasonDailyCardWidget::UpdateReveal(float DeltaTime)
+{
+	if (!bRevealActive)
+	{
+		return;
+	}
+	RevealTime += DeltaTime;
+
+	for (int32 Index = 0; Index < DetailValues.Num() && Index < 6; ++Index)
+	{
+		const float Start = RevealRowStart + RevealRowStep * Index;
+		if (RevealTime < Start)
+		{
+			continue;
+		}
+		const float Progress = FMath::Clamp((RevealTime - Start) / RevealRowRoll, 0.f, 1.f);
+		SetRollingValue(DetailValues[Index], RowTargets[Index], 1.f - FMath::Pow(1.f - Progress, 3.f), Index != 5);
+		if ((RevealRowsSounded & (1 << Index)) == 0)
+		{
+			RevealRowsSounded |= (1 << Index);
+			PlayRevealCue(RowTickSound, 0.34f, 0.98f + 0.05f * Index);
+		}
+	}
+
+	UTextBlock* TileBlocks[4] = {RevenueText, ExpenseText, ProfitText, CashText};
+	for (int32 Index = 0; Index < 4; ++Index)
+	{
+		const float Start = RevealTileStart + RevealTileStep * Index;
+		if (!TileBlocks[Index] || RevealTime < Start)
+		{
+			continue;
+		}
+		const float Progress = FMath::Clamp((RevealTime - Start) / RevealTileRoll, 0.f, 1.f);
+		SetRollingValue(TileBlocks[Index], TileTargets[Index], 1.f - FMath::Pow(1.f - Progress, 3.f), Index == 2);
+		if ((RevealTilesSounded & (1 << Index)) == 0)
+		{
+			RevealTilesSounded |= (1 << Index);
+			PlayRevealCue(RowTickSound, 0.26f, 1.18f + 0.06f * Index);
+		}
+	}
+
+	if (!bRevealGradeShown && RevealTime >= RevealGradeAt)
+	{
+		bRevealGradeShown = true;
+		PlayRevealCue(StampSound, 0.9f);
+		if (const USeasonSystem* Season = RevealSeason.Get())
+		{
+			if (GradeText)
+			{
+				GradeText->SetText(FText::FromString(Season->GetGradeName(RevealGrade)));
+				GradeText->SetColorAndOpacity(FSlateColor(GradeColor(RevealGrade)));
+			}
+		}
+		if (ScoreText)
+		{
+			ScoreText->SetText(FText::FromString(FString::Printf(TEXT("%d 分"), RevealScore)));
+		}
+		if (GradeLabelText)
+		{
+			GradeLabelText->SetText(FText::FromString(GradeLabel(RevealGrade)));
+		}
+		ApplyBannerVisual();
+		if (GradePanel)
+		{
+			GradePanel->SetBrush(RevealGrade >= ESeasonGrade::Great
+				? FSlateRoundedBoxBrush(DailyCardColor(TEXT("FFF0B8")), 18.f, DailyCardColor(TEXT("F0B93F")), 3.f)
+				: FSlateRoundedBoxBrush(DailyCardColor(TEXT("F4EBCF")), 18.f, DailyCardColor(TEXT("DECBA4")), 2.f));
+		}
+	}
+
+	// 评级盖章：从 1.45 倍弹回 1 倍
+	if (bRevealGradeShown && GradeText)
+	{
+		const float Pop = FMath::Clamp((RevealTime - RevealGradeAt) / 0.35f, 0.f, 1.f);
+		GradeText->SetRenderScale(FVector2D(1.f + 0.45f * (1.f - Pop) * (1.f - Pop)));
+	}
+
+	if (!bRevealCompareShown && RevealTime >= RevealCompareAt)
+	{
+		bRevealCompareShown = true;
+		ApplyCompareVisual();
+		PlayRevealCue(StampSound, 0.4f, 1.12f);
+	}
+
+	if (!bRevealBannerShown && RevealTime >= RevealBannerAt && RevealGrade >= ESeasonGrade::Great)
+	{
+		bRevealBannerShown = true;
+		PlayRevealCue(WinSound, 0.55f);
+	}
+	if (bRevealGradeShown && BannerPanel)
+	{
+		const float Pop = FMath::Clamp((RevealTime - RevealBannerAt) / 0.42f, 0.f, 1.f);
+		BannerPanel->SetRenderScale(FVector2D(RevealGrade >= ESeasonGrade::Great
+			? 1.f + 0.16f * FMath::Sin(Pop * PI) : 1.f));
+	}
+
+	if (RevealTime >= RevealDoneAt)
+	{
+		FinishReveal();
+	}
+}
+
+void USeasonDailyCardWidget::FinishReveal()
+{
+	if (!bRevealActive)
+	{
+		return;
+	}
+	bRevealActive = false;
+	bRevealFinished = true;
+	if (USeasonSystem* Season = RevealSeason.Get())
+	{
+		Apply(Season);
+	}
+	if (GradeText)
+	{
+		GradeText->SetRenderScale(FVector2D(1.f));
+	}
+	if (BannerPanel)
+	{
+		BannerPanel->SetRenderScale(FVector2D(1.f));
+	}
+}
+
+void USeasonDailyCardWidget::ApplyCompareVisual()
+{
+	if (!CompareText)
+	{
+		return;
+	}
+
+	FString Text;
+	FLinearColor Ink = DailyCardColor(TEXT("966C43"));
+	if (!bRevealHasPrevDay)
+	{
+		Text = TEXT("暂无昨日对比 · 明天就能看到进步");
+	}
+	else
+	{
+		const int32 Delta = RevealScore - RevealPrevScore;
+		const USeasonSystem* Season = RevealSeason.Get();
+		const FString PrevName = Season ? Season->GetGradeName(RevealPrevGrade) : FString(TEXT("—"));
+		if (Delta > 0)
+		{
+			Text = FString::Printf(TEXT("↑ 比昨日 +%d 分 · 昨日 %s"), Delta, *PrevName);
+			Ink = DailyCardColor(TEXT("527D32"));
+		}
+		else if (Delta < 0)
+		{
+			Text = FString::Printf(TEXT("↓ 比昨日 %d 分 · 昨日 %s"), Delta, *PrevName);
+			Ink = DailyCardColor(TEXT("A54351"));
+		}
+		else
+		{
+			Text = FString::Printf(TEXT("＝ 与昨日持平 · 昨日 %s"), *PrevName);
+		}
+	}
+	CompareText->SetText(FText::FromString(Text));
+	CompareText->SetColorAndOpacity(FSlateColor(Ink));
+}
+
+void USeasonDailyCardWidget::ApplyBannerVisual()
+{
+	if (!BannerText || !BannerPanel)
+	{
+		return;
+	}
+	const FBannerStyle Style = MakeBannerStyle(RevealGrade);
+	BannerText->SetText(FText::FromString(Style.Phrase));
+	BannerText->SetColorAndOpacity(FSlateColor(Style.Ink));
+	BannerPanel->SetBrush(FSlateRoundedBoxBrush(Style.Fill, 14.f, Style.Rim, 2.f));
 }
 
 void USeasonDailyCardWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
@@ -853,6 +1233,7 @@ void USeasonDailyCardWidget::NativeTick(const FGeometry& MyGeometry, float InDel
 		ApplyLayout(bInteractive);
 	}
 	Elapsed += InDeltaTime;
+	UpdateReveal(InDeltaTime);
 
 	// 结算期间新弹出的 HUD（打烊牌、缺货横幅、引导清单等）也要压下去
 	if (bInteractive)
@@ -896,6 +1277,7 @@ void USeasonDailyCardWidget::NativeDestruct()
 	}
 	bShowing = false;
 	bInteractive = false;
+	bRevealActive = false;
 	if (APlayerController* PC = OwnerController.Get())
 	{
 		ActiveCards.Remove(TWeakObjectPtr<APlayerController>(PC));
