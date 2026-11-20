@@ -66,6 +66,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GuestManager")
 	float SpawnInterval = 16.0f;
 
+	/** 开门后店内无客时，第一位客人的等待时间；后续仍使用正常来客间隔。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GuestManager|Pacing", meta = (ClampMin = "0.1", Units = "s"))
+	float FirstGuestArrivalDelay = 0.5f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|GuestManager|Pacing", meta = (ClampMin = "0.1"))
 	float FirstRushDelay = 12.0f;
 
