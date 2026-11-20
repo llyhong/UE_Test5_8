@@ -80,6 +80,32 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Food")
 	float MinCookSpeedMultiplier = 0.3f;
 
+	/** 杂货铺「煎锅升级」每级额外减少的烹饪时间比例（0.10 = 每级快 10%，对所有灶台生效） */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Food")
+	float CookSpeedBonusPerPanLevel = 0.10f;
+
+	/** 煎锅升级生效的最高等级（与商店售卖上限一致） */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Food")
+	int32 MaxPanUpgradeLevel = 3;
+
+	// ========== 商店解锁（榨汁机等设备） ==========
+	/** 需要购买的道具 ID（UEconomySystem 计数）：>0 时未购买就不能投入食材、不能做菜。
+	 *  榨汁机设备请填 EconomyShopItemIDs::Juicer(2005)。0 = 不限制（所有旧机器默认不受影响）。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Shop")
+	int32 RequiredShopItemID = 0;
+
+	/** 未解锁时是否隐藏整台设备（购买后“安装”出来）。仅 RequiredShopItemID>0 时生效 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Shop")
+	bool bHideUntilUnlocked = true;
+
+	/** 是否已购买解锁道具（RequiredShopItemID<=0 视为已解锁） */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Shop")
+	bool IsShopUnlocked() const;
+
+	/** 按解锁状态刷新显隐/碰撞（BeginPlay 自动调用一次，购买后由商店立即调用） */
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Shop")
+	void RefreshShopLock();
+
 	// ========== 烹饪刀具动画（可选） ==========
 	/** 约定：骨骼刀组件打 Tag "CookingKnife"，待机静态刀打 Tag "CookingKnifeIdle"，
 	 *  切菜动画配在骨骼 mesh 组件的 AnimationData 里。
@@ -116,6 +142,7 @@ public:
 	bool CanAddFoodMateral(int32 FoodMaterialID);//能否添加食材
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Food")
 	int GetMenuFood();//取餐
+	bool IsWaitingForPlate() const { return bWaitingForPlate; }
 
 
 
@@ -233,6 +260,7 @@ protected:
 	bool bNoPlateNotified = false;
 
 private:
+	bool bWaitingForPlate = false;
 	bool bAttentionPerformed = false;
 	bool UsesAttention() const;
 	ULocalPlayer* LocalPlayer;
