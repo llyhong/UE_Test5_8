@@ -3,6 +3,18 @@
 #include "UI/HUDWidget.h"
 #include "Game/EconomySystem.h"
 #include "Game/BaseLevelBP.h"
+#include "Game/TutorialTaskManager.h"
+#include "UI/TutorialGuideWidget.h"
+#include "Blueprint/UserWidget.h"
+#include "Blueprint/WidgetTree.h"
+#include "Components/Border.h"
+#include "Components/CanvasPanel.h"
+#include "Components/CanvasPanelSlot.h"
+#include "Components/Overlay.h"
+#include "Components/OverlaySlot.h"
+#include "Components/TextBlock.h"
+#include "Styling/CoreStyle.h"
+#include "GameFramework/PlayerController.h"
 
 void UHUDWidget::BindEconomy(UEconomySystem* Eco)
 {
@@ -33,6 +45,80 @@ void UHUDWidget::BindLevel(ABaseLevelBP* Level)
 		Level->OnLevelClosing.AddDynamic(this, &UHUDWidget::HandleLevelClosing);
 	}
 	RefreshGoal();
+}
+
+namespace
+{
+	/** 每日任务面板由 HUD 持有：按 HUD 记录唯一实例，避免分屏时每个玩家复制一份 */
+	struct FTutorialGuideBinding
+	{
+		TWeakObjectPtr<UTutorialGuideWidget> Guide;
+		bool bInsideHud = false;
+	};
+
+	TMap<UHUDWidget*, FTutorialGuideBinding> GTutorialGuides;
+}
+
+void UHUDWidget::EnsureTutorialGuide(ATutorialTaskManager* InManager)
+{
+	if (!IsValid(InManager))
+	{
+		return;
+	}
+
+	FTutorialGuideBinding& Binding = GTutorialGuides.FindOrAdd(this);
+	UTutorialGuideWidget* Guide = Binding.Guide.Get();
+	if (!Guide)
+	{
+		APlayerController* PC = GetOwningPlayer();
+		Guide = PC
+			? CreateWidget<UTutorialGuideWidget>(PC, UTutorialGuideWidget::StaticClass())
+			: CreateWidget<UTutorialGuideWidget>(GetWorld(), UTutorialGuideWidget::StaticClass());
+		if (!Guide)
+		{
+			return;
+		}
+		Guide->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+
+		// 优先并入 WBP_HUD 自己的控件树，让每日任务和常驻 HUD 共用同一层、同一生命周期；
+		// 分屏时 HUD 只有一份，任务面板也就只显示一次。
+		Binding.bInsideHud = false;
+		if (UWidgetTree* Tree = WidgetTree)
+		{
+			if (UCanvasPanel* Canvas = Cast<UCanvasPanel>(Tree->RootWidget))
+			{
+				if (UCanvasPanelSlot* GuideSlot = Canvas->AddChildToCanvas(Guide))
+				{
+					GuideSlot->SetAnchors(FAnchors(0.f, 0.f, 1.f, 1.f));
+					GuideSlot->SetOffsets(FMargin(0.f));
+					GuideSlot->SetAlignment(FVector2D(0.f, 0.f));
+					// 画布内压在本 HUD 其它元素之上，但仍低于订单/赛季等独立面板
+					GuideSlot->SetZOrder(60);
+					Binding.bInsideHud = true;
+				}
+			}
+			else if (UOverlay* Overlay = Cast<UOverlay>(Tree->RootWidget))
+			{
+				if (UOverlaySlot* GuideSlot = Overlay->AddChildToOverlay(Guide))
+				{
+					GuideSlot->SetHorizontalAlignment(HAlign_Fill);
+					GuideSlot->SetVerticalAlignment(VAlign_Fill);
+					Binding.bInsideHud = true;
+				}
+			}
+		}
+
+		// 根控件不是画布/Overlay 时（例如蓝图结构被改动）退回主玩家屏幕，保证功能不丢。
+		if (!Binding.bInsideHud && !Guide->AddToPlayerScreen(60))
+		{
+			Guide->RemoveFromParent();
+			GTutorialGuides.Remove(this);
+			return;
+		}
+		Binding.Guide = Guide;
+	}
+
+	Guide->SetManager(InManager);
 }
 
 void UHUDWidget::RefreshGoal()
@@ -70,6 +156,14 @@ void UHUDWidget::RefreshGoal()
 
 void UHUDWidget::NativeDestruct()
 {
+	if (FTutorialGuideBinding* Binding = GTutorialGuides.Find(this))
+	{
+		if (UTutorialGuideWidget* Guide = Binding->Guide.Get())
+		{
+			Guide->RemoveFromParent();
+		}
+		GTutorialGuides.Remove(this);
+	}
 	if (CachedLevel)
 	{
 		CachedLevel->LevelUpdateScore.RemoveDynamic(this, &UHUDWidget::HandleLevelScoreChanged);
@@ -89,6 +183,51 @@ void UHUDWidget::NativeDestruct()
 void UHUDWidget::SetClock(float CurrentHour, bool bIsOpen)
 {
 	OnClockChanged(CurrentHour, bIsOpen);
+}
+
+void UHUDWidget::SetKitchenPlateHint(int32 CleanPlates)
+{
+	static const FName HintName(TEXT("KitchenPlateHint"));
+	const bool bShow = CleanPlates == 0 || CleanPlates == 1;
+	UBorder* Hint = Cast<UBorder>(GetWidgetFromName(HintName));
+	if (!bShow)
+	{
+		if (Hint)
+		{
+			Hint->SetVisibility(ESlateVisibility::Collapsed);
+		}
+		return;
+	}
+
+	if (!Hint)
+	{
+		UCanvasPanel* Canvas = WidgetTree ? Cast<UCanvasPanel>(WidgetTree->RootWidget) : nullptr;
+		if (!Canvas)
+		{
+			return;
+		}
+		Hint = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), HintName);
+		Hint->SetBrushColor(FLinearColor(0.12f, 0.07f, 0.04f, 0.92f));
+		Hint->SetPadding(FMargin(16.f, 8.f));
+		UTextBlock* Label = WidgetTree->ConstructWidget<UTextBlock>();
+		Label->SetFont(FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 17));
+		Hint->SetContent(Label);
+
+		UCanvasPanelSlot* HintSlot = Canvas->AddChildToCanvas(Hint);
+		HintSlot->SetAnchors(FAnchors(0.5f, 1.f));
+		HintSlot->SetAlignment(FVector2D(0.5f, 1.f));
+		HintSlot->SetPosition(FVector2D(0.f, -72.f));
+		HintSlot->SetAutoSize(true);
+		HintSlot->SetZOrder(20);
+	}
+
+	UTextBlock* Label = CastChecked<UTextBlock>(Hint->GetContent());
+	Label->SetColorAndOpacity(FSlateColor(CleanPlates == 0
+		? FLinearColor(1.f, 0.65f, 0.5f) : FLinearColor(1.f, 0.88f, 0.61f)));
+	Label->SetText(CleanPlates == 0
+		? NSLOCTEXT("KitchenPlate", "NoCleanPlates", "没有干净盘子了 · 按 E 收空盘，送到洗碗机")
+		: NSLOCTEXT("KitchenPlate", "OneCleanPlate", "还剩 1 个干净盘 · 可以收盘送洗"));
+	Hint->SetVisibility(ESlateVisibility::HitTestInvisible);
 }
 
 FString UHUDWidget::FormatClock(float CurrentHour)
