@@ -183,7 +183,7 @@ public:
 	 *   false = 客人吃完直接离座、桌面立即清空，无需收碟环节。
 	 *  客人落座时会读取此值；运行时调用 SetDirtyPlateFlow 可立即影响在场客人。 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Gameplay|Plate")
-	bool bUseDirtyPlateFlow = false;
+	bool bUseDirtyPlateFlow = true;
 
 	/** 空碟玩法开关变化广播（参数 = 新值），蓝图可据此刷新提示 */
 	UPROPERTY(BlueprintAssignable, Category = "Shoot|Gameplay|Plate")

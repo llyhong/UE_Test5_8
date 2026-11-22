@@ -14,6 +14,7 @@ class USizeBox;
 class UTextBlock;
 class UHorizontalBoxSlot;
 class APlayerController;
+class UTexture2D;
 
 /** 单条弹窗队列项：首次发现 / 普通提示共用同一套卡片 */
 USTRUCT()
@@ -50,6 +51,16 @@ public:
 	/** 向指定本地玩家弹出一条普通提示卡片 */
 	static void ShowMessage(APlayerController* PC, const FString& Title, const FString& Body, FLinearColor Accent);
 
+	/** 野外采摘提示：屏幕右侧显示食材 Icon +【食材名】，停留 2 秒后淡出；每次弹出独立一张卡 */
+	static void ShowHarvestHint(APlayerController* PC, const FString& ItemName, UTexture2D* ItemIcon = nullptr);
+
+	/** 采摘提示堆叠到第几层（0 = 最新，靠屏幕右侧中部） */
+	void SetHarvestHintStackIndex(int32 Index);
+
+	/** 编辑器专用：把提示卡控件树写入 UI_2D 下的 WBP，便于在 UMG 设计器里可视化调整 */
+	UFUNCTION(BlueprintCallable, Category = "Shoot|UI")
+	static void BuildVisualWidgetBlueprint(const FString& AssetPath);
+
 	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
 	virtual void NativeDestruct() override;
 
@@ -60,6 +71,7 @@ private:
 	void Enqueue(const FDiscoveryToastEntry& Entry);
 	void BeginNext();
 	void ApplyVisual(const FDiscoveryToastEntry& Entry);
+	void BindNamedWidgets();
 
 	UPROPERTY()
 	TArray<FDiscoveryToastEntry> Queue;

@@ -702,6 +702,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Shoot|UI")
 	void ShowSimpleToast(const FString& Title, const FString& Body, FLinearColor Accent);
 
+	/** 野外采摘反馈：屏幕右侧显示 Icon +【食材名】，2 秒后淡出（仅本地玩家） */
+	void ShowHarvestHint(const FString& ItemName, UTexture2D* ItemIcon = nullptr);
+
 	/** 首次发现：读取物品键写入 GameInstance 存档；首次发现时弹出发现卡片 */
 	void TryDiscoverItem(AItemActor* Item);
 

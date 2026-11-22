@@ -29,7 +29,7 @@ public class Shoot : ModuleRules
 		PrivateDependencyModuleNames.AddRange(new string[] { "SlateCore", "CommonInput" });
 		if (Target.bBuildEditor)
 		{
-			PrivateDependencyModuleNames.AddRange(new string[] { "RenderCore", "ImageCore" });
+			PrivateDependencyModuleNames.AddRange(new string[] { "RenderCore", "ImageCore", "UnrealEd", "UMGEditor" });
 		}
 
 		PublicIncludePaths.AddRange(new string[] {

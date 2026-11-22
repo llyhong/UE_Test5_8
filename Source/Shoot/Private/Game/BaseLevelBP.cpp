@@ -336,7 +336,11 @@ void ABaseLevelBP::RefreshKitchenPlateFlow(const UTimeSystem& TimeSystem)
 	ADishwasher* Washer = Cast<ADishwasher>(UGameplayStatics::GetActorOfClass(this, ADishwasher::StaticClass()));
 	const bool bEnable = Washer != nullptr;
 	const bool bUseLimitedSupply = bEnable && (bAfterFirstMonth || TimeSystem.Day >= 4);
-	GI->SetDirtyPlateFlow(bEnable);
+	// 方案1：空碟玩法默认开启。World Partition 关卡在 BeginPlay 时外部 Actor 可能尚未加载，
+	// GetActorOfClass 会低估为"没有洗碗机"；若照旧 SetDirtyPlateFlow(false)，会把默认值(true=留空碟)
+	// 覆盖，导致客人吃完直接清桌。这里无条件开启，退出关卡时由 EndPlay 统一关闭。
+	// A/B 对比可在运行时用切换命令临时关闭，不受 BeginPlay 影响。
+	GI->SetDirtyPlateFlow(true);
 	if (bUseLimitedSupply)
 	{
 		if (PlateSystem->IsInfinitePlates())

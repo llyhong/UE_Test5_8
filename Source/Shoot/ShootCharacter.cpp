@@ -2072,9 +2072,11 @@ void AShootCharacter::BuildInteractionOptions(TArray<FInteractOption, TInlineAll
 				}
 
 				const FString ItemName = Loose->GetItemDisplayName();
+				UTexture2D* ItemIcon = Loose->GetItemIcon(); // 物体会在入篮时销毁，图标先缓存
 				// 篮子满时 StoreHarvestInBasket 内部会给提示；同样消费按键，不把篮子放下
 				if (StoreHarvestInBasket(Loose, 1)) // 成功后世界上的物体已被销毁，之后不能再访问 Loose
 				{
+					ShowHarvestHint(ItemName, ItemIcon);
 					RefreshBestOverlappingItem(); // 已销毁的引用会在重选时清理，并切到下一个目标
 					PlayGatheringMontage();
 					if (GEngine)
@@ -2379,11 +2381,13 @@ void AShootCharacter::TickRangePick(float DeltaTime)
 	if (AItemActor* Item = FindNearestRangePickItem())
 	{
 		RangePickCooldown = RangePickInterval;
-		const FString ItemName = Item->GetName();
+		const FString ItemName = Item->GetItemDisplayName();
+		UTexture2D* ItemIcon = Item->GetItemIcon(); // 入篮/入包可能销毁物体，图标先缓存
 		// 手上拿着外出背包：能入篮的食材优先装进篮子（"带篮子捡鸡蛋"等任务按篮内数量计），
 		// 不能入篮 / 篮子已满时才退回原逻辑收进背包
 		if (GetEquippedBasket() && Item->bCanStoreInBasket && StoreHarvestInBasket(Item, 1)) // 成功后 Item 已销毁
 		{
+			ShowHarvestHint(ItemName, ItemIcon);
 			RemoveOverlappingItem(Item);
 			RefreshBestOverlappingItem();
 			if (GEngine)
@@ -2394,6 +2398,7 @@ void AShootCharacter::TickRangePick(float DeltaTime)
 		}
 		else if (AddItemToInventory(Item)) // 内部销毁世界物体，之后不能再访问 Item
 		{
+			ShowHarvestHint(ItemName, ItemIcon);
 			RemoveOverlappingItem(Item);
 			if (GEngine)
 			{
@@ -2805,8 +2810,11 @@ void AShootCharacter::DoPick()
 			: true;
 		if (!bBusinessOpen && GI->bAutoStoreToBackpackWhileClosed && !Cast<AOutdoorBasket>(OverlappingItem))
 		{
-			AddItemToInventory(OverlappingItem); // 内部销毁世界物体并记入背包
-			PlayGatheringMontage(); // 收进背包时播放采集动画（此时动作状态为空闲，可正常播放）
+		const FString PickedItemName = OverlappingItem->GetItemDisplayName();
+		UTexture2D* PickedItemIcon = OverlappingItem->GetItemIcon(); // 入包会销毁物体，图标先缓存
+		AddItemToInventory(OverlappingItem); // 内部销毁世界物体并记入背包
+		ShowHarvestHint(PickedItemName, PickedItemIcon);
+		PlayGatheringMontage(); // 收进背包时播放采集动画（此时动作状态为空闲，可正常播放）
 			if (GEngine)
 			{
 				GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Green,
@@ -2835,7 +2843,17 @@ void AShootCharacter::DoPick()
 		// else
 		{
 			//如果不是番茄树的情况
+			AItemActor* PickedItem = OverlappingItem;
+			const FString PickedItemName = PickedItem->GetItemDisplayName();
+			UTexture2D* PickedItemIcon = PickedItem->GetItemIcon();
+			const bool bShowHarvestHint = PickedItem->GetMenuFoodID() < 0
+				&& !PickedItem->bIsEmptyPlate && !PickedItem->bIsDirtyPlate
+				&& !Cast<ADish>(PickedItem) && !Cast<AOutdoorBasket>(PickedItem);
 			SetPickingItemStatus();//这一个放在他的蓝图里处理
+			if (bShowHarvestHint)
+			{
+				ShowHarvestHint(PickedItemName, PickedItemIcon);
+			}
 			if (Cast<AOutdoorBasket>(OverlappingItem))
 			{
 				// 外出背包是“挂”在手上的，拾取时播放采集动画（AM_Gathering）而不是普通拾取动作
@@ -2874,8 +2892,11 @@ void AShootCharacter::DoPick()
 				UWorld* World = GetWorld();
 				AItemActor* Spawned = World->SpawnActor<AItemActor>(FoodSpawner->SpawnItemActorClass, GetActorLocation(), GetActorRotation());
 				if (!IsValid(Spawned)) return;
+				const FString SpawnedItemName = Spawned->GetItemDisplayName();
+				UTexture2D* SpawnedItemIcon = Spawned->GetItemIcon();
 				SetOverlappingItem(Spawned);
 				SetPickingItemStatus();
+				ShowHarvestHint(SpawnedItemName, SpawnedItemIcon);
 				FoodSpawner->OnSpawnActorEvent();//广播给蓝图（特效/音效等）
 				FoodSpawner->ConsumeOne();//消耗一个数量（空了就不会再生成）
 			}
@@ -3089,6 +3110,18 @@ void AShootCharacter::ShowSimpleToast(const FString& Title, const FString& Body,
 	if (APlayerController* PC = Cast<APlayerController>(GetController()))
 	{
 		UDiscoveryToastWidget::ShowMessage(PC, Title, Body, Accent);
+	}
+}
+
+void AShootCharacter::ShowHarvestHint(const FString& ItemName, UTexture2D* ItemIcon)
+{
+	if (!IsLocallyControlled())
+	{
+		return;
+	}
+	if (APlayerController* PC = Cast<APlayerController>(GetController()))
+	{
+		UDiscoveryToastWidget::ShowHarvestHint(PC, ItemName, ItemIcon);
 	}
 }
 

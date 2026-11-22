@@ -149,10 +149,10 @@ TSharedRef<SWidget> UTutorialGuideWidget::RebuildWidget()
 	ChecklistSize->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
 	if (UCanvasPanelSlot* BorderSlot = Root->AddChildToCanvas(ChecklistSize))
 	{
-		BorderSlot->SetAnchors(FAnchors(1.f, 0.5f));
-		BorderSlot->SetAlignment(FVector2D(1.f, 0.5f));
+		BorderSlot->SetAnchors(FAnchors(0.f, 0.5f));
+		BorderSlot->SetAlignment(FVector2D(0.f, 0.5f));
 		BorderSlot->SetAutoSize(true);
-		BorderSlot->SetPosition(FVector2D(-24.f, 0.f));
+		BorderSlot->SetPosition(FVector2D(24.f, 0.f));
 	}
 
 	ChecklistBorder = TutorialPanel(WidgetTree, TutorialColor(TEXT("FFF3D8")), 22.f, TutorialColor(TEXT("D4AA60")), 1.5f);

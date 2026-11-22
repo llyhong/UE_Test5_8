@@ -441,6 +441,9 @@ bool APlant::HarvestForCharacter(AShootCharacter* Character)
 	{
 		return false;
 	}
+	// 入篮/入包会销毁这个临时载体，先把名字和图标留下来给右侧采摘提示用
+	const FString HarvestItemName = Fruit->GetItemDisplayName();
+	UTexture2D* HarvestItemIcon = Fruit->GetItemIcon();
 	Fruit->bPickable = false;
 	// 营业中手采物会离手参与物理（投锅 / 抛掷）：Actor 级碰撞必须保留，
 	// 否则离手后没有任何地面接触，会直接穿过锅和地板一直下坠。打烊入包只是隐藏的数据载体，才关碰撞。
@@ -541,6 +544,7 @@ bool APlant::HarvestForCharacter(AShootCharacter* Character)
 	if (IsValid(Character))
 	{
 		Character->PlayHarvestEffect(PlantMesh ? PlantMesh->Bounds.Origin : GetActorLocation());
+		Character->ShowHarvestHint(HarvestItemName, HarvestItemIcon);
 	}
 	return true;
 }
@@ -1236,6 +1240,8 @@ bool APlant::Harvest()
 		SpawnedFruits.Empty();
 
 		bool bCollectedFruit = false;
+		FString HarvestItemName;
+		UTexture2D* HarvestItemIcon = nullptr;
 		// 生成配置数量的果实并逐个入背包（背包按 ItemClass 堆叠为同一槽位，Quantity=Yield）
 		for (int32 i = 0; i < Yield; i++)
 		{
@@ -1251,9 +1257,16 @@ bool APlant::Harvest()
 			if (Fruit)
 			{
 				Fruit->SetIngredientQuality(Quality); // 按当前整株熟度写入品质
+				const FString FruitName = Fruit->GetItemDisplayName(); // 入包可能销毁果实，名字先取出来
+				UTexture2D* FruitIcon = Fruit->GetItemIcon();
 				if (InteractingCharacter->AddItemToInventory(Fruit))
 				{
 					bCollectedFruit = true;
+					if (HarvestItemName.IsEmpty())
+					{
+						HarvestItemName = FruitName;
+						HarvestItemIcon = FruitIcon;
+					}
 				}
 				else
 				{
@@ -1266,6 +1279,7 @@ bool APlant::Harvest()
 		if (bCollectedFruit)
 		{
 			InteractingCharacter->PlayHarvestEffect(PlantMesh->Bounds.Origin);
+			InteractingCharacter->ShowHarvestHint(HarvestItemName, HarvestItemIcon);
 		}
 
 		// 解除与角色的交互注册，避免悬空引用
@@ -1286,10 +1300,17 @@ bool APlant::Harvest()
 	if (InteractingCharacter)
 	{
 		bool bFirst = true;
+		FString HarvestItemName;
+		UTexture2D* HarvestItemIcon = nullptr;
 		for (AItemActor* Fruit : SpawnedFruits)
 		{
 			if (Fruit)
 			{
+				if (bFirst)
+				{
+					HarvestItemName = Fruit->GetItemDisplayName();
+					HarvestItemIcon = Fruit->GetItemIcon();
+				}
 				// 离树：停止该果实的熟度计时（品质固定），并按其当前熟度写入品质
 				Fruit->StopRipening();
 				Fruit->SetIngredientQuality(Fruit->GetCurrentQuality());
@@ -1300,6 +1321,7 @@ bool APlant::Harvest()
 		if (!bFirst)
 		{
 			InteractingCharacter->PlayHarvestEffect(PlantMesh->Bounds.Origin);
+			InteractingCharacter->ShowHarvestHint(HarvestItemName, HarvestItemIcon);
 		}
 	}
 	else

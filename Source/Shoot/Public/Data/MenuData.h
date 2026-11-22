@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Engine/Texture2D.h"
+#include "Engine/StaticMesh.h"
 #include "Engine/DataTable.h"
 #include "MenuData.generated.h"
 
@@ -64,6 +65,20 @@ USTRUCT(BlueprintType)
 	/** 烹饪完成后生成的成品类（如"番茄炒鸡蛋"菜品对应的成品） */
 	UPROPERTY(EditAnywhere,BlueprintReadWrite, Category = "Shoot|Data")
 	TSubclassOf<AActor> CookedActorClass;
+
+	// ========== 用餐结束后留在桌上的空碟 / 空碗模型 ==========
+	/** 客人吃完留下的空碟模型；留空则保留成品原本的网格。
+	 *  例：煎鸡蛋 / 番茄炒蛋用 cc0_plate，炖番茄（番茄汤）用 bowl。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Plate", meta = (ToolTip = "客人吃完后留在桌上的空碟/空碗模型；留空则沿用成品原网格"))
+	TSoftObjectPtr<UStaticMesh> EmptyPlateMesh = nullptr;
+
+	/** 空碟模型挂到成品 ItemMesh 上时的缩放（默认 1，1，1） */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Plate")
+	FVector EmptyPlateScale = FVector::OneVector;
+
+	/** 空碟模型相对成品 ItemMesh 的位置偏移（默认不偏移） */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Plate")
+	FVector EmptyPlateLocationOffset = FVector::ZeroVector;
 
 	// ========== 订单属性（原 ULevelOrderCfg::Orders / FOrderData 里的字段，已合并到菜品行） ==========
 	/** 售价：完成含本菜品的订单时获得的金钱 / 分数（原 FOrderData::Price）。

@@ -395,6 +395,30 @@ void AChairSeat::SetDirtyPlate(AItemActor* Plate)
 	// 清掉碟上的食材，视觉上变成真正的“空碟”（只留盘子的网格）
 	Plate->OnClear();
 
+	// 空碟模型按菜品表配置（MenuDataTable / FMenuData::EmptyPlateMesh）替换：
+	// 煎蛋 / 番茄炒蛋用盘子，炖番茄（番茄汤）用碗；未配置时保留成品原网格。
+	if (UWorld* World = GetWorld())
+	{
+		if (UBaseGameInstance* GI = Cast<UBaseGameInstance>(World->GetGameInstance()))
+		{
+			if (GI->foodSystem && Plate->ItemMesh)
+			{
+				const FMenuData Menu = GI->foodSystem->GetMenuData(Plate->GetMenuFoodID());
+				if (!Menu.EmptyPlateMesh.IsNull())
+				{
+					if (UStaticMesh* EmptyMesh = Menu.EmptyPlateMesh.LoadSynchronous())
+					{
+						Plate->ItemMesh->SetStaticMesh(EmptyMesh);
+						Plate->ItemMesh->SetRelativeScale3D(Menu.EmptyPlateScale);
+						Plate->ItemMesh->SetRelativeLocation(Menu.EmptyPlateLocationOffset);
+						UE_LOG(LogTemp, Log, TEXT("[餐桌] 菜品 %d 用餐结束，空碟模型: %s"),
+							Plate->GetMenuFoodID(), *EmptyMesh->GetPathName());
+					}
+				}
+			}
+		}
+	}
+
 	// 空碟同样摆在挂点上，位置由蓝图里的 PlateSocket 调整
 	PlacePlateOnSocket(Plate);
 
