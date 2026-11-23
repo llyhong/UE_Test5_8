@@ -10,8 +10,10 @@
 #include "Game/BusinessTime.h"
 #include "Game/BusinessSimulation.h"
 #include "Data/MenuData.h"
+#include "Misc/ScopeExit.h"
 #include "Data/PlantInfo.h"
 #include "EngineUtils.h"
+#include "Kismet/GameplayStatics.h"
 #include "Item/FoodSpawner.h"
 #include "Item/ItemScatterSpawner.h"
 #include "Item/Plant.h"
@@ -93,6 +95,7 @@ void AOrderSystem::EndPlay(const EEndPlayReason::Type EndPlayReason)
 // Called every frame
 void AOrderSystem::Tick(float DeltaTime)
 {
+	RefreshKitchenShift();
 	if (UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetGameInstance()))
 	{
 		if (GI->businessSimulation && GI->businessSimulation->TimeSystem)
@@ -214,6 +217,7 @@ void AOrderSystem::InitCfg(ULevelOrderCfg* cfg)
 
 void AOrderSystem::RebuildOrderPool()
 {
+	ON_SCOPE_EXIT { UpdateKitchenShiftMenu(); };
 	OrderPool.Reset();
 	OrderWeights.Reset();
 	PoolBuiltDay = GetCurrentBusinessDay();
@@ -435,17 +439,32 @@ TArray<int32> AOrderSystem::GetAvailableDailyDishes() const
 	const UBaseGameInstance* GI = GetWorld() ? Cast<UBaseGameInstance>(GetWorld()->GetGameInstance()) : nullptr;
 	UFoodSystem* FS = GI ? GI->foodSystem.Get() : nullptr;
 	if (!FS) return Result;
+	TSet<int32> MenuIngredientIDs = CachedSuppliedItemIDs;
+	const int32 Day = GetCurrentBusinessDay();
+	if (Day >= 2 && Day <= 3 && UGameplayStatics::GetCurrentLevelName(this) == TEXT("Kitchen_New"))
+	{
+		// An empty box describes today's stock, not whether this recipe belongs on the menu.
+		// Keep the player's menu selections while the opening card tells them what to refill.
+		for (TActorIterator<AFoodSpawner> It(GetWorld()); It; ++It)
+			if (!It->IsDayLocked()) AddItemSupply(MenuIngredientIDs, It->SpawnItemActorClass);
+	}
 	for (const int32 ID : FS->GetFoodIDsByMachine(0))
 	{
 		const FMenuData Menu = FS->GetMenuData(ID);
 		FString Reason;
 		if (Menu.Price > 0 && Menu.Probabilitys > 0.f && !Menu.bRequiresWildIngredient
-			&& IsMenuServable(ID, CachedSuppliedItemIDs, Reason)
+			&& IsMenuServable(ID, MenuIngredientIDs, Reason)
 			&& IsMenuMachinePresent(ID, CachedAvailableMachineIDs, Reason))
 			Result.Add(ID);
 	}
 	Result.Sort();
 	return Result;
+}
+
+TArray<int32> AOrderSystem::GetTeachingOrderFoodIDs(int32 Day) const
+{
+	const FOrderData* Sequence = orderCfg ? orderCfg->DayFoodSequences.Find(Day) : nullptr;
+	return Sequence ? Sequence->FoodIDs : TArray<int32>();
 }
 
 bool AOrderSystem::IsDailyMenuEditable() const
@@ -627,10 +646,9 @@ void AOrderSystem::CollectSuppliedItemIDs(TSet<int32>& OutItemIDs) const
 	}
 }
 
-void AOrderSystem::CollectPreparedFoodIDs(TSet<int32>& OutFoodIDs) const
+void AOrderSystem::CollectPreparedFoodPortions(TMap<int32, int32>& Available) const
 {
-	OutFoodIDs.Reset();
-	TMap<int32, int32> Available;
+	Available.Reset();
 	// The last ingredient may already be in the pan when the guest orders.
 	for (TActorIterator<ACookingMachine> It(GetWorld()); It; ++It)
 	{
@@ -656,6 +674,13 @@ void AOrderSystem::CollectPreparedFoodIDs(TSet<int32>& OutFoodIDs) const
 		}
 		else if (Dish->GetMenuFoodID() >= 0) ++Available.FindOrAdd(Dish->GetMenuFoodID());
 	}
+}
+
+void AOrderSystem::CollectPreparedFoodIDs(TSet<int32>& OutFoodIDs) const
+{
+	OutFoodIDs.Reset();
+	TMap<int32, int32> Available;
+	CollectPreparedFoodPortions(Available);
 	// Reserve existing orders first, so the same last dish cannot promise another order.
 	for (const UOrderHandle* Handle : waitList)
 		if (Handle)
@@ -664,7 +689,8 @@ void AOrderSystem::CollectPreparedFoodIDs(TSet<int32>& OutFoodIDs) const
 		if (Pair.Value > 0) OutFoodIDs.Add(Pair.Key);
 }
 
-bool AOrderSystem::IsMenuServable(int32 FoodID, const TSet<int32>& SuppliedItemIDs, FString& OutReason) const
+bool AOrderSystem::IsMenuServable(int32 FoodID, const TSet<int32>& SuppliedItemIDs, FString& OutReason,
+	bool bCheckSupplies) const
 {
 	UBaseGameInstance* GI = GetWorld() ? Cast<UBaseGameInstance>(GetWorld()->GetGameInstance()) : nullptr;
 	UFoodSystem* FS = GI ? GI->foodSystem : nullptr;
@@ -699,7 +725,7 @@ bool AOrderSystem::IsMenuServable(int32 FoodID, const TSet<int32>& SuppliedItemI
 	}
 	for (const TPair<int32, int32>& Item : Menu.MenuItems)
 	{
-		if (Item.Value > 0 && !SuppliedItemIDs.Contains(Item.Key))
+		if (bCheckSupplies && Item.Value > 0 && !SuppliedItemIDs.Contains(Item.Key))
 		{
 			OutReason = FString::Printf(TEXT("缺少食材 ItemID=%d（本关没有对应箱子/植株/采集点）"), Item.Key);
 			return false;
@@ -901,7 +927,7 @@ bool AOrderSystem::GetNextConfigOrder(FOrderData& OutOrder, bool* bOutNoneServab
 	return false;
 }
 
-bool AOrderSystem::IsOrderServableToday(const FOrderData& Order, FString& OutReason) const
+bool AOrderSystem::IsOrderServableToday(const FOrderData& Order, FString& OutReason, bool bCheckSupplies) const
 {
 	if (Order.FoodIDs.Num() == 0)
 	{
@@ -910,7 +936,7 @@ bool AOrderSystem::IsOrderServableToday(const FOrderData& Order, FString& OutRea
 	}
 	for (const int32 FoodID : Order.FoodIDs)
 	{
-		if (!IsMenuServable(FoodID, CachedSuppliedItemIDs, OutReason)
+		if (!IsMenuServable(FoodID, CachedSuppliedItemIDs, OutReason, bCheckSupplies)
 			|| !IsMenuMachinePresent(FoodID, CachedAvailableMachineIDs, OutReason))
 		{
 			OutReason = FString::Printf(TEXT("菜品 %d %s"), FoodID, *OutReason);
@@ -944,7 +970,7 @@ int32 AOrderSystem::GetCurrentBusinessDay() const
 {
 	UBaseGameInstance* GI = GetWorld() ? Cast<UBaseGameInstance>(GetWorld()->GetGameInstance()) : nullptr;
 	UTimeSystem* TS = GI && GI->businessSimulation ? GI->businessSimulation->TimeSystem.Get() : nullptr;
-	return TS ? TS->Day : 0;
+	return TS ? TS->GetBusinessDayNumber() : 0;
 }
 
 int32 AOrderSystem::GetEffectiveWildOrderDailyLimit() const
@@ -1023,6 +1049,18 @@ int32 AOrderSystem::GetFirstDayOrdersServed() const
 		: FirstDayOrdersServed;
 }
 
+int32 AOrderSystem::GetRemainingFirstDayEggOrders() const
+{
+	const int32 Remaining = GetFirstDayServiceTarget() - GetFirstDayOrdersServed();
+	if (!IsStarted || Remaining <= 0 || UGameplayStatics::GetCurrentLevelName(this) != TEXT("Kitchen_New"))
+	{
+		return 0;
+	}
+
+	const FOrderData* Sequence = orderCfg->DayFoodSequences.Find(1);
+	return Sequence && Sequence->FoodIDs.Num() == 1 && Sequence->FoodIDs[0] == 1001 ? Remaining : 0;
+}
+
 void AOrderSystem::RecordFirstDayOrderServed()
 {
 	if (GetFirstDayServiceTarget() <= 0) return;
@@ -1057,6 +1095,8 @@ UOrderHandle* AOrderSystem::RequestOrderForGuest(AGuestCharacter* Guest)
 	{
 		return nullptr;
 	}
+
+	RefreshKitchenShift();
 
 	// 跨日重置野味订单计数（UTimeSystem::Day；拿不到时钟时固定为 0，行为退化为只发一次）
 	const int32 Today = GetCurrentBusinessDay();
@@ -1095,6 +1135,8 @@ UOrderHandle* AOrderSystem::RequestOrderForGuest(AGuestCharacter* Guest)
 	const FOrderData* DaySeq = orderCfg ? orderCfg->DayFoodSequences.Find(Today) : nullptr;
 	if (DaySeq)
 	{
+		// The first-day lesson replenishes lost ingredients until all three plates are served.
+		const bool bFirstDayEggLesson = GetRemainingFirstDayEggOrders() > 0;
 		if (Today != TutorialSeqDay)
 		{
 			TutorialSeqDay = Today;
@@ -1117,10 +1159,10 @@ UOrderHandle* AOrderSystem::RequestOrderForGuest(AGuestCharacter* Guest)
 			Candidate.FoodIDs = { DaySeq->FoodIDs[TutorialSeqCursor] };
 
 			FString Reason;
-			if (!IsOrderServableToday(Candidate, Reason))
+			if (!IsOrderServableToday(Candidate, Reason, !bFirstDayEggLesson))
 			{
 				// Keep the promised teaching dish at the front until it is available.
-				if (Today == 2 || Today == 3)
+				if (bFirstDayEggLesson || Today == 2 || Today == 3)
 				{
 					UE_LOG(LogTemp, Warning, TEXT("[OrderSystem] 第 %d 天教学单 %d 暂不可接：%s"),
 						Today, TutorialSeqCursor + 1, *Reason);
@@ -1176,7 +1218,7 @@ UOrderHandle* AOrderSystem::RequestOrderForGuest(AGuestCharacter* Guest)
 			// bNoneServable：配置单今天都发不了，退回已按当天过滤的随机池
 		}
 
-		if (bUseRandomPool)
+		if (bUseRandomPool && !TryBuildKitchenShiftOrder(OrderData))
 		{
 			const FOrderData* RandomData = GetRandomOrder();
 			if (!RandomData)
@@ -1250,7 +1292,7 @@ bool AOrderSystem::CancelOrderForGuest(AGuestCharacter* Guest)
 	return false;
 }
 
-bool AOrderSystem::PushFoods(const TArray<int>& FoodIDs)
+bool AOrderSystem::PushFoods(const TArray<int>& FoodIDs, bool bPremiumDish)
 {
 	if (!IsStarted)
 	{
@@ -1319,6 +1361,7 @@ bool AOrderSystem::PushFoods(const TArray<int>& FoodIDs)
 
 	ABaseLevelBP::AddScore(this, BestHandle->GetOrderSettlementPrice());
 	RecordOrderTiming(*BestHandle);
+	RecordKitchenShiftOrder(*BestHandle, bPremiumDish);
 	OnFinishOrder.Broadcast(BestHandle, BestHandle->OrderData);
 	waitList.Remove(BestHandle);
 	GEngine->AddOnScreenDebugMessage(-1, 2, FColor::Red, TEXT("完成订单(优先最短剩余时间)"));
@@ -1333,7 +1376,7 @@ bool AOrderSystem::PushFoods(const TArray<int>& FoodIDs)
 	return true;
 }
 
-bool AOrderSystem::PushFoodsForGuest(const TArray<int>& FoodIDs, AGuestCharacter* TargetGuest)
+bool AOrderSystem::PushFoodsForGuest(const TArray<int>& FoodIDs, AGuestCharacter* TargetGuest, bool bPremiumDish)
 {
 	if (!IsStarted)
 	{
@@ -1406,6 +1449,7 @@ bool AOrderSystem::PushFoodsForGuest(const TArray<int>& FoodIDs, AGuestCharacter
 
 	ABaseLevelBP::AddScore(this, BestHandle->GetOrderSettlementPrice());
 	RecordOrderTiming(*BestHandle);
+	RecordKitchenShiftOrder(*BestHandle, bPremiumDish);
 	OnFinishOrder.Broadcast(BestHandle, BestHandle->OrderData);
 	waitList.Remove(BestHandle);
 	GEngine->AddOnScreenDebugMessage(-1, 2, FColor::Red, TEXT("完成订单(针对性上菜)"));

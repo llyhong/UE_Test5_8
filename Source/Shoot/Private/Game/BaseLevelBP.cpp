@@ -332,10 +332,8 @@ void ABaseLevelBP::RefreshKitchenPlateFlow(const UTimeSystem& TimeSystem)
 		return;
 	}
 
-	const bool bAfterFirstMonth = TimeSystem.Year > TimeSystem.StartYear || TimeSystem.Month > TimeSystem.StartMonth;
 	ADishwasher* Washer = Cast<ADishwasher>(UGameplayStatics::GetActorOfClass(this, ADishwasher::StaticClass()));
-	const bool bEnable = Washer != nullptr;
-	const bool bUseLimitedSupply = bEnable && (bAfterFirstMonth || TimeSystem.Day >= 4);
+	const bool bUseLimitedSupply = Washer != nullptr;
 	// 方案1：空碟玩法默认开启。World Partition 关卡在 BeginPlay 时外部 Actor 可能尚未加载，
 	// GetActorOfClass 会低估为"没有洗碗机"；若照旧 SetDirtyPlateFlow(false)，会把默认值(true=留空碟)
 	// 覆盖，导致客人吃完直接清桌。这里无条件开启，退出关卡时由 EndPlay 统一关闭。
@@ -353,7 +351,7 @@ void ABaseLevelBP::RefreshKitchenPlateFlow(const UTimeSystem& TimeSystem)
 	{
 		PlateSystem->SetInfinite(!bUseLimitedSupply);
 	}
-	if (bEnable && (bAfterFirstMonth || TimeSystem.Day >= 5) && Washer->UnlockCollectionTray())
+	if (Washer && TimeSystem.GetBusinessDayNumber() >= 5 && Washer->UnlockCollectionTray())
 	{
 		if (APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0))
 		{
@@ -371,8 +369,11 @@ void ABaseLevelBP::RefreshClock()
 		{
 			UTimeSystem* TS = GI->businessSimulation->TimeSystem;
 			HUDWidget->SetClock(TS->GetCurrentHour(), TS->IsBusinessOpen());
+			HUDWidget->SetKitchenShiftText(orderSystem && !TS->IsEndOfDayReached()
+				? orderSystem->GetKitchenShiftProgress().Format(false, !TS->IsBusinessOpen()) : FText::GetEmpty());
 			const bool bShowPlateSupply = PlateSystem && !PlateSystem->IsInfinitePlates() && TS->IsBusinessOpen();
-			HUDWidget->SetKitchenPlateHint(bShowPlateSupply ? PlateSystem->GetAvailablePlates() : INDEX_NONE);
+			HUDWidget->SetKitchenPlateHint(bShowPlateSupply ? PlateSystem->GetAvailablePlates() : INDEX_NONE,
+				PlateSystem ? PlateSystem->TotalCount : 0);
 		}
 	}
 }

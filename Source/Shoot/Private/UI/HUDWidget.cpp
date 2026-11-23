@@ -15,6 +15,7 @@
 #include "Components/TextBlock.h"
 #include "Styling/CoreStyle.h"
 #include "GameFramework/PlayerController.h"
+#include "TimerManager.h"
 
 void UHUDWidget::BindEconomy(UEconomySystem* Eco)
 {
@@ -156,6 +157,7 @@ void UHUDWidget::RefreshGoal()
 
 void UHUDWidget::NativeDestruct()
 {
+	if (UWorld* World = GetWorld()) World->GetTimerManager().ClearTimer(HygieneNoticeTimer);
 	if (FTutorialGuideBinding* Binding = GTutorialGuides.Find(this))
 	{
 		if (UTutorialGuideWidget* Guide = Binding->Guide.Get())
@@ -185,10 +187,85 @@ void UHUDWidget::SetClock(float CurrentHour, bool bIsOpen)
 	OnClockChanged(CurrentHour, bIsOpen);
 }
 
-void UHUDWidget::SetKitchenPlateHint(int32 CleanPlates)
+bool UHUDWidget::ShowDiningHygieneNotice(const FText& Text, float Duration, bool bWarning)
+{
+	static const FName NoticeName(TEXT("DiningHygieneNotice"));
+	UCanvasPanel* Canvas = WidgetTree ? Cast<UCanvasPanel>(WidgetTree->RootWidget) : nullptr;
+	UWorld* World = GetWorld();
+	if (!Canvas || !World) return false;
+
+	UBorder* Panel = Cast<UBorder>(GetWidgetFromName(NoticeName));
+	if (!Panel)
+	{
+		Panel = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), NoticeName);
+		Panel->SetPadding(FMargin(14.f, 9.f));
+		Panel->SetBrushColor(FLinearColor(0.12f, 0.07f, 0.04f, 0.94f));
+		UTextBlock* Label = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("DiningHygieneNoticeText"));
+		Label->SetFont(FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 17));
+		Label->SetWrapTextAt(340.f);
+		Panel->SetContent(Label);
+		UCanvasPanelSlot* NoticeSlot = Canvas->AddChildToCanvas(Panel);
+		NoticeSlot->SetAnchors(FAnchors(1.f, 0.f));
+		NoticeSlot->SetAlignment(FVector2D(1.f, 0.f));
+		NoticeSlot->SetPosition(FVector2D(-24.f, 76.f));
+		NoticeSlot->SetAutoSize(true);
+		NoticeSlot->SetZOrder(22);
+	}
+	UTextBlock* Label = CastChecked<UTextBlock>(Panel->GetContent());
+	Label->SetText(Text);
+	Label->SetColorAndOpacity(FSlateColor(bWarning
+		? FLinearColor(1.f, 0.67f, 0.52f) : FLinearColor(1.f, 0.89f, 0.67f)));
+	Panel->SetVisibility(ESlateVisibility::HitTestInvisible);
+	World->GetTimerManager().SetTimer(HygieneNoticeTimer, FTimerDelegate::CreateWeakLambda(Panel, [Panel]()
+	{
+		Panel->SetVisibility(ESlateVisibility::Collapsed);
+	}), Duration, false);
+	return true;
+}
+
+void UHUDWidget::SetKitchenShiftText(const FText& Text)
+{
+	static const FName Name(TEXT("KitchenShiftGoals"));
+	UBorder* Panel = Cast<UBorder>(GetWidgetFromName(Name));
+	if (Text.IsEmpty())
+	{
+		if (Panel) Panel->SetVisibility(ESlateVisibility::Collapsed);
+		return;
+	}
+
+	if (!Panel)
+	{
+		UCanvasPanel* Canvas = WidgetTree ? Cast<UCanvasPanel>(WidgetTree->RootWidget) : nullptr;
+		if (!Canvas) return;
+
+		Panel = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), Name);
+		Panel->SetBrushColor(FLinearColor(0.12f, 0.07f, 0.04f, 0.90f));
+		Panel->SetPadding(FMargin(14.f, 9.f));
+		UTextBlock* Label = WidgetTree->ConstructWidget<UTextBlock>();
+		Label->SetFont(FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 16));
+		Label->SetColorAndOpacity(FSlateColor(FLinearColor(1.f, 0.88f, 0.65f)));
+		Label->SetWrapTextAt(254.f);
+		Panel->SetContent(Label);
+
+		UCanvasPanelSlot* GoalSlot = Canvas->AddChildToCanvas(Panel);
+		GoalSlot->SetAnchors(FAnchors(1.f, 0.f));
+		GoalSlot->SetAlignment(FVector2D(1.f, 0.f));
+		GoalSlot->SetPosition(FVector2D(-22.f, 152.f));
+		GoalSlot->SetAutoSize(true);
+		GoalSlot->SetZOrder(18);
+	}
+	UTextBlock* Label = CastChecked<UTextBlock>(Panel->GetContent());
+	if (!Label->GetText().EqualTo(Text))
+	{
+		Label->SetText(Text);
+	}
+	Panel->SetVisibility(ESlateVisibility::HitTestInvisible);
+}
+
+void UHUDWidget::SetKitchenPlateHint(int32 CleanPlates, int32 TotalPlates)
 {
 	static const FName HintName(TEXT("KitchenPlateHint"));
-	const bool bShow = CleanPlates == 0 || CleanPlates == 1;
+	const bool bShow = CleanPlates >= 0;
 	UBorder* Hint = Cast<UBorder>(GetWidgetFromName(HintName));
 	if (!bShow)
 	{
@@ -226,7 +303,9 @@ void UHUDWidget::SetKitchenPlateHint(int32 CleanPlates)
 		? FLinearColor(1.f, 0.65f, 0.5f) : FLinearColor(1.f, 0.88f, 0.61f)));
 	Label->SetText(CleanPlates == 0
 		? NSLOCTEXT("KitchenPlate", "NoCleanPlates", "没有干净盘子了 · 按 E 收空盘，送到洗碗机")
-		: NSLOCTEXT("KitchenPlate", "OneCleanPlate", "还剩 1 个干净盘 · 可以收盘送洗"));
+		: CleanPlates == 1
+			? NSLOCTEXT("KitchenPlate", "OneCleanPlate", "还剩 1 个干净盘 · 可以收盘送洗")
+			: FText::Format(NSLOCTEXT("KitchenPlate", "CleanPlateCount", "干净盘子 {0}/{1}"), CleanPlates, TotalPlates));
 	Hint->SetVisibility(ESlateVisibility::HitTestInvisible);
 }
 

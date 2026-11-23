@@ -69,6 +69,7 @@ void APlateSystem::RefillToFull()
 
 void APlateSystem::SetInfinite(bool bInfinite)
 {
+	if (bInfinitePlates == bInfinite) return;
 	bInfinitePlates = bInfinite;
 	// 切回有限时恢复：可用碟子补满到总数，重新启用收碟闭环
 	if (!bInfinitePlates)

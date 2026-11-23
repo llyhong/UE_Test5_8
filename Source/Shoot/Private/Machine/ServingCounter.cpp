@@ -234,13 +234,14 @@ bool AServingCounter::SubmitDish(AItemActor* Dish)
 	}
 
 	const int32 FoodID = Dish->GetMenuFoodID();
+	if (FoodID >= 0 && !Dish->TryPrepareServingPlate()) return false;
 
 	if (bUseMenuControll)
 	{
 		TArray<int> FoodIdArray ;
 		FoodIdArray.Add(FoodID);
 
-		bool success = FoodID != -1 && Cast<UBaseGameInstance>(GetGameInstance())->curLevelBP->orderSystem->PushFoods(FoodIdArray);
+		bool success = FoodID != -1 && Cast<UBaseGameInstance>(GetGameInstance())->curLevelBP->orderSystem->PushFoods(FoodIdArray, Dish->GetIngredientQuality() == EIngredientQuality::Premium);
 		if (success)
 		{
 			// 已在上方通过 orderSystem->PushFoods 完成订单（驱动分数/声誉/金钱）
@@ -316,6 +317,7 @@ bool AServingCounter::SubmitDish(AItemActor* Dish)
 
 		// 取出碟子里的菜品 ID（拷贝一份，避免 Destroy 后悬空引用）
 		const TArray<int32> DishFoods = Dish->FoodIdArray;
+		const bool bPremiumDish = Dish->GetIngredientQuality() == EIngredientQuality::Premium;
 		DeliverDishToSeat(Dish, TargetGuest);
 
 		if (UWorld* W = GetWorld())
@@ -329,11 +331,11 @@ bool AServingCounter::SubmitDish(AItemActor* Dish)
 						// 优先用碟子实际菜品列表，为空则退回单个 FoodID
 						if (DishFoods.Num() > 0)
 						{
-							OS->PushFoods(DishFoods);
+							OS->PushFoods(DishFoods, bPremiumDish);
 						}
 						else if (FoodID != -1)
 						{
-							OS->PushFoods({ FoodID });
+							OS->PushFoods({ FoodID }, bPremiumDish);
 						}
 					}
 				}

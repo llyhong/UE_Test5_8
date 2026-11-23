@@ -1826,7 +1826,7 @@ void AShootCharacter::BuildInteractionOptions(TArray<FInteractOption, TInlineAll
 			&& OverlappingPlant->UsesWildHarvest() && OverlappingPlant->CanHarvest()
 			&& !OverlappingPlant->CanHarvestFruitStoreInBasket();
 		AddOption(TierWorld, DistTo(OverlappingPlant),
-			bHarvestNeedsFreeHand ? TEXT("采摘（该食材只能手持）") : TEXT("植物"), OverlappingPlant, [this]()
+			bHarvestNeedsFreeHand ? TEXT("只能手持 · 用投掷键放下篮子") : TEXT("植物"), OverlappingPlant, [this]()
 		{
 			InteractWithPlant();
 			return true;
@@ -1836,7 +1836,7 @@ void AShootCharacter::BuildInteractionOptions(TArray<FInteractOption, TInlineAll
 	// 就餐区散落物：按 E 清理垃圾 / 积水（同层与其他环境交互按距离决胜）
 	if (IsValid(OverlappingMess))
 	{
-		AddOption(TierWorld, DistTo(OverlappingMess), TEXT("清理"), OverlappingMess, [this]()
+		AddOption(TierWorld, DistTo(OverlappingMess), *OverlappingMess->GetCleanActionText().ToString(), OverlappingMess, [this]()
 		{
 			if (IsValid(OverlappingMess))
 			{
@@ -1960,7 +1960,11 @@ void AShootCharacter::BuildInteractionOptions(TArray<FInteractOption, TInlineAll
 		const float MDist = DistTo(CookingMachine);
 		if (IsSpawnOther())
 		{
-			if (NeedDropDown())
+			if (GetEquippedBasket())
+			{
+				AddOption(TierWorld, MDist, TEXT("用投掷键放下采集篮"), CookingMachine, []() { return true; });
+			}
+			else if (NeedDropDown())
 			{
 				AddOption(TierWorld, MDist, TEXT("放下手持物"), CookingMachine, [this]()
 				{
@@ -2054,7 +2058,7 @@ void AShootCharacter::BuildInteractionOptions(TArray<FInteractOption, TInlineAll
 		if (bLooseIngredient)
 		{
 			const bool bStorable = Loose->bCanStoreInBasket;
-			AddOption(TierWorld, DistTo(Loose), bStorable ? TEXT("装进篮子") : TEXT("拾取（该食材只能手持）"), Loose, [this, Loose]()
+			AddOption(TierWorld, DistTo(Loose), bStorable ? TEXT("装进篮子") : TEXT("只能手持 · 用投掷键放下篮子"), Loose, [this, Loose]()
 			{
 				if (!IsValid(Loose))
 				{
@@ -2107,7 +2111,7 @@ void AShootCharacter::BuildInteractionOptions(TArray<FInteractOption, TInlineAll
 	// ---------------- Tier 4：兜底 —— 放下手上的东西 ----------------
 	// 缓冲消费时不执行：玩家在动画期间按的那一下本意是"继续交互"，
 	// 补执行时若变成"把刚捡的东西放下"，手感会更差。
-	if (NeedDropDown() && !bConsumingBufferedPick)
+	if (NeedDropDown() && !GetEquippedBasket() && !bConsumingBufferedPick)
 	{
 		AddOption(TierFallback, FLT_MAX, TEXT("放下"), nullptr, [this]()
 		{
@@ -2472,6 +2476,15 @@ bool AShootCharacter::HasBlockingInteractionTarget() const
 
  void AShootCharacter::PushFoodStart(const FInputActionValue& Value)
  {
+	if (GetEquippedBasket())
+	{
+		if (CanSwitchHarvestBasket())
+		{
+			DoDropDown();
+			RefreshAllInteractionTargets();
+		}
+		return;
+	}
  	if (NeedDropDown())
  	{
  		//GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, TEXT("PushFoodStart"));
@@ -2485,15 +2498,18 @@ bool AShootCharacter::HasBlockingInteractionTarget() const
 
  void AShootCharacter::PushFoodComplete(const FInputActionValue& Value)
  {
- 	if (NeedDropDown())
- 	{
+	if (!bIsPKeyHeld)
+	{
+		return;
+	}
+	if (NeedDropDown() && !GetEquippedBasket())
+	{
  		//GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, TEXT("P键松开 - 停止绘制抛物线"));
  		OnPushFoodComplete();
- 		ClearPrediction();
- 		bIsPKeyHeld = false;
- 		CurrentAngle = 0.0f;
- 	
- 	}
+	}
+	ClearPrediction();
+	bIsPKeyHeld = false;
+	CurrentAngle = 0.0f;
  }
 
  void AShootCharacter::OnMouseWheelAxis(const FInputActionValue& Value)
@@ -2843,17 +2859,8 @@ void AShootCharacter::DoPick()
 		// else
 		{
 			//如果不是番茄树的情况
-			AItemActor* PickedItem = OverlappingItem;
-			const FString PickedItemName = PickedItem->GetItemDisplayName();
-			UTexture2D* PickedItemIcon = PickedItem->GetItemIcon();
-			const bool bShowHarvestHint = PickedItem->GetMenuFoodID() < 0
-				&& !PickedItem->bIsEmptyPlate && !PickedItem->bIsDirtyPlate
-				&& !Cast<ADish>(PickedItem) && !Cast<AOutdoorBasket>(PickedItem);
+			// 拾取会把物品挂到手上，无需再弹“打开背包”的采摘提示
 			SetPickingItemStatus();//这一个放在他的蓝图里处理
-			if (bShowHarvestHint)
-			{
-				ShowHarvestHint(PickedItemName, PickedItemIcon);
-			}
 			if (Cast<AOutdoorBasket>(OverlappingItem))
 			{
 				// 外出背包是“挂”在手上的，拾取时播放采集动画（AM_Gathering）而不是普通拾取动作
@@ -2892,11 +2899,9 @@ void AShootCharacter::DoPick()
 				UWorld* World = GetWorld();
 				AItemActor* Spawned = World->SpawnActor<AItemActor>(FoodSpawner->SpawnItemActorClass, GetActorLocation(), GetActorRotation());
 				if (!IsValid(Spawned)) return;
-				const FString SpawnedItemName = Spawned->GetItemDisplayName();
-				UTexture2D* SpawnedItemIcon = Spawned->GetItemIcon();
 				SetOverlappingItem(Spawned);
+				// 取料直接拿到手上，不再弹“打开背包”的采摘提示
 				SetPickingItemStatus();
-				ShowHarvestHint(SpawnedItemName, SpawnedItemIcon);
 				FoodSpawner->OnSpawnActorEvent();//广播给蓝图（特效/音效等）
 				FoodSpawner->ConsumeOne();//消耗一个数量（空了就不会再生成）
 			}
@@ -2934,6 +2939,7 @@ void AShootCharacter::DoPick()
 
  void AShootCharacter::DoDropDown() // 如果已经手上有食物了，要先将食物扔下
  {
+	if (!IsValid(PickingItem)) return;
  	PickingItem->DeAttachMeshToSocket();
  	//PickingItem->SetItemState(EItemState::EIS_Idle);//临时简单处理，为了可以放下食物可以马上拾取
 
@@ -3238,6 +3244,23 @@ bool AShootCharacter::AddSlotToInventory(const FInventorySlot& Slot)
 AOutdoorBasket* AShootCharacter::GetEquippedBasket() const
 {
 	return Cast<AOutdoorBasket>(PickingItem);
+}
+
+bool AShootCharacter::CanSwitchHarvestBasket()
+{
+	return CharacterState != ECharacterState::ECS_Dead && !IsInteractionAnimPlaying() && !bIsPKeyHeld;
+}
+
+void AShootCharacter::ReturnHarvestBasket(const FTransform& DockTransform)
+{
+	if (AOutdoorBasket* Basket = GetEquippedBasket())
+	{
+		Basket->DeAttachMeshToSocket();
+		OnReleasePickEvent();
+		Basket->PlaceAtDock(DockTransform);
+		ClearHeldItemState();
+		RefreshAllInteractionTargets();
+	}
 }
 
 bool AShootCharacter::StoreHarvestInBasket(AItemActor* Fruit, int32 Quantity)
@@ -3574,8 +3597,12 @@ void AShootCharacter::DoRepairEnd()
  void AShootCharacter::DoPutDish()
  {
 	//GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red, TEXT("菜煮好了，放碟子上"));
- 	int FoodId = CookingMachine->GetMenuFood();
-	if (!PickingItem)
+	if (!PickingItem || !CookingMachine || !PickingItem->TryPrepareServingPlate())
+	{
+		return;
+	}
+	const int32 FoodId = CookingMachine->GetMenuFood();
+	if (FoodId < 0)
 	{
 		return;
 	}

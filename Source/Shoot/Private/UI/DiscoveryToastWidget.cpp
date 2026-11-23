@@ -13,8 +13,12 @@
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
+#include "Engine/Font.h"
 #include "GameFramework/PlayerController.h"
+#include "Kismet/GameplayStatics.h"
+#include "Sound/SoundBase.h"
 #include "Styling/CoreStyle.h"
+#include "UObject/StrongObjectPtr.h"
 #include "WidgetBlueprint.h"
 #include "Kismet2/KismetEditorUtilities.h"
 
@@ -24,10 +28,22 @@ namespace
 	constexpr float ToastHoldSeconds = 3.6f;
 	constexpr float ToastFadeOutSeconds = 0.35f;
 	constexpr int32 ToastZOrder = 90;
-	constexpr float HarvestHoldSeconds = 2.f;
-	constexpr float HarvestHintSpacing = 100.f;
+
+	// 采摘提示节奏对齐参考视频：右侧快速滑入(~0.26s) → 停留 3.2s → 向右滑出(~0.3s)
+	constexpr float HarvestSlideInSeconds = 0.26f;
+	constexpr float HarvestHoldSeconds = 3.2f;
+	constexpr float HarvestSlideOutSeconds = 0.30f;
+	constexpr float HarvestSlideDistance = 460.f;
+	constexpr float HarvestHintSpacing = 118.f;
 	constexpr float HarvestHintRightMargin = 28.f;
 	const TCHAR* HintWidgetBlueprintPath = TEXT("/Game/_Demo/Blueprints/UI_2D/Tips/WBP_HarvestHintCard.WBP_HarvestHintCard_C");
+
+	/** 采摘提示音效直接复用金币拾取音（StackOBot 现成资源） */
+	USoundBase* GetHarvestHintSound()
+	{
+		static TStrongObjectPtr<USoundBase> CachedSound(LoadObject<USoundBase>(nullptr, TEXT("/Game/StackOBot/Audio/SFX/Waves/SFX_Coin_Collect.SFX_Coin_Collect")));
+		return CachedSound.Get();
+	}
 
 	UClass* GetHintWidgetClass()
 	{
@@ -37,6 +53,17 @@ namespace
 			CachedClass = LoadObject<UClass>(nullptr, HintWidgetBlueprintPath);
 		}
 		return CachedClass ? CachedClass : UDiscoveryToastWidget::StaticClass();
+	}
+
+	/** FCoreStyle 默认复合字体在本卡里渲染 Bold 中文会变豆腐块，统一换成带中文回退的引擎字体资产 */
+	FSlateFontInfo MakeToastFont(const TCHAR* Typeface, int32 Size)
+	{
+		static TStrongObjectPtr<UFont> CachedFont(LoadObject<UFont>(nullptr, TEXT("/Engine/EngineFonts/Roboto.Roboto")));
+		if (UFont* Font = CachedFont.Get())
+		{
+			return FSlateFontInfo(Font, static_cast<float>(Size), Typeface);
+		}
+		return FCoreStyle::GetDefaultFontStyle(Typeface, Size);
 	}
 
 	/** 普通弹窗每个本地玩家只保留一个容器，队列播放 */
@@ -194,7 +221,7 @@ void UDiscoveryToastWidget::ShowHarvestHint(APlayerController* PC, const FString
 		}
 	}
 
-	// 每次采摘都新建一张独立卡片，三条提示可同时显示，各自 2 秒后淡出
+	// 每次采摘都新建一张独立卡片，多条可同时堆叠，各自滑入后停留再从右侧收回
 	UDiscoveryToastWidget* Toast = CreateWidget<UDiscoveryToastWidget>(PC, GetHintWidgetClass());
 	if (!Toast)
 	{
@@ -207,11 +234,17 @@ void UDiscoveryToastWidget::ShowHarvestHint(APlayerController* PC, const FString
 	RefreshHarvestHintStack(PC);
 
 	FDiscoveryToastEntry Entry;
-	Entry.Info.DisplayName = FString::Printf(TEXT("【%s】"), *ItemName);
+	Entry.Info.DisplayName = ItemName;
 	Entry.Info.Icon = ItemIcon;
 	Entry.Accent = FLinearColor(0.55f, 0.86f, 0.55f, 1.f);
 	Entry.bDiscovery = false;
 	Toast->Enqueue(Entry);
+
+	if (USoundBase* HintSound = GetHarvestHintSound())
+	{
+		UGameplayStatics::PlaySound2D(PC, HintSound, 0.7f);
+		UE_LOG(LogTemp, Log, TEXT("[采摘] 提示卡弹出，播放提示音效 %s"), *HintSound->GetName());
+	}
 }
 
 void UDiscoveryToastWidget::SetHarvestHintStackIndex(int32 Index)
@@ -239,7 +272,110 @@ void UDiscoveryToastWidget::BindNamedWidgets()
 	NameText = WidgetTree->FindWidget<UTextBlock>(TEXT("Name"));
 	DescText = WidgetTree->FindWidget<UTextBlock>(TEXT("Desc"));
 	RewardText = WidgetTree->FindWidget<UTextBlock>(TEXT("Reward"));
+	TextColumn = WidgetTree->FindWidget<UVerticalBox>(TEXT("TextColumn"));
+	BagRow = WidgetTree->FindWidget<UHorizontalBox>(TEXT("BagRow"));
+	BagKeyBorder = WidgetTree->FindWidget<UBorder>(TEXT("BagKey"));
+	BagKeyText = WidgetTree->FindWidget<UTextBlock>(TEXT("BagKeyText"));
+	BagText = WidgetTree->FindWidget<UTextBlock>(TEXT("BagHint"));
 	IconSlot = IconBox ? Cast<UHorizontalBoxSlot>(IconBox->Slot) : nullptr;
+	if (CardBorder)
+	{
+		// WBP 里画好的圆角/描边要保留，后续只改描边颜色
+		CardBrush = CardBorder->Background;
+	}
+	// 覆盖 WBP 自带字体，避免中文缺字
+	if (KickerText)
+	{
+		KickerText->SetFont(MakeToastFont(TEXT("Bold"), 12));
+	}
+	if (NameText)
+	{
+		NameText->SetFont(MakeToastFont(TEXT("Bold"), 22));
+	}
+	if (DescText)
+	{
+		DescText->SetFont(MakeToastFont(TEXT("Regular"), 13));
+	}
+	if (RewardText)
+	{
+		RewardText->SetFont(MakeToastFont(TEXT("Bold"), 12));
+	}
+	if (BagText)
+	{
+		BagText->SetFont(MakeToastFont(TEXT("Regular"), 12));
+	}
+	if (BagKeyText)
+	{
+		BagKeyText->SetFont(MakeToastFont(TEXT("Bold"), 11));
+	}
+	// 旧版 WBP 没有 BagRow 节点时，在构建阶段补出来
+	EnsureBagHint();
+}
+
+void UDiscoveryToastWidget::EnsureBagHint()
+{
+	if (!WidgetTree)
+	{
+		return;
+	}
+	if (!TextColumn)
+	{
+		TextColumn = WidgetTree->FindWidget<UVerticalBox>(TEXT("TextColumn"));
+	}
+	if (!TextColumn)
+	{
+		return;
+	}
+
+	if (!BagRow)
+	{
+		BagRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("BagRow"));
+
+		BagText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("BagHint"));
+		BagText->SetFont(MakeToastFont(TEXT("Regular"), 12));
+		BagText->SetColorAndOpacity(FSlateColor(FLinearColor(0.78f, 0.80f, 0.83f, 1.f)));
+		BagText->SetText(FText::FromString(TEXT("打开背包")));
+		if (UHorizontalBoxSlot* HintSlot = BagRow->AddChildToHorizontalBox(BagText))
+		{
+			HintSlot->SetPadding(FMargin(0.f, 0.f, 6.f, 0.f));
+			HintSlot->SetVerticalAlignment(VAlign_Center);
+		}
+
+		BagKeyBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("BagKey"));
+		FSlateBrush KeyBrush;
+		KeyBrush.DrawAs = ESlateBrushDrawType::RoundedBox;
+		KeyBrush.OutlineSettings.CornerRadii = FVector4(4.f, 4.f, 4.f, 4.f);
+		KeyBrush.OutlineSettings.RoundingType = ESlateBrushRoundingType::FixedRadius;
+		BagKeyBorder->SetBrush(KeyBrush);
+		BagKeyBorder->SetBrushColor(FLinearColor(0.93f, 0.93f, 0.90f, 0.96f));
+		BagKeyBorder->SetPadding(FMargin(5.f, 1.f));
+
+		BagKeyText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("BagKeyText"));
+		BagKeyText->SetFont(MakeToastFont(TEXT("Bold"), 11));
+		BagKeyText->SetColorAndOpacity(FSlateColor(FLinearColor(0.08f, 0.09f, 0.10f, 1.f)));
+		BagKeyText->SetText(FText::FromString(TEXT("B")));
+		BagKeyBorder->SetContent(BagKeyText);
+
+		if (UHorizontalBoxSlot* KeySlot = BagRow->AddChildToHorizontalBox(BagKeyBorder))
+		{
+			KeySlot->SetVerticalAlignment(VAlign_Center);
+		}
+
+		if (UVerticalBoxSlot* BagRowSlot = TextColumn->AddChildToVerticalBox(BagRow))
+		{
+			BagRowSlot->SetPadding(FMargin(0.f, 6.f, 0.f, 0.f));
+			BagRowSlot->SetHorizontalAlignment(HAlign_Right);
+		}
+	}
+}
+
+void UDiscoveryToastWidget::SetBagHintVisible(bool bVisible)
+{
+	EnsureBagHint();
+	if (BagRow)
+	{
+		BagRow->SetVisibility(bVisible ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
+	}
 }
 
 TSharedRef<SWidget> UDiscoveryToastWidget::RebuildWidget()
@@ -308,14 +444,14 @@ TSharedRef<SWidget> UDiscoveryToastWidget::RebuildWidget()
 		IconSlot->SetVerticalAlignment(VAlign_Center);
 	}
 
-	UVerticalBox* TextColumn = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("TextColumn"));
+	TextColumn = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("TextColumn"));
 	if (UHorizontalBoxSlot* TextSlot = Row->AddChildToHorizontalBox(TextColumn))
 	{
 		TextSlot->SetVerticalAlignment(VAlign_Center);
 	}
 
 	KickerText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Kicker"));
-	KickerText->SetFont(FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 12));
+	KickerText->SetFont(MakeToastFont(TEXT("Bold"), 12));
 	KickerText->SetColorAndOpacity(FSlateColor(FLinearColor(0.95f, 0.78f, 0.35f, 1.f)));
 	if (UVerticalBoxSlot* KickerSlot = TextColumn->AddChildToVerticalBox(KickerText))
 	{
@@ -323,7 +459,7 @@ TSharedRef<SWidget> UDiscoveryToastWidget::RebuildWidget()
 	}
 
 	NameText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Name"));
-	NameText->SetFont(FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 22));
+	NameText->SetFont(MakeToastFont(TEXT("Bold"), 22));
 	NameText->SetColorAndOpacity(FSlateColor(FLinearColor(0.96f, 0.96f, 0.96f, 1.f)));
 	if (UVerticalBoxSlot* NameSlot = TextColumn->AddChildToVerticalBox(NameText))
 	{
@@ -331,7 +467,7 @@ TSharedRef<SWidget> UDiscoveryToastWidget::RebuildWidget()
 	}
 
 	DescText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Desc"));
-	DescText->SetFont(FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 13));
+	DescText->SetFont(MakeToastFont(TEXT("Regular"), 13));
 	DescText->SetColorAndOpacity(FSlateColor(FLinearColor(0.72f, 0.74f, 0.78f, 1.f)));
 	DescText->SetAutoWrapText(true);
 	DescText->SetWrapTextAt(380.f);
@@ -341,9 +477,11 @@ TSharedRef<SWidget> UDiscoveryToastWidget::RebuildWidget()
 	}
 
 	RewardText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Reward"));
-	RewardText->SetFont(FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 12));
+	RewardText->SetFont(MakeToastFont(TEXT("Bold"), 12));
 	RewardText->SetColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.9f, 0.55f, 1.f)));
 	TextColumn->AddChildToVerticalBox(RewardText);
+
+	EnsureBagHint();
 
 	CardBorder->SetVisibility(ESlateVisibility::Collapsed);
 
@@ -382,7 +520,19 @@ void UDiscoveryToastWidget::BeginNext()
 	{
 		CardBorder->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
 		CardBorder->SetRenderOpacity(0.f);
-		CardBorder->SetRenderTranslation(FVector2D(0.f, 18.f));
+		if (GetToastStyle(this) == EToastStyle::HarvestRight)
+		{
+			// 采摘提示从屏幕右侧外滑入
+			CardBorder->SetRenderTransform(FWidgetTransform(
+				FVector2D(HarvestSlideDistance, 0.f),
+				FVector2D(0.96f, 0.96f),
+				FVector2D::ZeroVector,
+				0.f));
+		}
+		else
+		{
+			CardBorder->SetRenderTranslation(FVector2D(0.f, 18.f));
+		}
 	}
 }
 
@@ -393,9 +543,18 @@ void UDiscoveryToastWidget::ApplyVisual(const FDiscoveryToastEntry& Entry)
 		return;
 	}
 
+	const bool bHarvestStyle = GetToastStyle(this) == EToastStyle::HarvestRight;
+
 	// 卡片描边跟随本次提示的主色，让“新发现”和普通提示在视觉上可区分
 	CardBrush.OutlineSettings.Color = FSlateColor(Entry.Accent);
 	CardBorder->SetBrush(CardBrush);
+	// 采摘提示用半透明墨绿横幅，贴近参考视频里的炸弹花提示
+	CardBorder->SetBrushColor(bHarvestStyle
+		? FLinearColor(0.055f, 0.11f, 0.065f, 0.88f)
+		: FLinearColor(0.04f, 0.045f, 0.05f, 0.94f));
+
+	// “打开背包 B”只在采摘提示上出现
+	SetBagHintVisible(bHarvestStyle);
 
 	if (KickerText)
 	{
@@ -515,7 +674,7 @@ void UDiscoveryToastWidget::BuildVisualWidgetBlueprint(const FString& AssetPath)
 	auto AddText = [Tree, TextColumn](const TCHAR* Name, const TCHAR* FontStyle, int32 Size, FLinearColor Color)
 	{
 		UTextBlock* Text = Tree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), Name);
-		Text->SetFont(FCoreStyle::GetDefaultFontStyle(FontStyle, Size));
+		Text->SetFont(MakeToastFont(FontStyle, Size));
 		Text->SetColorAndOpacity(FSlateColor(Color));
 		Text->SetText(FText::GetEmpty());
 		TextColumn->AddChildToVerticalBox(Text);
@@ -528,6 +687,44 @@ void UDiscoveryToastWidget::BuildVisualWidgetBlueprint(const FString& AssetPath)
 	Desc->SetAutoWrapText(true);
 	Desc->SetWrapTextAt(380.f);
 	AddText(TEXT("Reward"), TEXT("Bold"), 12, FLinearColor(0.55f, 0.9f, 0.55f, 1.f));
+
+	// “打开背包 B”指引行：采摘提示右下角展示 B 键
+	UHorizontalBox* BagRow = Tree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("BagRow"));
+	UTextBlock* BagHint = Tree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("BagHint"));
+	BagHint->SetFont(MakeToastFont(TEXT("Regular"), 12));
+	BagHint->SetColorAndOpacity(FSlateColor(FLinearColor(0.78f, 0.80f, 0.83f, 1.f)));
+	BagHint->SetText(FText::FromString(TEXT("打开背包")));
+	if (UHorizontalBoxSlot* HintSlot = BagRow->AddChildToHorizontalBox(BagHint))
+	{
+		HintSlot->SetPadding(FMargin(0.f, 0.f, 6.f, 0.f));
+		HintSlot->SetVerticalAlignment(VAlign_Center);
+	}
+
+	UBorder* BagKey = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("BagKey"));
+	FSlateBrush KeyBrush;
+	KeyBrush.DrawAs = ESlateBrushDrawType::RoundedBox;
+	KeyBrush.OutlineSettings.CornerRadii = FVector4(4.f, 4.f, 4.f, 4.f);
+	KeyBrush.OutlineSettings.RoundingType = ESlateBrushRoundingType::FixedRadius;
+	BagKey->SetBrush(KeyBrush);
+	BagKey->SetBrushColor(FLinearColor(0.93f, 0.93f, 0.90f, 0.96f));
+	BagKey->SetPadding(FMargin(5.f, 1.f));
+
+	UTextBlock* BagKeyText = Tree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("BagKeyText"));
+	BagKeyText->SetFont(MakeToastFont(TEXT("Bold"), 11));
+	BagKeyText->SetColorAndOpacity(FSlateColor(FLinearColor(0.08f, 0.09f, 0.10f, 1.f)));
+	BagKeyText->SetText(FText::FromString(TEXT("B")));
+	BagKey->SetContent(BagKeyText);
+
+	if (UHorizontalBoxSlot* KeySlot = BagRow->AddChildToHorizontalBox(BagKey))
+	{
+		KeySlot->SetVerticalAlignment(VAlign_Center);
+	}
+
+	if (UVerticalBoxSlot* BagRowSlot = TextColumn->AddChildToVerticalBox(BagRow))
+	{
+		BagRowSlot->SetPadding(FMargin(0.f, 6.f, 0.f, 0.f));
+		BagRowSlot->SetHorizontalAlignment(HAlign_Right);
+	}
 
 	FKismetEditorUtilities::CompileBlueprint(BP);
 	BP->GetOutermost()->MarkPackageDirty();
@@ -545,17 +742,55 @@ void UDiscoveryToastWidget::NativeTick(const FGeometry& MyGeometry, float InDelt
 
 	Elapsed += InDeltaTime;
 
-	// 采摘提示只停 2 秒就淡出；普通弹窗沿用原来的 3.6 秒
-	const float HoldSeconds = (GetToastStyle(this) == EToastStyle::HarvestRight)
-		? HarvestHoldSeconds : ToastHoldSeconds;
+	if (GetToastStyle(this) == EToastStyle::HarvestRight)
+	{
+		// 参考视频节奏：快速滑入 → 稳停 3.2 秒 → 向右滑出收回
+		float Alpha = 1.f;
+		float OffsetX = 0.f;
+		float Scale = 1.f;
+		if (Elapsed < HarvestSlideInSeconds)
+		{
+			const float T = FMath::Clamp(Elapsed / HarvestSlideInSeconds, 0.f, 1.f);
+			const float Eased = 1.f - FMath::Pow(1.f - T, 3.f);
+			OffsetX = (1.f - Eased) * HarvestSlideDistance;
+			Alpha = FMath::Clamp(Elapsed / (HarvestSlideInSeconds * 0.6f), 0.f, 1.f);
+			Scale = FMath::Lerp(0.96f, 1.f, Eased);
+		}
+		else if (Elapsed > HarvestHoldSeconds)
+		{
+			const float T = FMath::Clamp((Elapsed - HarvestHoldSeconds) / HarvestSlideOutSeconds, 0.f, 1.f);
+			OffsetX = T * T * HarvestSlideDistance;
+			Alpha = 1.f - T;
+		}
+
+		CardBorder->SetRenderOpacity(Alpha);
+		CardBorder->SetRenderTransform(FWidgetTransform(
+			FVector2D(OffsetX, 0.f),
+			FVector2D(Scale, Scale),
+			FVector2D::ZeroVector,
+			0.f));
+
+		if (Elapsed >= HarvestHoldSeconds + HarvestSlideOutSeconds)
+		{
+			bShowing = false;
+			// 采摘提示用完即销毁整张卡，其它堆叠卡自动补位
+			if (APlayerController* PC = OwnerController.Get())
+			{
+				RemoveHarvestHint(PC, this);
+			}
+			RemoveFromParent();
+		}
+		return;
+	}
+
 	float Alpha = 1.f;
 	if (Elapsed < ToastFadeInSeconds)
 	{
 		Alpha = Elapsed / ToastFadeInSeconds;
 	}
-	else if (Elapsed > HoldSeconds)
+	else if (Elapsed > ToastHoldSeconds)
 	{
-		Alpha = 1.f - (Elapsed - HoldSeconds) / ToastFadeOutSeconds;
+		Alpha = 1.f - (Elapsed - ToastHoldSeconds) / ToastFadeOutSeconds;
 	}
 	Alpha = FMath::Clamp(Alpha, 0.f, 1.f);
 
@@ -563,22 +798,10 @@ void UDiscoveryToastWidget::NativeTick(const FGeometry& MyGeometry, float InDelt
 	CardBorder->SetRenderOpacity(Alpha);
 	CardBorder->SetRenderTranslation(FVector2D(0.f, (1.f - Alpha) * 18.f));
 
-	if (Elapsed >= HoldSeconds + ToastFadeOutSeconds)
+	if (Elapsed >= ToastHoldSeconds + ToastFadeOutSeconds)
 	{
 		bShowing = false;
-		if (GetToastStyle(this) == EToastStyle::HarvestRight)
-		{
-			// 采摘提示用完即销毁整张卡，其它堆叠卡自动上移
-			if (APlayerController* PC = OwnerController.Get())
-			{
-				RemoveHarvestHint(PC, this);
-			}
-			RemoveFromParent();
-		}
-		else
-		{
-			BeginNext();
-		}
+		BeginNext();
 	}
 }
 

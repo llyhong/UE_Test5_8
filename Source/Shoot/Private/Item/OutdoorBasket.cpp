@@ -318,3 +318,13 @@ void AOutdoorBasket::SettleOnGround(AActor* IgnoreActor)
 	SetActorEnableCollision(true);
 	SetItemState(EItemState::EIS_Idle);
 }
+
+void AOutdoorBasket::PlaceAtDock(const FTransform& DockTransform)
+{
+	ItemMesh->SetSimulatePhysics(false);
+	ItemMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	SetActorTransform(DockTransform, false, nullptr, ETeleportType::TeleportPhysics);
+	SetActorHiddenInGame(false);
+	SetActorEnableCollision(true);
+	SetItemState(EItemState::EIS_Idle);
+}

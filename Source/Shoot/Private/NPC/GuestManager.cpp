@@ -12,6 +12,16 @@
 #include "Game/BaseGameInstance.h"
 #include "Game/BaseLevelBP.h"
 #include "Game/OrderSystem.h"
+
+namespace
+{
+	EKitchenShift GetGuestPacingShift(const AGuestManager& Manager)
+	{
+		const UBaseGameInstance* GI = Cast<UBaseGameInstance>(Manager.GetGameInstance());
+		const AOrderSystem* Orders = GI && GI->curLevelBP ? GI->curLevelBP->orderSystem.Get() : nullptr;
+		return Orders ? Orders->GetKitchenShiftType() : EKitchenShift::None;
+	}
+}
 #include "Game/EconomySystem.h"
 #include "Game/BusinessTime.h"
 #include "Game/TutorialTaskManager.h"
@@ -218,7 +228,6 @@ void AGuestManager::TickSpawn()
 		return;
 	}
 
-	AGuestCharacter* Guest = nullptr;
 	if (IsAdmissionStopped())
 	{
 		// 距打烊太近：停止进新客（PauseSpawning 同时收掉波峰横幅与节奏定时器），已进场客人继续接待
@@ -231,6 +240,16 @@ void AGuestManager::TickSpawn()
 		PauseSpawning();
 		return;
 	}
+	for (TActorIterator<ATutorialTaskManager> It(GetWorld()); It; ++It)
+	{
+		if (It->IsDayTwoServiceLesson())
+		{
+			SpawnGuest();
+			ScheduleNextSpawn(0.75f);
+			return;
+		}
+	}
+	AGuestCharacter* Guest = nullptr;
 	// 前期节奏：按配置表逐次来客（1,1,1,2,1,2…），表走完才落入常规波峰循环。
 	// 之前开门后要先干等一个完整周期，再被第一波波峰一次涌入，体验上就是“半天没客、一来一群”。
 	const float PressureScale = GetCoopPressureScale();
@@ -286,12 +305,14 @@ void AGuestManager::TickSpawn()
 			if (UWorld* World = GetWorld())
 			{
 				World->GetTimerManager().SetTimer(RushPhaseTimerHandle,
-					this, &AGuestManager::AdvanceRushPhase, FMath::Max(FirstRushDelay, 0.1f), false);
+					this, &AGuestManager::AdvanceRushPhase, GetFirstRushDelay(), false);
 			}
 		}
 		else
 		{
-			ScheduleNextSpawn((Spawned > 0 ? EarlyArrivalInterval : SpawnRetryDelay) / PressureScale);
+			const UTimeSystem* Clock = BoundTimeSystem.Get();
+			const float EarlyInterval = Clock && Clock->IsFirstRegularKitchenService() ? EarlyArrivalInterval * 0.75f : EarlyArrivalInterval;
+			ScheduleNextSpawn((Spawned > 0 ? EarlyInterval : SpawnRetryDelay) / PressureScale);
 		}
 		return;
 	}
@@ -300,7 +321,7 @@ void AGuestManager::TickSpawn()
 	if (bCustomerPacingStarted)
 	{
 		// 备料窗口内放慢来客（GetEffectiveSpawnInterval 只放宽不收紧）
-		const float Interval = (bInCustomerRush ? FMath::Max(RushSpawnInterval, 0.1f) : GetEffectiveSpawnInterval()) / PressureScale;
+		const float Interval = (bInCustomerRush ? GetRushSpawnInterval() : GetEffectiveSpawnInterval()) / PressureScale;
 		ScheduleNextSpawn(Guest ? Interval : FMath::Max(SpawnRetryDelay, 0.1f) / PressureScale);
 	}
 }
@@ -332,7 +353,7 @@ void AGuestManager::AdvanceRushPhase()
 		// 新波峰开始：立刻关闭备料窗口（恢复来客节奏与订单宽限）
 		ClosePrepWindow();
 		PhaseDelay = FMath::Max(RushDuration, 0.1f);
-		const double CycleDuration = FMath::Max(static_cast<double>(RushInterval), static_cast<double>(PhaseDelay) + 0.1);
+		const double CycleDuration = FMath::Max(static_cast<double>(GetRushCycleInterval()), static_cast<double>(PhaseDelay) + 0.1);
 		NextRushStartTime = World->GetTimeSeconds() + CycleDuration;
 		ShowRushBanner();
 	}
@@ -352,7 +373,7 @@ void AGuestManager::AdvanceRushPhase()
 		}
 	}
 
-	ScheduleNextSpawn((bInCustomerRush ? FMath::Max(RushSpawnInterval, 0.1f) : GetEffectiveSpawnInterval()) / GetCoopPressureScale());
+	ScheduleNextSpawn((bInCustomerRush ? GetRushSpawnInterval() : GetEffectiveSpawnInterval()) / GetCoopPressureScale());
 	World->GetTimerManager().SetTimer(RushPhaseTimerHandle,
 		this, &AGuestManager::AdvanceRushPhase, PhaseDelay, false);
 }
@@ -432,7 +453,30 @@ void AGuestManager::HideRushBanner()
 float AGuestManager::GetEffectiveSpawnInterval() const
 {
 	// 只放宽不收紧：配置里把 PrepWindowSpawnInterval 调小也不会让来客变快
-	return bInPrepWindow ? FMath::Max(SpawnInterval, PrepWindowSpawnInterval) : SpawnInterval;
+	const EKitchenShift Shift = GetGuestPacingShift(*this);
+	const UTimeSystem* Clock = BoundTimeSystem.Get();
+	const bool bFirstRegularService = Clock && Clock->IsFirstRegularKitchenService();
+	const float Regular = Shift == EKitchenShift::PlateTurnover || bFirstRegularService ? SpawnInterval * 0.75f : SpawnInterval;
+	return bInPrepWindow && Shift != EKitchenShift::PlateTurnover ? FMath::Max(Regular, PrepWindowSpawnInterval) : Regular;
+}
+
+float AGuestManager::GetFirstRushDelay() const
+{
+	const EKitchenShift Shift = GetGuestPacingShift(*this);
+	const float Scale = Shift == EKitchenShift::Rush ? 0.6f : Shift == EKitchenShift::PlateTurnover ? 1.75f : 1.f;
+	return FMath::Max(FirstRushDelay * Scale, 0.1f);
+}
+
+float AGuestManager::GetRushSpawnInterval() const
+{
+	const EKitchenShift Shift = GetGuestPacingShift(*this);
+	const float Scale = Shift == EKitchenShift::Rush ? 0.8f : Shift == EKitchenShift::PlateTurnover ? 2.5f : 1.f;
+	return FMath::Max(RushSpawnInterval * Scale, 0.1f);
+}
+
+float AGuestManager::GetRushCycleInterval() const
+{
+	return GetGuestPacingShift(*this) == EKitchenShift::Rush ? RushInterval * 0.8f : RushInterval;
 }
 
 bool AGuestManager::IsAdmissionStopped() const
@@ -763,11 +807,13 @@ void AGuestManager::DrawSpawnLeaveDebug() const
 
 AGuestCharacter* AGuestManager::SpawnGuest()
 {
+	const ATutorialTaskManager* DayTwoLesson = nullptr;
 	// 首单教学期间只留一位客人，玩家可先学会流程再面对波峰。
 	for (TActorIterator<ATutorialTaskManager> It(GetWorld()); It; ++It)
 	{
 		if (It->IsFirstDayPlateLessonActive()) return nullptr;
 		if (It->IsFirstServiceTutorialActive() && ActiveGuests.Num() >= 1) return nullptr;
+		if (It->IsDayTwoServiceLesson()) DayTwoLesson = *It;
 	}
 	UWorld* World = GetWorld();
 	if (!World)
@@ -784,7 +830,7 @@ AGuestCharacter* AGuestManager::SpawnGuest()
 	if (const UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetGameInstance()))
 	{
 		const AOrderSystem* Orders = GI->curLevelBP ? GI->curLevelBP->orderSystem.Get() : nullptr;
-		if (Orders && Orders->GetFirstDayServiceTarget() > 0)
+		if (DayTwoLesson || (Orders && Orders->GetFirstDayServiceTarget() > 0))
 		{
 			int32 UnservedGuests = 0;
 			for (const AGuestCharacter* Guest : ActiveGuests)
@@ -793,8 +839,14 @@ AGuestCharacter* AGuestManager::SpawnGuest()
 					&& Guest->GuestState != EGuestState::Leaving && Guest->GuestState != EGuestState::Dead)
 					++UnservedGuests;
 			}
-			if (Orders->GetFirstDayOrdersServed() + UnservedGuests >= Orders->GetFirstDayServiceTarget())
+			if (DayTwoLesson)
+			{
+				if (!DayTwoLesson->CanAdmitDayTwoGuest(UnservedGuests)) return nullptr;
+			}
+			else if (Orders->GetFirstDayOrdersServed() + UnservedGuests >= Orders->GetFirstDayServiceTarget())
+			{
 				return nullptr;
+			}
 		}
 	}
 	if (!bSpawningPaused && (!bCustomerPacingStarted || TS != Previous))
@@ -1166,7 +1218,7 @@ void AGuestManager::ResumeSpawning()
 	}
 	ScheduleNextSpawn(bWaitingForFirstGuest ? InitialDelay : GetEffectiveSpawnInterval());
 	World->GetTimerManager().SetTimer(RushPhaseTimerHandle,
-		this, &AGuestManager::AdvanceRushPhase, FMath::Max(FirstRushDelay, 0.1f), false);
+		this, &AGuestManager::AdvanceRushPhase, GetFirstRushDelay(), false);
 }
 
 FVector AGuestManager::GetQueueWanderCenter() const

@@ -691,17 +691,17 @@ UWidget* UShopScreenWidget::BuildIngredientCard(int32 ItemID, const FString& Ite
 	UHorizontalBox* Header = WidgetTree->ConstructWidget<UHorizontalBox>();
 	Column->AddChildToVerticalBox(Header);
 
-	USizeBox* IconSize = WidgetTree->ConstructWidget<USizeBox>();
-	IconSize->SetWidthOverride(58.f);
-	IconSize->SetHeightOverride(58.f);
+	USizeBox* ItemIconBox = WidgetTree->ConstructWidget<USizeBox>();
+	ItemIconBox->SetWidthOverride(58.f);
+	ItemIconBox->SetHeightOverride(58.f);
 	UImage* IconImage = WidgetTree->ConstructWidget<UImage>();
 	if (Icon)
 	{
 		IconImage->SetBrushFromTexture(Icon, true);
 	}
 	IconImage->SetVisibility(ESlateVisibility::HitTestInvisible);
-	IconSize->SetContent(IconImage);
-	Header->AddChildToHorizontalBox(IconSize);
+	ItemIconBox->SetContent(IconImage);
+	Header->AddChildToHorizontalBox(ItemIconBox);
 
 	UVerticalBox* NameColumn = WidgetTree->ConstructWidget<UVerticalBox>();
 	if (UHorizontalBoxSlot* NameSlot = Header->AddChildToHorizontalBox(NameColumn))

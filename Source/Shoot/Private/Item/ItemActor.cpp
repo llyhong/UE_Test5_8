@@ -3,6 +3,7 @@
 #include "Item/ItemActor.h"
 #include "Item/PlateCollectionTray.h"
 #include "Data/ItemActorInfo.h"
+#include "Components/PointLightComponent.h"
 #include "Components/SphereComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/WidgetComponent.h"
@@ -14,9 +15,12 @@
 
 #include "Game/PlateSystem.h"
 #include "Game/BaseGameInstance.h"
+#include "Game/BaseLevelBP.h"
 #include "Kismet/GameplayStatics.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "DrawDebugHelpers.h"
 #include "UI/PremiumDishFeedbackWidget.h"
+#include "UI/DirtyPlateMarkerWidget.h"
 
 AItemActor::AItemActor()
 {
@@ -141,6 +145,14 @@ void AItemActor::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 	RefreshInteractionHighlightRequests();
+
+	// —— 空碟暖色光晕脉动（1.6s 一个呼吸周期）——
+	if (DirtyPlateGlowLight)
+	{
+		DirtyPlateGlowPhase += DeltaTime;
+		const float Glow = 0.5f + 0.5f * FMath::Sin(DirtyPlateGlowPhase * 2.f * PI / 1.6f);
+		DirtyPlateGlowLight->SetIntensity(8.f + 6.f * Glow);
+	}
 
 	// 根组件就是 ItemMesh：投掷/掉落开启物理后整个 Actor 会翻滚，
 	// 挂在根上的判定球跟着转到地面以下，物品明明在脚边却按不出来。
@@ -364,13 +376,23 @@ void AItemActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	Super::EndPlay(EndPlayReason);
 }
 
-void AItemActor::ReserveServingPlate(APlateSystem& PlateSystem)
+bool AItemActor::ReserveServingPlate(APlateSystem& PlateSystem)
 {
-	if (!PlateSystem.IsInfinitePlates() && !ReservedPlateSystem.IsValid())
+	if (!PlateSystem.IsInfinitePlates() && !HasReservedServingPlate())
 	{
+		if (PlateSystem.GetAvailablePlates() <= 0) return false;
 		PlateSystem.RemovePlate();
 		ReservedPlateSystem = &PlateSystem;
 	}
+	return true;
+}
+
+bool AItemActor::TryPrepareServingPlate()
+{
+	if (HasReservedServingPlate() || UGameplayStatics::GetCurrentLevelName(this) != TEXT("Kitchen_New")) return true;
+	const UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetGameInstance());
+	APlateSystem* Plates = GI && GI->curLevelBP ? GI->curLevelBP->PlateSystem.Get() : nullptr;
+	return Plates && ReserveServingPlate(*Plates);
 }
 
 bool AItemActor::ReturnServingPlate()
@@ -540,6 +562,154 @@ void AItemActor::ClearPremiumDishFeedback()
 	{
 		PremiumDishFeedback->DestroyComponent();
 		PremiumDishFeedback = nullptr;
+	}
+}
+
+void AItemActor::ShowDirtyPlateFeedback()
+{
+	if (!bIsEmptyPlate || DirtyPlateMarker || !ItemMesh || GetNetMode() == NM_DedicatedServer)
+	{
+		return;
+	}
+
+	FVector Anchor(0.f, 0.f, 14.f);
+	if (const UStaticMesh* Mesh = ItemMesh->GetStaticMesh())
+	{
+		const FBoxSphereBounds MeshBounds = Mesh->GetBounds();
+		Anchor = MeshBounds.Origin;
+		Anchor.Z += MeshBounds.BoxExtent.Z + 2.f;
+	}
+
+	// 纯图形标记：几只绕飞苍蝇（虚线轨迹）+ 臭味飘线，不含任何文字；屏幕空间固定像素大小，远处也能看到
+	DirtyPlateMarker = NewObject<UWidgetComponent>(this, TEXT("DirtyPlateMarker"));
+	DirtyPlateMarker->SetupAttachment(ItemMesh);
+	DirtyPlateMarker->SetWidgetSpace(EWidgetSpace::Screen);
+	DirtyPlateMarker->SetWidgetClass(UDirtyPlateMarkerWidget::StaticClass());
+	DirtyPlateMarker->SetDrawSize(FVector2D(128.f, 128.f));
+	DirtyPlateMarker->SetPivot(FVector2D(0.5f, 1.f));
+	DirtyPlateMarker->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	DirtyPlateMarker->SetWindowFocusable(false);
+	DirtyPlateMarker->SetRelativeLocation(Anchor);
+	DirtyPlateMarker->RegisterComponent();
+
+	// 碟子本体的暖色光晕：小范围点光源从碟口上方往下打；
+	// 亮度刻意压低，只给碟沿一圈暖边，避免白盘子被照成一块发光的白饼盖住残渍
+	DirtyPlateGlowLight = NewObject<UPointLightComponent>(this, TEXT("DirtyPlateGlowLight"));
+	DirtyPlateGlowLight->SetupAttachment(ItemMesh);
+	DirtyPlateGlowLight->SetRelativeLocation(FVector(0.f, 0.f, Anchor.Z + 6.f));
+	DirtyPlateGlowLight->SetLightColor(FLinearColor(1.f, 0.62f, 0.22f));
+	DirtyPlateGlowLight->SetAttenuationRadius(120.f);
+	DirtyPlateGlowLight->SetIntensity(10.f);
+	DirtyPlateGlowLight->SetCastShadows(false);
+	DirtyPlateGlowLight->SetMobility(EComponentMobility::Movable);
+	DirtyPlateGlowLight->RegisterComponent();
+	DirtyPlateGlowPhase = 0.f;
+}
+
+void AItemActor::ShowDirtyPlateResidue()
+{
+	if (!ItemMesh || DirtyPlateResidues.Num() > 0 || GetNetMode() == NM_DedicatedServer)
+	{
+		return;
+	}
+
+	UStaticMesh* BlobMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Sphere.Sphere"));
+	UMaterialInterface* BaseMat = LoadObject<UMaterialInterface>(nullptr,
+		TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+	const UStaticMesh* PlateMesh = ItemMesh->GetStaticMesh();
+	if (!BlobMesh || !BaseMat || !PlateMesh)
+	{
+		return;
+	}
+
+	// 只靠包围盒估算碟面高度：盘子取约半个盘深，碗取碗底上方一点；残渣略微嵌入表面避免悬空
+	const FBoxSphereBounds Bounds = PlateMesh->GetBounds();
+	const bool bBowl = Bounds.BoxExtent.Z > Bounds.BoxExtent.X * 0.4f;
+	const float SurfaceZ = bBowl
+		? Bounds.Origin.Z - Bounds.BoxExtent.Z + Bounds.BoxExtent.Z * 0.18f
+		: Bounds.Origin.Z + Bounds.BoxExtent.Z * 0.4f;
+	// 盘面半径（网格本地单位）：位置按它铺开，斑块尺寸按它缩放，两者分开算，
+	// 否则大斑点会把坐标挤到中间，看上去只剩一坨
+	const float PlateRadius = FMath::Min(Bounds.BoxExtent.X, Bounds.BoxExtent.Y);
+	const float Spread = PlateRadius * (bBowl ? 0.7f : 0.95f);
+	const FVector Center(Bounds.Origin.X, Bounds.Origin.Y, 0.f);
+
+	struct FResiduePiece
+	{
+		float X;         // 相对碟心的水平偏移（Spread 的比例）
+		float Y;
+		float Radius;    // 斑块半径（PlateRadius 的比例）
+		float Elongation; // Y 方向拉伸（<1 压扁成椭圆抹痕，>1 拉长）
+		float Yaw;
+		float R, G, B;
+		float Roughness;
+	};
+
+	// 大面积的暗色抹痕铺满盘心 + 沿半径方向的细长酱痕 + 零星菜渣：
+	// 全部压得很薄、粗糙度高，远看是一盘被吃过的残渍而不是几颗食物
+	static const FResiduePiece Pieces[] =
+	{
+		{ -0.34f, 0.26f, 0.40f, 0.75f, 20.f, 0.16f, 0.075f, 0.035f, 0.80f },
+		{ 0.26f, -0.28f, 0.34f, 0.60f, -30.f, 0.20f, 0.09f, 0.04f, 0.78f },
+		{ 0.40f, 0.34f, 0.16f, 2.60f, 40.f, 0.28f, 0.12f, 0.05f, 0.70f },
+		{ -0.44f, -0.16f, 0.14f, 2.20f, -15.f, 0.24f, 0.10f, 0.045f, 0.72f },
+		{ 0.00f, -0.50f, 0.12f, 2.80f, 85.f, 0.18f, 0.08f, 0.04f, 0.75f },
+		{ -0.12f, 0.52f, 0.10f, 1.80f, 10.f, 0.34f, 0.20f, 0.09f, 0.65f },
+		{ 0.36f, -0.04f, 0.06f, 1.40f, 0.f, 0.08f, 0.04f, 0.02f, 0.85f },
+		{ -0.30f, 0.10f, 0.06f, 1.20f, 0.f, 0.14f, 0.13f, 0.05f, 0.80f },
+		{ 0.14f, 0.20f, 0.05f, 1.60f, 0.f, 0.42f, 0.24f, 0.10f, 0.58f },
+		{ -0.20f, -0.30f, 0.05f, 1.30f, 0.f, 0.10f, 0.05f, 0.03f, 0.88f },
+		{ 0.08f, -0.12f, 0.07f, 2.00f, 70.f, 0.30f, 0.14f, 0.06f, 0.70f },
+		{ -0.50f, 0.44f, 0.08f, 1.40f, 55.f, 0.12f, 0.06f, 0.03f, 0.82f },
+		{ 0.48f, -0.44f, 0.07f, 1.20f, -50.f, 0.20f, 0.09f, 0.04f, 0.80f },
+		{ 0.00f, 0.02f, 0.09f, 1.50f, 5.f, 0.10f, 0.05f, 0.03f, 0.85f },
+	};
+
+	for (int32 Index = 0; Index < UE_ARRAY_COUNT(Pieces); ++Index)
+	{
+		const FResiduePiece& Piece = Pieces[Index];
+		const float Radius = PlateRadius * Piece.Radius;
+		// 统一压成极薄的贴面：厚度只取半径的 3%，看上去是干在碟面上的抹痕
+		const float HalfHeight = Radius * 0.03f;
+
+		UStaticMeshComponent* Blob = NewObject<UStaticMeshComponent>(this,
+			*FString::Printf(TEXT("DirtyPlateResidue%d"), Index));
+		Blob->SetupAttachment(ItemMesh);
+		Blob->SetStaticMesh(BlobMesh);
+		Blob->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Blob->SetGenerateOverlapEvents(false);
+		Blob->SetCastShadow(false);
+		Blob->SetMobility(EComponentMobility::Movable);
+		Blob->SetRelativeLocation(FVector(
+			Center.X + Piece.X * Spread,
+			Center.Y + Piece.Y * Spread,
+			SurfaceZ + HalfHeight * 0.1f));
+		// 球体基网格半径 50：压成扁椭圆，代表酱渍 / 菜渣
+		Blob->SetRelativeScale3D(FVector(
+			Radius / 50.f, Radius * Piece.Elongation / 50.f, HalfHeight / 50.f));
+		Blob->SetRelativeRotation(FRotator(0.f, Piece.Yaw, 0.f));
+
+		UMaterialInstanceDynamic* BlobMat = UMaterialInstanceDynamic::Create(BaseMat, this);
+		BlobMat->SetVectorParameterValue(TEXT("Color"), FLinearColor(Piece.R, Piece.G, Piece.B));
+		BlobMat->SetScalarParameterValue(TEXT("Roughness"), Piece.Roughness);
+		Blob->SetMaterial(0, BlobMat);
+
+		Blob->RegisterComponent();
+		DirtyPlateResidues.Add(Blob);
+	}
+}
+
+void AItemActor::ClearDirtyPlateFeedback()
+{
+	if (DirtyPlateMarker)
+	{
+		DirtyPlateMarker->DestroyComponent();
+		DirtyPlateMarker = nullptr;
+	}
+	if (DirtyPlateGlowLight)
+	{
+		DirtyPlateGlowLight->DestroyComponent();
+		DirtyPlateGlowLight = nullptr;
 	}
 }
 
@@ -729,6 +899,7 @@ bool AItemActor::PickUpByPlayer(AShootCharacter* Player)
 	// 不再是“桌上空碟”，改为玩家手上的“脏碟”，需交给洗碗机清洗
 	bIsEmptyPlate = false;
 	bIsDirtyPlate = true;
+	ClearDirtyPlateFeedback();
 	bPickable = false;       // 脏碟不能被当作普通可捡物放下/丢弃，只能交还洗碗机
 	bEnableDecay = false;
 	if (CollectSphere)

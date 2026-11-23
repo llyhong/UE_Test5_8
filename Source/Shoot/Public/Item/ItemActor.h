@@ -16,6 +16,8 @@ class AShootCharacter;
 class APlateSystem;
 class UTexture2D;
 class UWidgetComponent;
+class UPointLightComponent;
+class UStaticMeshComponent;
 
 UENUM(BlueprintType)
 enum class EItemState : uint8
@@ -158,7 +160,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Item")
 	FORCEINLINE void SetMenuFoodID(int32 InID) { MenuFoodID = InID; }
 
-	void ReserveServingPlate(APlateSystem& PlateSystem);
+	bool ReserveServingPlate(APlateSystem& PlateSystem);
+	bool TryPrepareServingPlate();
+	bool HasReservedServingPlate() const { return ReservedPlateSystem.IsValid(); }
 	bool ReturnServingPlate();
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Shoot|Item")
@@ -322,6 +326,14 @@ public:
 	void ShowPremiumDishFeedback();
 	void ClearPremiumDishFeedback();
 
+	/** 桌上空碟的视觉标记（无文字）：上方绕飞苍蝇（带虚线轨迹）+ 臭味飘线，碟子本身叠加暖色光晕；
+	 *  收走 / 换菜时清除（只清标记，碟面残渣保留在手上） */
+	void ShowDirtyPlateFeedback();
+	void ClearDirtyPlateFeedback();
+
+	/** 碟面上的食物残渣与酱渍：只建一次，收走后仍留在脏碟上，随洗碗机销毁 */
+	void ShowDirtyPlateResidue();
+
 	// ========== 熟度（素材结果后的“成熟 / 熟过头”子阶段，按每个果实独立计时） ==========
 	/** 是否启用熟度：由植物在生成果实时按 PlantInfo 写入 */
 	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Item|Ripeness")
@@ -395,6 +407,19 @@ public:
 private:
 	UPROPERTY(Transient)
 	TObjectPtr<UWidgetComponent> PremiumDishFeedback;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UWidgetComponent> DirtyPlateMarker = nullptr;
+
+	/** 空碟暖色光晕（脉动，模拟碟沿发光照亮周围桌面） */
+	UPROPERTY(Transient)
+	TObjectPtr<UPointLightComponent> DirtyPlateGlowLight = nullptr;
+
+	/** 脏碟碟面的食物残渣（附着在 ItemMesh 上，随碟子一起移动 / 缩放） */
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UStaticMeshComponent>> DirtyPlateResidues;
+
+	float DirtyPlateGlowPhase = 0.f;
 
 	TWeakObjectPtr<APlateSystem> ReservedPlateSystem;
 };

@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Game/DataClass.h"
 #include "GameFramework/Actor.h"
+#include "Game/KitchenShift.h"
 #include "OrderSystem.generated.h"
 
 class AGuestCharacter;
@@ -146,14 +147,14 @@ public:
 	 */
 	bool GetNextConfigOrder(FOrderData& OutOrder, bool* bOutNoneServable = nullptr);
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Order")
-	bool PushFoods(const TArray<int>& FoodIDs);
+	bool PushFoods(const TArray<int>& FoodIDs, bool bPremiumDish = false);
 
 	/**
 	 * 针对性上菜：仅完成绑定到指定客人的、且菜品集合匹配的订单（方案B 玩家端菜走到客人面前上菜）。
 	 * @return 是否成功完成该客人的订单
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Order")
-	bool PushFoodsForGuest(const TArray<int>& FoodIDs, AGuestCharacter* TargetGuest);
+	bool PushFoodsForGuest(const TArray<int>& FoodIDs, AGuestCharacter* TargetGuest, bool bPremiumDish = false);
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Order")
 	void InitCfg(ULevelOrderCfg* cfg);
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Order")
@@ -190,6 +191,9 @@ public:
 	TArray<int32> GetDailyMenu() const { return DailyMenuIDs; }
 	UFUNCTION(BlueprintPure, Category = "Shoot|Order|Menu")
 	bool IsDailyMenuEditable() const;
+	TArray<int32> GetTeachingOrderFoodIDs(int32 Day) const;
+	int32 GetRemainingFirstDayEggOrders() const;
+	void CollectPreparedFoodPortions(TMap<int32, int32>& OutPortions) const;
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Order|Menu")
 	bool ToggleDailyMenuDish(int32 FoodID);
 	UFUNCTION(BlueprintPure, Category = "Shoot|Order|Menu")
@@ -292,6 +296,11 @@ public:
 	DECLARE_MULTICAST_DELEGATE_OneParam(FOnTimeStreakChanged, int32);
 	FOnTimeStreakChanged OnTimeStreakChanged;
 	void ResetOnTimeStreak();
+
+	EKitchenShift GetKitchenShiftType() const;
+	UFUNCTION(BlueprintPure, Category = "Shoot|Order|Kitchen Shift")
+	FKitchenShiftProgress GetKitchenShiftProgress() const { return KitchenShift; }
+	void RecordKitchenShiftPlate();
 	UPROPERTY(BlueprintAssignable, Category = "Shoot|Events")
 	FOrderEvent2 OnFinishOrder;
 	UPROPERTY(BlueprintAssignable, Category = "Shoot|Events")
@@ -311,6 +320,14 @@ public:
 
 private:
 	void RecordOrderTiming(const UOrderHandle& Order);
+	void RefreshKitchenShift();
+	void UpdateKitchenShiftMenu();
+	bool TryBuildKitchenShiftOrder(FOrderData& OutOrder);
+	void RecordKitchenShiftOrder(const UOrderHandle& Order, bool bPremiumDish);
+
+	FKitchenShiftProgress KitchenShift;
+	bool bKitchenShiftMenuLocked = false;
+	int32 KitchenShiftMenuCursor = 0;
 	UPROPERTY(Transient)
 	TArray<int32> DailyMenuIDs;
 	TArray<int32> PendingTastingIDs;
@@ -348,7 +365,8 @@ private:
 	void CollectSuppliedItemIDs(TSet<int32>& OutItemIDs) const;
 
 	/** 一道菜能不能进订单池：菜谱已解锁，且全部食材在当前关卡有来源。OutReason 供日志排查 */
-	bool IsMenuServable(int32 FoodID, const TSet<int32>& SuppliedItemIDs, FString& OutReason) const;
+	bool IsMenuServable(int32 FoodID, const TSet<int32>& SuppliedItemIDs, FString& OutReason,
+		bool bCheckSupplies = true) const;
 
 	/** Dishes being cooked or ready to serve can satisfy an order after the last raw ingredient is spent. */
 	void CollectPreparedFoodIDs(TSet<int32>& OutFoodIDs) const;
@@ -363,7 +381,7 @@ private:
 	/** 一张订单今天能不能发：订单里每道菜都要满足“已解锁 + 到了 UnlockDay + 食材有来源 + 机器在场”。
 	 *  关卡顺序单（Orders）与新手按天序列（DayFoodSequences）发单前都走这里，
 	 *  避免配置顺序绕过订单池的过滤（例如第 1 天按顺序发出第 2 天才开放的番茄汤） */
-	bool IsOrderServableToday(const FOrderData& Order, FString& OutReason) const;
+	bool IsOrderServableToday(const FOrderData& Order, FString& OutReason, bool bCheckSupplies = true) const;
 
 	/** 最近一次 RebuildOrderPool 收集到的食材来源（野味订单按它过滤，避免每次点餐都扫场景） */
 	TSet<int32> CachedSuppliedItemIDs;

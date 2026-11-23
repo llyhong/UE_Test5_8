@@ -81,6 +81,7 @@ void UBusinessSimulation::HandleMoneyChanged(int32 NewValue, int32 Delta, EMoney
 	if (Delta > 0)
 	{
 		TodayIncome += Delta;
+		if (Source == EMoneySource::OrderComplete) TodaySales += Delta;
 		MonthIncome += Delta;
 		YearIncome  += Delta;
 	}
@@ -98,6 +99,7 @@ void UBusinessSimulation::HandleMoneyChanged(int32 NewValue, int32 Delta, EMoney
 		if (GI->curSaveGameData)
 		{
 			GI->curSaveGameData->BizTodayIncome = TodayIncome;
+			GI->curSaveGameData->BizTodaySales = TodaySales;
 			GI->curSaveGameData->BizTodayExpense = TodayExpense;
 			GI->curSaveGameData->BizTodayInvestment = TodayInvestment;
 		}
@@ -111,14 +113,32 @@ FBusinessReport UBusinessSimulation::MakeReport(int32 Y, int32 M, int32 D) const
 	R.Month = M;
 	R.Day = D;
 	R.Income = TodayIncome;
+	R.Sales = TodaySales;
+	if (TimeSystem && TimeSystem->IsFirstRegularKitchenService())
+	{
+		R.SalesTarget = UTimeSystem::FirstRegularKitchenSalesTarget;
+	}
 	R.Expense = TodayExpense;
 	R.Net = TodayIncome - TodayExpense;
 	R.Investment = TodayInvestment;
 	R.OperatingNet = R.Net + R.Investment;
 	R.Money = Economy ? Economy->GetMoney() : 0;
 	R.Reputation = Economy ? Economy->GetReputation() : 0;
+	R.HygieneReputationLoss = TodayHygieneReputationLoss;
+	R.HygieneCompensation = TodayHygieneCompensation;
 	R.Stars = RestaurantStars;
 	return R;
+}
+
+void UBusinessSimulation::RecordHygieneLoss(int32 ReputationLoss, int32 Compensation)
+{
+	TodayHygieneReputationLoss += ReputationLoss;
+	TodayHygieneCompensation += Compensation;
+	if (UBaseGameInstance* GI = GetTypedOuter<UBaseGameInstance>(); GI && GI->curSaveGameData)
+	{
+		GI->curSaveGameData->BizTodayHygieneReputationLoss = TodayHygieneReputationLoss;
+		GI->curSaveGameData->BizTodayHygieneCompensation = TodayHygieneCompensation;
+	}
 }
 
 void UBusinessSimulation::ApplyDailyPassiveCash()
@@ -152,8 +172,11 @@ void UBusinessSimulation::ApplyDailyPassiveCash()
 void UBusinessSimulation::ResetDailyLedger()
 {
 	TodayIncome = 0;
+	TodaySales = 0;
 	TodayExpense = 0;
 	TodayInvestment = 0;
+	TodayHygieneReputationLoss = 0;
+	TodayHygieneCompensation = 0;
 }
 
 void UBusinessSimulation::HandleBusinessDayEnded()
@@ -169,7 +192,24 @@ void UBusinessSimulation::HandleBusinessDayEnded()
 	ApplyDailyPassiveCash();
 	RecomputeStars();
 
-	const FBusinessReport R = MakeReport(TimeSystem->Year, TimeSystem->Month, TimeSystem->Day);
+	FBusinessReport R = MakeReport(TimeSystem->Year, TimeSystem->Month, TimeSystem->Day);
+	if (UBaseGameInstance* GI = GetTypedOuter<UBaseGameInstance>())
+	{
+		const AOrderSystem* Orders = GI->curLevelBP ? GI->curLevelBP->orderSystem.Get() : nullptr;
+		if (Orders)
+		{
+			const FKitchenShiftProgress Shift = Orders->GetKitchenShiftProgress();
+			if (Shift.IsActive() && Shift.Day == TimeSystem->GetBusinessDayNumber())
+			{
+				R.KitchenShift = Shift;
+				if (GI->curSaveGameData)
+				{
+					int32& Best = GI->curSaveGameData->KitchenShiftBestStars.FindOrAdd(Shift.Day);
+					Best = FMath::Max(Best, Shift.GetStars());
+				}
+			}
+		}
+	}
 	if (SeasonSystem)
 	{
 		SeasonSystem->RecordDailyReport(R);
@@ -315,8 +355,11 @@ void UBusinessSimulation::Save()
 	}
 
 	GI->curSaveGameData->BizTodayIncome = TodayIncome;
+	GI->curSaveGameData->BizTodaySales = TodaySales;
 	GI->curSaveGameData->BizTodayExpense = TodayExpense;
 	GI->curSaveGameData->BizTodayInvestment = TodayInvestment;
+	GI->curSaveGameData->BizTodayHygieneReputationLoss = TodayHygieneReputationLoss;
+	GI->curSaveGameData->BizTodayHygieneCompensation = TodayHygieneCompensation;
 
 	if (TimeSystem)
 	{
@@ -345,8 +388,11 @@ void UBusinessSimulation::Load()
 	}
 
 	TodayIncome = GI->curSaveGameData->BizTodayIncome;
+	TodaySales = GI->curSaveGameData->BizTodaySales;
 	TodayExpense = GI->curSaveGameData->BizTodayExpense;
 	TodayInvestment = GI->curSaveGameData->BizTodayInvestment;
+	TodayHygieneReputationLoss = GI->curSaveGameData->BizTodayHygieneReputationLoss;
+	TodayHygieneCompensation = GI->curSaveGameData->BizTodayHygieneCompensation;
 
 	if (TimeSystem)
 	{

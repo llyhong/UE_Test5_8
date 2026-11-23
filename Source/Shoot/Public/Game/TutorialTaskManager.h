@@ -71,7 +71,7 @@ public:
 
 	/** 前三天不出现垃圾/积水，第四天开始清理教学；可追加其他无垃圾日。 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Tutorial")
-	TArray<int32> NoMessesDays = { 1, 2, 3 };
+	TArray<int32> NoMessesDays = { 1, 2, 3, 4 };
 
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Tutorial")
 	TArray<FTutorialChecklistEntry> GetChecklistEntries() const;
@@ -83,6 +83,18 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Tutorial")
 	void CaptureTutorialState();
+
+	/** 调试：立刻跳过全部新手引导（清任务、隐藏任务卡、释放引导暂停的时钟） */
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Tutorial|Debug")
+	void SkipTutorial();
+
+	/** 调试：跳过教程并从第 3 天开始（时钟/存档/赛季一起跳）。蓝图里直接调用，或勾选下方开关 PIE 自动执行 */
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Tutorial|Debug")
+	void DebugStartFromDay3();
+
+	/** 勾选后 PIE 开始时自动跳过教程并从第 3 天开始（放在 TutorialTaskManager 蓝图 Class Defaults 上调） */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Tutorial|Debug")
+	bool bAutoStartDay3 = false;
 
 	/** 当前引导箭头应指向的文本；无指引返回空 */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Tutorial")
@@ -100,6 +112,8 @@ public:
 	static void NotifyAction(UWorld* World, ETutorialTaskType Type, int32 ItemID, AActor* Target = nullptr, int32 Quantity = 1);
 	bool IsFirstServiceTutorialActive() const;
 	bool IsFirstDayPlateLessonActive() const;
+	bool IsDayTwoServiceLesson() const;
+	bool CanAdmitDayTwoGuest(int32 UnservedGuests) const;
 
 private:
 	struct FActiveTask
@@ -127,6 +141,7 @@ private:
 	float PollAccum = 0.f;
 	float InitDelay = 0.4f;
 	bool bHoldingTutorialClock = false;
+	bool bDebugJumpPending = false;
 	TWeakObjectPtr<class UMySaveGame> AppliedSave;
 
 	/** 每个角色上一帧手持物品的 ItemID，用于统计“新采到手上”的次数 */
@@ -147,6 +162,11 @@ private:
 	int32 GetSupplyRequirement(int32 ItemID) const;
 	int32 CountReadyStock(int32 ItemID) const;
 	int32 CountAvailableSupply(int32 ItemID) const;
+	static constexpr int32 FirstDayEggItemID = 2;
+	static const FName CollectedFirstDayEggTag;
+	void ReplenishFirstDayEggs() const;
+	bool GetDayThreeOpeningStatus(FText& OutReason, int32& OutMissingItem,
+		TArray<FTutorialChecklistEntry>* Card = nullptr) const;
 	bool ResolveIngredientRoute(int32 ItemID, bool bMustStore, int32 RemainingToStore = 0);
 	FText FormatObjectiveProgress(const FActiveTask& Task) const;
 	AActor* FindIngredientSource(int32 ItemID, bool bHarvestOnly) const;

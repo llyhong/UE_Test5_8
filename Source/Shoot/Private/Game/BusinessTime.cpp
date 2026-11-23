@@ -6,6 +6,7 @@
 #include "Components/DirectionalLightComponent.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
+#include "Kismet/GameplayStatics.h"
 #include "Game/BaseGameInstance.h"
 #include "Game/BusinessSimulation.h"
 #include "NPC/GuestManager.h"
@@ -109,6 +110,13 @@ void UTimeSystem::AdvanceOneDay(bool bResetDayProgress)
 	}
 }
 
+bool UTimeSystem::IsFirstRegularKitchenService() const
+{
+	const UBaseGameInstance* GI = GetTypedOuter<UBaseGameInstance>();
+	return GetBusinessDayNumber() == 3 && GI && GI->GetWorld()
+		&& UGameplayStatics::GetCurrentLevelName(GI->GetWorld()) == TEXT("Kitchen_New");
+}
+
 void UTimeSystem::Tick(float DeltaTime)
 {
 	const float SafeDeltaTime = FMath::Max(0.f, DeltaTime);
@@ -117,7 +125,8 @@ void UTimeSystem::Tick(float DeltaTime)
 	const bool bPreparing = bPauseBeforeOpening && !bAutoOpenBusiness && !bIsBusinessOpen && !bBusinessClosedForDay;
 	if (!bPausedState && !bPreparing && !bGoalDrivenBusiness && bAutoAdvance && RealSecondsPerDay > 0.f)
 	{
-		const double DaySeconds = RealSecondsPerDay;
+		// Give the first full service enough time for several rounds of plate washing.
+		const double DaySeconds = RealSecondsPerDay * (IsFirstRegularKitchenService() ? 1.75 : 1.0);
 		double RemainingSeconds = SafeDeltaTime;
 		// 分日处理大 Delta：每个旧日结束前都必须打烊，不能回绕后仍带着上一日的营业状态。
 		while (RemainingSeconds > 0.0)

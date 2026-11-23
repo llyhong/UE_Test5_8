@@ -50,6 +50,11 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Time", meta = (ClampMin = "1", ClampMax = "31"))
 	int32 DaysPerMonth = 30;
 
+	bool IsFirstRegularKitchenService() const;
+	static constexpr int32 FirstRegularKitchenSalesTarget = 600;
+
+	int32 GetBusinessDayNumber() const { return ((Year - 1) * 12 + Month - 1) * DaysPerMonth + Day; }
+
 	/** 一天的“营业日”起止小时：DayProgress=0 映射 DayStartHour，=1 映射 DayEndHour（如 8~22），而非 0~24 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shoot|Time", meta = (ClampMin = "0", ClampMax = "24"))
 	float DayStartHour = 8.f;

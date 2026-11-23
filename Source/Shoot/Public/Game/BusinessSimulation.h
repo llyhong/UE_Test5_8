@@ -7,6 +7,7 @@
 #include "Game/EconomySystem.h"
 #include "Game/BusinessTime.h"
 #include "Game/StaffSystem.h"
+#include "Game/KitchenShift.h"
 #include "BusinessSimulation.generated.h"
 
 class USeasonSystem;
@@ -27,6 +28,10 @@ struct FBusinessReport
 	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Business")
 	int32 Income = 0;
 	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Business")
+	int32 Sales = 0;
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Business")
+	int32 SalesTarget = 0;
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Business")
 	int32 Expense = 0;
 	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Business")
 	int32 Net = 0;
@@ -42,7 +47,14 @@ struct FBusinessReport
 	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Business")
 	int32 Reputation = 0;
 	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Business")
+	int32 HygieneReputationLoss = 0;
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Business")
+	int32 HygieneCompensation = 0;
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Business")
 	int32 Stars = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Business")
+	FKitchenShiftProgress KitchenShift;
 };
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBusinessReport, const FBusinessReport&, Report);
@@ -105,6 +117,7 @@ public:
 
 	// ---- 账本（滚动累计，结算时重置对应周期） ----
 	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Business") int32 TodayIncome = 0;
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Business") int32 TodaySales = 0;
 	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Business") int32 TodayExpense = 0;
 	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Business") int32 TodayInvestment = 0;
 	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Business") int32 MonthIncome = 0;
@@ -143,6 +156,8 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Shoot|Business")
 	FBusinessReport GetTodayReport() const { return MakeReport(0, 0, 0); }
 
+	void RecordHygieneLoss(int32 ReputationLoss, int32 Compensation);
+
 	/** 写入存档（日期 + 员工名册）。会在每次日结算时自动调用，也可手动调用。 */
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Business")
 	void Save();
@@ -156,6 +171,9 @@ public:
 	void SkipNextDaySettlement() { bSkipNextDaySettlement = true; }
 
 private:
+	int32 TodayHygieneReputationLoss = 0;
+	int32 TodayHygieneCompensation = 0;
+
 	/** 经济金钱变化：按正负自动计入收入 / 支出账本（含被动收支与玩家消费） */
 	UFUNCTION()
 	void HandleMoneyChanged(int32 NewValue, int32 Delta, EMoneySource Source);

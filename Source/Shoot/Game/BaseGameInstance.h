@@ -193,6 +193,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Gameplay|Plate")
 	void SetDirtyPlateFlow(bool bEnable);
 
+	/** 调试：跳过全部新手引导并直接进入第 3 天。任意蓝图 Get GameInstance 后调用即可。 */
+	UFUNCTION(BlueprintCallable, Category = "Shoot|Debug")
+	void DebugSkipTutorialToDay3();
+
 	/** 打烊（未营业）期间“拾取物品”的行为路由开关：
 	 *   true  = 打烊时拾取物品自动收进背包（玩家手上不残留物品）；营业时仍正常拿在手上（默认）；
 	 *   false = 不论营业与否，拾取都拿在手上（原行为，不做打烊特判）。

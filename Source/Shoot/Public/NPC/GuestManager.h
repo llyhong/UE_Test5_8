@@ -325,6 +325,9 @@ public:
 	/** 当前生效的来客间隔：备料窗口内取更慢的那个值 */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|GuestManager|PrepWindow")
 	float GetEffectiveSpawnInterval() const;
+	float GetFirstRushDelay() const;
+	float GetRushSpawnInterval() const;
+	float GetRushCycleInterval() const;
 
 	/** 客人入队：返回分配的排队序号，并把它摆到对应的队列位置（重复入队会移到队尾） */
 	UFUNCTION(BlueprintCallable, Category = "Shoot|GuestManager|Queue")

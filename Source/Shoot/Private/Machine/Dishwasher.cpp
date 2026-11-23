@@ -12,6 +12,7 @@
 #include "ShootCharacter.h"
 #include "Interaction/InteractionConfig.h"
 #include "Game/PlateSystem.h"
+#include "Game/OrderSystem.h"
 #include "Game/BaseGameInstance.h"
 #include "Game/BaseLevelBP.h"
 #include "Engine/Engine.h"
@@ -196,11 +197,17 @@ bool ADishwasher::SubmitPlate(AItemActor* Plate)
 	}
 
 	// 可用碟子数 +1（上限为碟子总数 TotalCount）
-	if (!Plate->ReturnServingPlate())
+	if (!Plate->ReturnServingPlate() && UGameplayStatics::GetCurrentLevelName(this) != TEXT("Kitchen_New"))
 	{
 		PS->AddPlate();
 	}
 	const int32 Available = PS->CurOrderIndex;
+	if (Plate->bIsDirtyPlate)
+	{
+		const UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetGameInstance());
+		if (AOrderSystem* Orders = GI && GI->curLevelBP ? GI->curLevelBP->orderSystem.Get() : nullptr)
+			Orders->RecordKitchenShiftPlate();
+	}
 
 	// 碟子消失
 	Plate->Destroy();

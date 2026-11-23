@@ -73,6 +73,12 @@ void ADiningMessActor::BeginPlay()
 	InteractionSphere->SetSphereRadius(InteractionRadius);
 	InteractionSphere->OnComponentBeginOverlap.AddDynamic(this, &ADiningMessActor::OnInteractionOverlap);
 	InteractionSphere->OnComponentEndOverlap.AddDynamic(this, &ADiningMessActor::OnInteractionEndOverlap);
+	TArray<AActor*> Players;
+	InteractionSphere->GetOverlappingActors(Players, AShootCharacter::StaticClass());
+	for (AActor* Player : Players)
+	{
+		CastChecked<AShootCharacter>(Player)->SetOverlappingMess(this);
+	}
 }
 
 void ADiningMessActor::Tick(float DeltaSeconds)
@@ -85,7 +91,10 @@ void ADiningMessActor::Tick(float DeltaSeconds)
 	}
 
 	// DeltaSeconds 仍是距上次 Tick 的真实时长（TickInterval 只改变调用频率）
-	AgeSeconds += FMath::Max(0.f, DeltaSeconds);
+	if (const auto* Manager = Cast<ADiningHygieneManager>(GetOwner()); !Manager || Manager->IsHygieneActive())
+	{
+		AgeSeconds += FMath::Max(0.f, DeltaSeconds);
+	}
 }
 
 void ADiningMessActor::ApplyTypeVisuals()

@@ -544,7 +544,12 @@ bool APlant::HarvestForCharacter(AShootCharacter* Character)
 	if (IsValid(Character))
 	{
 		Character->PlayHarvestEffect(PlantMesh ? PlantMesh->Bounds.Origin : GetActorLocation());
-		Character->ShowHarvestHint(HarvestItemName, HarvestItemIcon);
+		// 没拿篮子且营业中时果实直接挂到手上，玩家看得见，不再弹“打开背包”提示
+		const bool bHeldInHand = bBusinessOpen && !bToBasket;
+		if (!bHeldInHand)
+		{
+			Character->ShowHarvestHint(HarvestItemName, HarvestItemIcon);
+		}
 	}
 	return true;
 }
@@ -1300,17 +1305,10 @@ bool APlant::Harvest()
 	if (InteractingCharacter)
 	{
 		bool bFirst = true;
-		FString HarvestItemName;
-		UTexture2D* HarvestItemIcon = nullptr;
 		for (AItemActor* Fruit : SpawnedFruits)
 		{
 			if (Fruit)
 			{
-				if (bFirst)
-				{
-					HarvestItemName = Fruit->GetItemDisplayName();
-					HarvestItemIcon = Fruit->GetItemIcon();
-				}
 				// 离树：停止该果实的熟度计时（品质固定），并按其当前熟度写入品质
 				Fruit->StopRipening();
 				Fruit->SetIngredientQuality(Fruit->GetCurrentQuality());
@@ -1320,8 +1318,8 @@ bool APlant::Harvest()
 		}
 		if (!bFirst)
 		{
+			// 果实已挂到手上，不再弹“打开背包”的采摘提示
 			InteractingCharacter->PlayHarvestEffect(PlantMesh->Bounds.Origin);
-			InteractingCharacter->ShowHarvestHint(HarvestItemName, HarvestItemIcon);
 		}
 	}
 	else

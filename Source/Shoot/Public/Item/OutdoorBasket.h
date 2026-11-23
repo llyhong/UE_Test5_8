@@ -91,6 +91,8 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Basket")
 	void SettleOnGround(AActor* IgnoreActor = nullptr);
 
+	void PlaceAtDock(const FTransform& DockTransform);
+
 	/** 收纳内容变化广播（UI 显示 3/10 等） */
 	UPROPERTY(BlueprintAssignable, Category = "Shoot|Basket")
 	FOnBasketChanged OnBasketChanged;

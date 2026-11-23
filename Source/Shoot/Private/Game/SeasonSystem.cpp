@@ -170,11 +170,16 @@ void USeasonSystem::RecordDailyReport(const FBusinessReport& Report)
 
 	FDailyFinancialRecord Record;
 	Record.Day = SeasonDay;
+	Record.KitchenShift = Report.KitchenShift;
+	Record.Sales = Report.Sales;
+	Record.SalesTarget = Report.SalesTarget;
 	Record.Revenue = Report.Income;
 	Record.OperatingExpense = Report.Expense - Report.Investment;
 	Record.Investment = Report.Investment;
 	Record.Cash = Report.Money;
 	Record.UnpaidBills = Economy ? Economy->GetUnpaidBills() : 0;
+	Record.HygieneReputationLoss = Report.HygieneReputationLoss;
+	Record.HygieneCompensation = Report.HygieneCompensation;
 
 	DailyFinancialHistory.RemoveAll([this](const FDailyFinancialRecord& Existing)
 	{

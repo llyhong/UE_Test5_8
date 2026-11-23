@@ -41,10 +41,22 @@ class SHOOT_API UMySaveGame : public USaveGame
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, SaveGame, Category = "Shoot|Business")
 	int32 BizTodayIncome = 0;
+
+	UPROPERTY()
+	int32 BizTodaySales = 0;
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, SaveGame, Category = "Shoot|Business")
 	int32 BizTodayExpense = 0;
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, SaveGame, Category = "Shoot|Business")
 	int32 BizTodayInvestment = 0;
+
+	UPROPERTY(SaveGame)
+	int32 BizTodayHygieneReputationLoss = 0;
+
+	UPROPERTY(SaveGame)
+	int32 BizTodayHygieneCompensation = 0;
+
+	UPROPERTY(SaveGame)
+	bool bHasSeenDiningHygiene = false;
 
 	/** 员工 / 居民名册（含属性与是否在职），替代"关卡制"后的核心经营资产 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Shoot|Business")
@@ -120,6 +132,9 @@ class SHOOT_API UMySaveGame : public USaveGame
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, SaveGame, Category = "Shoot|Season|Finance")
 	TArray<FDailyFinancialRecord> SeasonDailyFinancialHistory;
+
+	UPROPERTY()
+	TMap<int32, int32> KitchenShiftBestStars;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Shoot|Season|Checkpoint")
 	bool bSeasonCheckpointValid = false;

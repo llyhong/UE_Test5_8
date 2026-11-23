@@ -7,10 +7,14 @@
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "Game/BaseGameInstance.h"
+#include "Game/BaseLevelBP.h"
 #include "Game/BusinessTime.h"
 #include "Game/EconomySystem.h"
 #include "NPC/GuestCharacter.h"
 #include "Components/SceneComponent.h"
+#include "Kismet/GameplayStatics.h"
+#include "MySaveGame.h"
+#include "UI/HUDWidget.h"
 
 ADiningHygieneManager::ADiningHygieneManager()
 {
@@ -26,13 +30,14 @@ void ADiningHygieneManager::BeginPlay()
 
 	EnsureRandomReady();
 	EnsureTimeSystemBound();
+	bKitchenHygiene = UGameplayStatics::GetCurrentLevelName(this) == TEXT("Kitchen_New");
 
 	if (bShowDebugInfo && SpawnAreas.Num() == 0)
 	{
 		ShowDebug(TEXT("[就餐区卫生] 未配置 SpawnAreas，将以本 Actor 位置为圆心、600cm 生成"), FLinearColor::Yellow);
 	}
 
-	if (bSpawnInitialMesses && InitialMessCount > 0)
+	if (!bKitchenHygiene && bSpawnInitialMesses && InitialMessCount > 0)
 	{
 		for (int32 Index = 0; Index < InitialMessCount; ++Index)
 		{
@@ -64,7 +69,8 @@ void ADiningHygieneManager::Tick(float DeltaSeconds)
 	PruneMesses();
 	if (!IsMessDayAllowed(this))
 	{
-		ClearAllMesses();
+		if (!ActiveMesses.IsEmpty()) ClearAllMesses();
+		bWasBusinessOpen = false;
 		return;
 	}
 
@@ -75,14 +81,41 @@ void ADiningHygieneManager::Tick(float DeltaSeconds)
 	}
 
 	const float Now = World->GetTimeSeconds();
+	if (bKitchenHygiene)
+	{
+		const bool bOpen = IsHygieneActive();
+		if (!bOpen)
+		{
+			if (BoundTimeSystem && BoundTimeSystem->IsEndOfDayReached() && !ActiveMesses.IsEmpty()) ClearAllMesses();
+			bWasBusinessOpen = false;
+			return;
+		}
+		if (!bWasBusinessOpen)
+		{
+			const UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetGameInstance());
+			bHasShownHygieneIntro |= GI && GI->curSaveGameData && GI->curSaveGameData->bHasSeenDiningHygiene;
+			NextSpawnWorldTime = Now + (bHasShownHygieneIntro ? Rand.FRandRange(SpawnIntervalMin, SpawnIntervalMax) : 20.f);
+			bWasBusinessOpen = true;
+		}
+	}
 
 	if (bAutoSpawn && IsSpawningAllowed()
 		&& ActiveMesses.Num() < MaxActiveMesses
-		&& Now >= NextSpawnWorldTime)
+		&& Now >= NextSpawnWorldTime
+		&& !HasIntroGrace(IntroMess.Get()))
 	{
-		SpawnRandomMess();
+		if (bKitchenHygiene && !bHasShownHygieneIntro)
+		{
+			IntroMess = SpawnMessInArea(EDiningMessType::Trash);
+		}
+		else
+		{
+			SpawnRandomMess();
+		}
 		NextSpawnWorldTime = Now + Rand.FRandRange(SpawnIntervalMin, SpawnIntervalMax);
 	}
+
+	if (IntroMess.IsValid() && !bHasShownHygieneIntro) ShowFirstMessHint();
 
 	if (ActiveMesses.Num() > 0)
 	{
@@ -124,7 +157,42 @@ bool ADiningHygieneManager::IsMessDayAllowed(const UObject* WorldContextObject)
 	const UWorld* World = WorldContextObject ? WorldContextObject->GetWorld() : nullptr;
 	const UBaseGameInstance* GI = World ? Cast<UBaseGameInstance>(World->GetGameInstance()) : nullptr;
 	const UTimeSystem* Time = GI && GI->businessSimulation ? GI->businessSimulation->TimeSystem.Get() : nullptr;
-	return Time && Time->Day >= 4;
+	return Time && Time->GetBusinessDayNumber() >= FirstHygieneDay;
+}
+
+bool ADiningHygieneManager::IsHygieneActive() const
+{
+	return !bKitchenHygiene || (BoundTimeSystem && BoundTimeSystem->IsBusinessOpen());
+}
+
+bool ADiningHygieneManager::HasIntroGrace(const ADiningMessActor* Mess) const
+{
+	return Mess && Mess == IntroMess.Get() && Mess->GetAgeSeconds() < FMath::Max(60.f, CleanGraceSeconds);
+}
+
+void ADiningHygieneManager::ShowFirstMessHint()
+{
+	UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetGameInstance());
+	UHUDWidget* HUD = GI && GI->curLevelBP ? GI->curLevelBP->GetHUDWidget() : nullptr;
+	if (HUD && HUD->ShowDiningHygieneNotice(NSLOCTEXT("DiningHygiene", "FirstTrash",
+		"餐区有垃圾。靠近按 E 清理，放太久会影响店铺声誉。"), 10.f, false))
+	{
+		bHasShownHygieneIntro = true;
+		if (GI->curSaveGameData)
+		{
+			GI->curSaveGameData->bHasSeenDiningHygiene = true;
+			GI->SaveGameData();
+		}
+	}
+}
+
+void ADiningHygieneManager::ShowHygieneNotice(const FText& Text, float Duration, bool bWarning) const
+{
+	const UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetGameInstance());
+	if (UHUDWidget* HUD = GI && GI->curLevelBP ? GI->curLevelBP->GetHUDWidget() : nullptr)
+	{
+		HUD->ShowDiningHygieneNotice(Text, Duration, bWarning);
+	}
 }
 
 bool ADiningHygieneManager::IsSpawningAllowed() const
@@ -205,7 +273,6 @@ FVector ADiningHygieneManager::PickSpawnLocation() const
 
 ADiningMessActor* ADiningHygieneManager::SpawnMess(EDiningMessType Type, FVector Location)
 {
-	// Applies to initial, timed, tutorial and direct Blueprint spawns alike.
 	if (!IsMessDayAllowed(this)) return nullptr;
 	UWorld* World = GetWorld();
 	if (!World)
@@ -221,6 +288,7 @@ ADiningMessActor* ADiningHygieneManager::SpawnMess(EDiningMessType Type, FVector
 
 	FActorSpawnParameters Params;
 	Params.Owner = this;
+	Params.bDeferConstruction = true;
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 
 	const FRotator Rotation(0.f, Rand.FRandRange(0.f, 360.f), 0.f);
@@ -230,8 +298,11 @@ ADiningMessActor* ADiningHygieneManager::SpawnMess(EDiningMessType Type, FVector
 		return nullptr;
 	}
 
+	Mess->FinishSpawning(FTransform(Rotation, Location));
+	if (!IsValid(Mess)) return nullptr;
+
 	Mess->SetMessType(Type);
-	Mess->bShowDebugInfo = bShowDebugInfo;
+	Mess->bShowDebugInfo = bShowDebugInfo && !bKitchenHygiene;
 	Mess->OnCleaned.AddDynamic(this, &ADiningHygieneManager::HandleMessCleaned);
 	ActiveMesses.Add(Mess);
 
@@ -266,13 +337,15 @@ void ADiningHygieneManager::ApplyPenalties(float DeltaSeconds)
 	UWorld* World = GetWorld();
 
 	int32 PenaltyCount = 0;
+	bool bTrash = false;
+	bool bPuddle = false;
 	for (const TObjectPtr<ADiningMessActor>& Mess : ActiveMesses)
 	{
 		if (!IsValid(Mess))
 		{
 			continue;
 		}
-		if (Mess->GetAgeSeconds() < CleanGraceSeconds)
+		if (Mess->GetAgeSeconds() < CleanGraceSeconds || HasIntroGrace(Mess))
 		{
 			continue;
 		}
@@ -281,15 +354,13 @@ void ADiningHygieneManager::ApplyPenalties(float DeltaSeconds)
 		Accum += DeltaSeconds;
 
 		// 一帧内一般最多触发一次；用 while 保证低帧率下也不漏结算
-		while (Accum >= PenaltyIntervalSeconds)
+		const float Interval = FMath::Max(1.f, PenaltyIntervalSeconds);
+		while (Accum >= Interval)
 		{
-			Accum -= PenaltyIntervalSeconds;
+			Accum -= Interval;
 			++PenaltyCount;
-
-			if (Economy && ReputationLossPerPenalty > 0)
-			{
-				Economy->AddReputation(-ReputationLossPerPenalty);
-			}
+			bTrash |= Mess->MessType == EDiningMessType::Trash;
+			bPuddle |= Mess->MessType == EDiningMessType::Puddle;
 
 			if (World && GuestWaitTimePenaltySeconds > 0.f)
 			{
@@ -314,6 +385,17 @@ void ADiningHygieneManager::ApplyPenalties(float DeltaSeconds)
 
 	if (PenaltyCount > 0 && Economy)
 	{
+		const int32 Loss = FMath::Min(Economy->GetReputation(), PenaltyCount * FMath::Max(0, ReputationLossPerPenalty));
+		if (Loss > 0)
+		{
+			if (GI->businessSimulation) GI->businessSimulation->RecordHygieneLoss(Loss, 0);
+			Economy->AddReputation(-Loss);
+			const FText Reason = bTrash && bPuddle ? NSLOCTEXT("DiningHygiene", "MessOverdue", "餐区未及时清理")
+				: bPuddle ? NSLOCTEXT("DiningHygiene", "PuddleOverdue", "餐区积水未清理")
+				: NSLOCTEXT("DiningHygiene", "TrashOverdue", "餐区垃圾未清理");
+			ShowHygieneNotice(FText::Format(NSLOCTEXT("DiningHygiene", "OverduePenalty", "{0}，声誉 −{1}"),
+				Reason, Loss), 5.f, true);
+		}
 		UE_LOG(LogTemp, Warning, TEXT("[DiningHygiene] 本轮未清理结算 %d 次，当前声誉 %d"), PenaltyCount, Economy->GetReputation());
 	}
 }
@@ -350,7 +432,7 @@ void ADiningHygieneManager::CheckGuestSlips(float DeltaSeconds)
 		const FVector GuestLocation = Guest->GetActorLocation();
 		for (const TObjectPtr<ADiningMessActor>& Mess : ActiveMesses)
 		{
-			if (!IsValid(Mess))
+			if (!IsValid(Mess) || HasIntroGrace(Mess))
 			{
 				continue;
 			}
@@ -364,13 +446,32 @@ void ADiningHygieneManager::CheckGuestSlips(float DeltaSeconds)
 			}
 
 			Guest->ReactToSlip(SlipFallSeconds);
-			PaySlipCompensation();
 
 			if (UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetGameInstance()))
 			{
-				if (GI->economySystem && SlipReputationLoss > 0)
+				if (UEconomySystem* Economy = GI->economySystem)
 				{
-					GI->economySystem->AddReputation(-SlipReputationLoss);
+					const int32 Loss = FMath::Min(Economy->GetReputation(), FMath::Max(0, SlipReputationLoss));
+					const int32 Compensation = FMath::Max(0, SlipCompensationMoney);
+					if (GI->businessSimulation) GI->businessSimulation->RecordHygieneLoss(Loss, Compensation);
+					const bool bPaid = PaySlipCompensation(*Economy);
+					if (Loss > 0) Economy->AddReputation(-Loss);
+					if (!bPaid && Loss == 0) GI->SaveGameData();
+
+					TArray<FText> Effects;
+					if (Compensation > 0)
+					{
+						Effects.Add(FText::Format(bPaid
+							? NSLOCTEXT("DiningHygiene", "SlipPaid", "赔偿 {0} 金币")
+							: NSLOCTEXT("DiningHygiene", "SlipUnpaid", "待付赔偿 {0} 金币"), Compensation));
+					}
+					if (Loss > 0) Effects.Add(FText::Format(NSLOCTEXT("DiningHygiene", "SlipRep", "声誉 −{0}"), Loss));
+					const FText Cause = Mess->MessType == EDiningMessType::Puddle
+						? NSLOCTEXT("DiningHygiene", "SlipPuddle", "客人踩到积水摔倒")
+						: NSLOCTEXT("DiningHygiene", "SlipTrash", "客人踩到垃圾摔倒");
+					ShowHygieneNotice(Effects.IsEmpty() ? Cause
+						: FText::Format(NSLOCTEXT("DiningHygiene", "SlipNotice", "{0} · {1}"),
+							Cause, FText::Join(FText::FromString(TEXT(" · ")), Effects)), 6.f, true);
 				}
 			}
 
@@ -386,25 +487,15 @@ void ADiningHygieneManager::CheckGuestSlips(float DeltaSeconds)
 	}
 }
 
-void ADiningHygieneManager::PaySlipCompensation()
+bool ADiningHygieneManager::PaySlipCompensation(UEconomySystem& Economy)
 {
-	if (SlipCompensationMoney <= 0)
-	{
-		return;
-	}
-
-	UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetGameInstance());
-	UEconomySystem* Economy = GI ? GI->economySystem.Get() : nullptr;
-	if (!Economy)
-	{
-		return;
-	}
-
 	// 赔偿是刚性支出：付不起也要赔，差额按未付账单记账（赛季据此判定入不敷出）
-	if (!Economy->SpendMoney(SlipCompensationMoney, EMoneySource::Maintenance))
+	if (!Economy.SpendMoney(SlipCompensationMoney, EMoneySource::Maintenance))
 	{
-		Economy->AddUnpaidBill(SlipCompensationMoney);
+		Economy.AddUnpaidBill(SlipCompensationMoney);
+		return false;
 	}
+	return true;
 }
 
 void ADiningHygieneManager::PruneMesses()
@@ -431,6 +522,7 @@ void ADiningHygieneManager::HandleMessCleaned(ADiningMessActor* Mess)
 	}
 
 	ActiveMesses.Remove(Mess);
+	if (IntroMess.Get() == Mess) IntroMess.Reset();
 	PenaltyAccumSeconds.Remove(Mess);
 	++TotalCleanedCount;
 
@@ -479,7 +571,7 @@ void ADiningHygieneManager::ShowDebug(const FString& Message, const FLinearColor
 	}
 
 	UE_LOG(LogTemp, Log, TEXT("%s"), *Message);
-	if (GEngine)
+	if (GEngine && !bKitchenHygiene)
 	{
 		GEngine->AddOnScreenDebugMessage(-1, 6.f, Color.ToFColor(true), Message);
 	}

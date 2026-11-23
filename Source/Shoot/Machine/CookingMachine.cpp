@@ -478,8 +478,10 @@ void ACookingMachine::SpawnCookedActor()
 	// 没有空闲碟子 → 本次不出成品，直接 return 走回原始逻辑：
 	// 机器保持"完成/加热"状态并继续累计煮过头时间，最终煮糊/着火（OnFire）；
 	// 玩家把脏碟交还洗碗机后，下一次烹饪才能正常出菜。
-	APlateSystem* PlateSys = bConsumePlateOnFinish ? FindPlateSystem() : nullptr;
-	if (bConsumePlateOnFinish)
+	const bool bUseServingPlate = bConsumePlateOnFinish
+		|| UGameplayStatics::GetCurrentLevelName(this) == TEXT("Kitchen_New");
+	APlateSystem* PlateSys = bUseServingPlate ? FindPlateSystem() : nullptr;
+	if (bUseServingPlate)
 	{
 		if (!PlateSys)
 		{
@@ -565,7 +567,13 @@ void ACookingMachine::SpawnCookedActor()
 	{
 		if (PlateSys)
 		{
-			Item->ReserveServingPlate(*PlateSys);
+			if (!Item->ReserveServingPlate(*PlateSys))
+			{
+				CookedActorStack.Remove(CookedActor);
+				CookedActor->Destroy();
+				bWaitingForPlate = true;
+				return;
+			}
 		}
 		Item->SetMenuFoodID(TargetMenuData.FoodID);
 

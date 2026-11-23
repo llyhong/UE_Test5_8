@@ -9,6 +9,7 @@
 #include "DiningHygieneManager.generated.h"
 
 class UTimeSystem;
+class UEconomySystem;
 
 /**
  * 就餐区卫生管理器（关卡里放一个）。
@@ -33,8 +34,9 @@ public:
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
-	/** Cleaning is introduced on day four; all earlier days stay free of messes. */
+	static constexpr int32 FirstHygieneDay = 5;
 	static bool IsMessDayAllowed(const UObject* WorldContextObject);
+	bool IsHygieneActive() const;
 
 	// ==================== 生成配置 ====================
 	/** 撒点区域：只取这里的区域；为空时以本 Actor 位置为圆心、600cm 半径 */
@@ -157,6 +159,13 @@ public:
 	ADiningMessActor* SpawnMessInArea(EDiningMessType Type);
 
 protected:
+	bool bKitchenHygiene = false;
+	bool bHasShownHygieneIntro = false;
+	bool bWasBusinessOpen = false;
+	TWeakObjectPtr<ADiningMessActor> IntroMess;
+	void ShowFirstMessHint();
+	void ShowHygieneNotice(const FText& Text, float Duration, bool bWarning) const;
+	bool HasIntroGrace(const ADiningMessActor* Mess) const;
 	/** 已绑定的时间系统（营业状态判定；关卡重建时钟时幂等重绑） */
 	UPROPERTY()
 	TObjectPtr<UTimeSystem> BoundTimeSystem;
@@ -192,7 +201,7 @@ protected:
 	void CheckGuestSlips(float DeltaSeconds);
 
 	/** 支付摔倒赔偿：钱不够记未付账单 */
-	void PaySlipCompensation();
+	bool PaySlipCompensation(UEconomySystem& Economy);
 
 	/** 清理已被销毁的散落物记录（玩家清理 / 关卡卸载） */
 	void PruneMesses();

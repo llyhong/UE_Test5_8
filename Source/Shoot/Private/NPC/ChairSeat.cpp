@@ -352,6 +352,7 @@ bool AChairSeat::PlacePlateOnSocket(AItemActor* Plate)
 		return false;
 	}
 	Plate->ClearPremiumDishFeedback();
+	Plate->ClearDirtyPlateFeedback();
 
 	// 先把物品网格从手上 / 其它挂点摘下，再把整个碟子吸附到本座位的挂点：
 	// 之后碟子跟随餐桌移动，摆放位置与朝向完全由蓝图里的 PlateSocket 决定。
@@ -397,6 +398,9 @@ void AChairSeat::SetDirtyPlate(AItemActor* Plate)
 
 	// 空碟模型按菜品表配置（MenuDataTable / FMenuData::EmptyPlateMesh）替换：
 	// 煎蛋 / 番茄炒蛋用盘子，炖番茄（番茄汤）用碗；未配置时保留成品原网格。
+	bool bHasEmptyPlateVisual = false;
+	FVector EmptyPlateScale = FVector::OneVector;
+	FVector EmptyPlateLocation = FVector::ZeroVector;
 	if (UWorld* World = GetWorld())
 	{
 		if (UBaseGameInstance* GI = Cast<UBaseGameInstance>(World->GetGameInstance()))
@@ -409,8 +413,9 @@ void AChairSeat::SetDirtyPlate(AItemActor* Plate)
 					if (UStaticMesh* EmptyMesh = Menu.EmptyPlateMesh.LoadSynchronous())
 					{
 						Plate->ItemMesh->SetStaticMesh(EmptyMesh);
-						Plate->ItemMesh->SetRelativeScale3D(Menu.EmptyPlateScale);
-						Plate->ItemMesh->SetRelativeLocation(Menu.EmptyPlateLocationOffset);
+						EmptyPlateScale = Menu.EmptyPlateScale;
+						EmptyPlateLocation = Menu.EmptyPlateLocationOffset;
+						bHasEmptyPlateVisual = true;
 						UE_LOG(LogTemp, Log, TEXT("[餐桌] 菜品 %d 用餐结束，空碟模型: %s"),
 							Plate->GetMenuFoodID(), *EmptyMesh->GetPathName());
 					}
@@ -422,6 +427,14 @@ void AChairSeat::SetDirtyPlate(AItemActor* Plate)
 	// 空碟同样摆在挂点上，位置由蓝图里的 PlateSocket 调整
 	PlacePlateOnSocket(Plate);
 
+	// 挂点吸附（SnapToTarget）会把根组件缩放重置成 PlateSocket 的缩放（1），
+	// 所以空碟的尺寸 / 偏移必须在吸附之后再套用，否则菜品表里的 scale 会被吃掉
+	if (bHasEmptyPlateVisual)
+	{
+		Plate->ItemMesh->SetRelativeScale3D(EmptyPlateScale);
+		Plate->ItemMesh->SetRelativeLocation(EmptyPlateLocation);
+	}
+
 	// 启用回收球：玩家靠近即可按 E 收走空碟
 	if (Plate->CollectSphere)
 	{
@@ -431,6 +444,10 @@ void AChairSeat::SetDirtyPlate(AItemActor* Plate)
 
 	DirtyPlate = Plate;
 	bHasDirtyPlate = true;
+	// 碟子本身的视觉标记（绕飞苍蝇 + 臭味飘线 + 暖色光晕），避免玩家忽视这张桌上还有空碟没收
+	Plate->ShowDirtyPlateFeedback();
+	// 碟面上留一圈食物残渣和酱渍，一眼能看出“这盘吃过了”；收走后残渣仍跟着脏碟
+	Plate->ShowDirtyPlateResidue();
 	RefreshTipsWidget();
 }
 
@@ -740,7 +757,12 @@ bool AChairSeat::TryServeDishByPlayer(AShootCharacter* Player, AItemActor* Dish)
 		SeatMessage(TEXT("[餐桌] 订单系统未就绪，无法上菜"), FColor::Red);
 		return false;
 	}
-	if (!OS->PushFoodsForGuest(DishFoodIDs, Occupant))
+	if (!Dish->TryPrepareServingPlate())
+	{
+		SeatMessage(TEXT("没有干净盘子了，请把空盘送回洗碗机"), FColor::Red);
+		return false;
+	}
+	if (!OS->PushFoodsForGuest(DishFoodIDs, Occupant, Dish->GetIngredientQuality() == EIngredientQuality::Premium))
 	{
 		SeatMessage(TEXT("[餐桌] 上菜失败：订单已失效或菜品不匹配"), FColor::Red);
 		return false;

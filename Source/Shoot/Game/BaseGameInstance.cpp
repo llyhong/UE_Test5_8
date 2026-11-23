@@ -729,6 +729,19 @@ void UBaseGameInstance::SetDirtyPlateFlow(bool bEnable)
 	OnDirtyPlateFlowChanged.Broadcast(bEnable);
 }
 
+void UBaseGameInstance::DebugSkipTutorialToDay3()
+{
+	// 统一转发给关卡里的 TutorialTaskManager 处理（教程与跳天逻辑都集中在那里）
+	if (UWorld* World = GetWorld())
+	{
+		for (TActorIterator<ATutorialTaskManager> It(World); It; ++It)
+		{
+			It->DebugStartFromDay3();
+		}
+	}
+	UE_LOG(LogTemp, Log, TEXT("[Debug] 已通过 TutorialTaskManager 跳过新手教程并直接进入第 3 天"));
+}
+
 int32 UBaseGameInstance::GetWarehouseStock(TSubclassOf<AItemActor> ItemClass) const
 {
 	int32 Total = 0;

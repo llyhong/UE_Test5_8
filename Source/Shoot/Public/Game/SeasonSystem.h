@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Engine/DataTable.h"
 #include "UObject/NoExportTypes.h"
+#include "Game/KitchenShift.h"
 #include "SeasonSystem.generated.h"
 
 class UEconomySystem;
@@ -28,6 +29,16 @@ struct FDailyFinancialRecord
 	int32 Cash = 0;
 	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Season|Finance")
 	int32 UnpaidBills = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Season|Kitchen Shift")
+	FKitchenShiftProgress KitchenShift;
+
+	UPROPERTY() int32 Sales = 0;
+	UPROPERTY() int32 SalesTarget = 0;
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Season|Finance")
+	int32 HygieneReputationLoss = 0;
+	UPROPERTY(BlueprintReadOnly, Category = "Shoot|Season|Finance")
+	int32 HygieneCompensation = 0;
 };
 
 /** 日评级：由完成率 / 超时 / 平均等待 / 附加项加权得出（见 营业忙乱机制配置.md 18.3） */

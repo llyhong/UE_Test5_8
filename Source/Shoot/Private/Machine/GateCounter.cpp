@@ -1,4 +1,6 @@
 #include "Machine/GateCounter.h"
+#include "Game/TutorialTaskManager.h"
+#include "EngineUtils.h"
 #include "Components/SphereComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/PrimitiveComponent.h"
@@ -91,6 +93,18 @@ UTimeSystem* AGateCounter::GetTimeSystem() const
 bool AGateCounter::OpenBusiness()
 {
 	UTimeSystem* TS = GetTimeSystem();
+	if (TS && !TS->IsBusinessOpen())
+	{
+		for (TActorIterator<ATutorialTaskManager> It(GetWorld()); It; ++It)
+		{
+			FText Reason;
+			if (!It->CanOpenForTutorial(Reason))
+			{
+				OnOpenResult(false);
+				return false;
+			}
+		}
+	}
 	const bool bOk = TS ? TS->OpenBusiness() : false;
 	OnOpenResult(bOk);
 	return bOk;

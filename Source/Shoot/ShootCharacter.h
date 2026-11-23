@@ -772,6 +772,9 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Shoot|Inventory|Basket")
 	class AOutdoorBasket* GetEquippedBasket() const;
 
+	bool CanSwitchHarvestBasket();
+	void ReturnHarvestBasket(const FTransform& DockTransform);
+
 	/** 采摘入篮：手上拿着外出背包时，果实直接进背包（不占用/不覆盖手上的其它物品）。
 	 *  背包满了返回 false，由调用方保持植株可采。 */
 	UFUNCTION(BlueprintCallable, Category = "Shoot|Inventory|Basket")

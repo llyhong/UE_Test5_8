@@ -804,7 +804,8 @@ bool AGuestCharacter::TryServeDish(AShootCharacter* Player, AItemActor* Dish)
 	}
 
 	// 仅完成“本客人”的订单（针对性上菜，而非最紧急的任意客人）
-	const bool bServed = OS->PushFoodsForGuest(FoodIDs, this);
+	if (!Dish->TryPrepareServingPlate()) return false;
+	const bool bServed = OS->PushFoodsForGuest(FoodIDs, this, Dish->GetIngredientQuality() == EIngredientQuality::Premium);
 	if (!bServed)
 	{
 		if (GEngine)

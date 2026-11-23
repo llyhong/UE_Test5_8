@@ -63,7 +63,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Shoot|HUD")
 	void SetClock(float CurrentHour, bool bIsOpen);
 
-	void SetKitchenPlateHint(int32 CleanPlates);
+	void SetKitchenPlateHint(int32 CleanPlates, int32 TotalPlates);
+	void SetKitchenShiftText(const FText& Text);
+	bool ShowDiningHygieneNotice(const FText& Text, float Duration, bool bWarning);
 
 	/** 蓝图实现：显示当前时间（如 17:30）与营业状态（营业中 / 备货中 / 已打烊） */
 	UFUNCTION(BlueprintImplementableEvent, Category = "Shoot|HUD")
@@ -103,6 +105,8 @@ public:
 
 protected:
 	virtual void NativeDestruct() override;
+
+	FTimerHandle HygieneNoticeTimer;
 
 	UFUNCTION()
 	void HandleReputationChanged(int32 NewValue, int32 Delta);

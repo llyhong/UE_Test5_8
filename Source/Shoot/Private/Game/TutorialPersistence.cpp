@@ -135,6 +135,11 @@ void ATutorialTaskManager::RestoreTutorialState()
 		AItemActor* Item = GetWorld()->SpawnActor<AItemActor>(Saved.Item.ItemClass, Saved.Transform, Params);
 		if (!Item) continue;
 		Item->ItemInfoRow = Saved.Item.ItemInfoRow; Item->FoodIdArray = Saved.Item.FoodIdArray; Item->SetMenuFoodID(Saved.MenuID);
+		if (Saved.MenuID >= 0 && !Item->TryPrepareServingPlate())
+		{
+			Item->Destroy();
+			continue;
+		}
 		if (Players.IsValidIndex(Saved.Holder)) Players[Saved.Holder]->HoldItemInHand(Item, true);
 	}
 	for (TActorIterator<AResearchStove> It(GetWorld()); It; ++It)

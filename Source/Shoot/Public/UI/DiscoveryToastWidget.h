@@ -12,7 +12,9 @@ class UBorder;
 class UImage;
 class USizeBox;
 class UTextBlock;
+class UHorizontalBox;
 class UHorizontalBoxSlot;
+class UVerticalBox;
 class APlayerController;
 class UTexture2D;
 
@@ -51,7 +53,8 @@ public:
 	/** 向指定本地玩家弹出一条普通提示卡片 */
 	static void ShowMessage(APlayerController* PC, const FString& Title, const FString& Body, FLinearColor Accent);
 
-	/** 野外采摘提示：屏幕右侧显示食材 Icon +【食材名】，停留 2 秒后淡出；每次弹出独立一张卡 */
+	/** 野外采摘提示：食材 Icon + 名字 + “打开背包 B”指引，从屏幕右侧滑入停留后滑出；每次弹出独立一张卡 */
+	UFUNCTION(BlueprintCallable, Category = "Shoot|UI")
 	static void ShowHarvestHint(APlayerController* PC, const FString& ItemName, UTexture2D* ItemIcon = nullptr);
 
 	/** 采摘提示堆叠到第几层（0 = 最新，靠屏幕右侧中部） */
@@ -72,6 +75,8 @@ private:
 	void BeginNext();
 	void ApplyVisual(const FDiscoveryToastEntry& Entry);
 	void BindNamedWidgets();
+	void EnsureBagHint();
+	void SetBagHintVisible(bool bVisible);
 
 	UPROPERTY()
 	TArray<FDiscoveryToastEntry> Queue;
@@ -103,6 +108,22 @@ private:
 
 	UPROPERTY()
 	UTextBlock* RewardText = nullptr;
+
+	UPROPERTY()
+	UVerticalBox* TextColumn = nullptr;
+
+	/** 采摘提示右下角的“打开背包 B”指引行（首次提示卡不显示） */
+	UPROPERTY()
+	UHorizontalBox* BagRow = nullptr;
+
+	UPROPERTY()
+	UBorder* BagKeyBorder = nullptr;
+
+	UPROPERTY()
+	UTextBlock* BagKeyText = nullptr;
+
+	UPROPERTY()
+	UTextBlock* BagText = nullptr;
 
 	TWeakObjectPtr<APlayerController> OwnerController;
 

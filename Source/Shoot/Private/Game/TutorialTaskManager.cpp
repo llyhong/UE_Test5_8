@@ -16,6 +16,7 @@
 #include "Game/FoodSystem.h"
 #include "Item/Plant.h"
 #include "Item/OutdoorBasket.h"
+#include "Item/HarvestBasketArea.h"
 #include "Machine/ResearchStove.h"
 #include "Machine/StorageWarehouse.h"
 #include "Machine/CookingMachine.h"
@@ -36,6 +37,14 @@
 
 namespace
 {
+	// Day one used to store the final order target under key 8.
+	constexpr int32 FirstDayFinalOrdersKey = 8;
+
+	int32 GetFirstDaySaveKey(const FTutorialTaskRow& Row)
+	{
+		return Row.StepOrder == 9 ? FirstDayFinalOrdersKey : Row.StepOrder;
+	}
+
 	/** 从背包槽位取物品 ID（行名是数字时以行名为准） */
 	int32 SlotItemID(const FInventorySlot& Slot)
 	{
@@ -79,7 +88,7 @@ void ATutorialTaskManager::BeginPlay()
 {
 	Super::BeginPlay();
 	// Merge old map/Blueprint overrides that still serialize only day one.
-	for (int32 Day : {1, 2, 3}) NoMessesDays.AddUnique(Day);
+	for (int32 Day : {1, 2, 3, 4}) NoMessesDays.AddUnique(Day);
 
 	if (!TaskTable)
 	{
@@ -89,11 +98,98 @@ void ATutorialTaskManager::BeginPlay()
 
 	InitDelay = 0.4f;
 	PollAccum = PollInterval;
+
+	// 蓝图 Class Defaults 勾选 Auto Start Day 3 时，第一帧 Tick 自动跳到第 3 天
+	// （放在 Tick 而不是 BeginPlay：保证其它 Actor 的 BeginPlay 已跑完，时钟/存档已就绪）
+	bDebugJumpPending = bAutoStartDay3;
+}
+
+void ATutorialTaskManager::DebugStartFromDay3()
+{
+	// 1) 只跳过前两天，教程系统本身继续运行（不能调用 SkipTutorial：那会 bEnable=false，
+	//    导致 Tick 不再 ApplyDay，第 3 天任务永远加载不出来）。
+	bEnable = true;
+	if (bHoldingTutorialClock)
+	{
+		// 释放第 1/2 天引导可能持有的暂停，让第 3 天时钟能正常推进
+		if (UTimeSystem* TS = GetTimeSystem())
+		{
+			TS->SetPaused(TS->IsEndOfDayReached());
+		}
+		bHoldingTutorialClock = false;
+	}
+	// 强制下一帧 Tick 按新的第 3 天重新 ApplyDay，加载第 3 天任务卡
+	ResetRuntimeState();
+	AppliedDay = INDEX_NONE;
+
+	UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetGameInstance());
+	UMySaveGame* Save = GI ? GI->curSaveGameData.Get() : nullptr;
+
+	// 2) 存档标记为教程已跳过，避免读档后引导又回来
+	if (Save)
+	{
+		Save->bFirstServiceTutorialComplete = true;
+		Save->FirstDayOrdersServed = FMath::Max(Save->FirstDayOrdersServed, 2);
+		for (int32 Day = 1; Day <= 2; ++Day)
+		{
+			FTutorialDaySave& DaySave = Save->TutorialDays.FindOrAdd(Day);
+			DaySave.bOpened = true;
+			DaySave.Served = FMath::Max(DaySave.Served, 2);
+		}
+	}
+
+	// 3) 经营时钟拨到第 3 天：Init 清掉打烊/暂停等瞬时状态，不触发前两天日结算
+	if (GI && GI->businessSimulation)
+	{
+		if (UTimeSystem* TS = GI->businessSimulation->TimeSystem.Get())
+		{
+			TS->SetPaused(false);
+			TS->Init();
+			TS->Day = FMath::Clamp(3, 1, FMath::Max(1, TS->DaysPerMonth));
+			TS->DayProgress = 0.f;
+			TS->SetGoalDrivenBusiness(false);
+			if (Save)
+			{
+				Save->BizYear = TS->Year;
+				Save->BizMonth = TS->Month;
+				Save->BizDay = TS->Day;
+			}
+		}
+	}
+
+	// 4) 赛季天数同步到第 3 天，避免日评级/检查点还停在第 1 天
+	if (GI && GI->seasonSystem)
+	{
+		GI->seasonSystem->SeasonDay = 3;
+		GI->seasonSystem->CheckpointDay = 3;
+		GI->seasonSystem->CheckpointDayOfMonth = 3;
+		if (Save)
+		{
+			Save->SeasonDay = 3;
+			Save->CheckpointDay = 3;
+			Save->CheckpointDayOfMonth = 3;
+		}
+	}
+
+	if (GI)
+	{
+		if (GI->businessSimulation) GI->businessSimulation->Save();
+		else GI->SaveGameData();
+	}
+	UE_LOG(LogTemp, Log, TEXT("[Debug] TutorialTaskManager: 已跳过新手教程并从第 3 天开始"));
 }
 
 void ATutorialTaskManager::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+
+	// 蓝图勾选的调试跳天：在所有 Actor BeginPlay 后只执行一次
+	if (bDebugJumpPending)
+	{
+		bDebugJumpPending = false;
+		DebugStartFromDay3();
+		return;
+	}
 
 	if (!bEnable || !TaskTable)
 	{
@@ -129,6 +225,15 @@ void ATutorialTaskManager::Tick(float DeltaSeconds)
 	UpdateProgress();
 	if (UTimeSystem* TS = GetTimeSystem())
 	{
+		if (AppliedDay == 1 && TS->IsBusinessOpen())
+		{
+			ReplenishFirstDayEggs();
+		}
+		if (IsDayTwoServiceLesson() && TS->IsBusinessOpen() && !ActiveTasks.ContainsByPredicate(
+			[](const FActiveTask& Task) { return !Task.bDone; }))
+		{
+			TS->FinishBusinessDayEarly();
+		}
 		if (IsFirstServiceTutorialActive())
 		{
 			TS->SetPaused(true);
@@ -178,6 +283,22 @@ void ATutorialTaskManager::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	Super::EndPlay(EndPlayReason);
 }
 
+void ATutorialTaskManager::SkipTutorial()
+{
+	// 关闭总开关后 Tick 不再装任务/刷新箭头；任务卡自身会在下一帧因 bEnable=false 折叠。
+	bEnable = false;
+	if (bHoldingTutorialClock)
+	{
+		if (UTimeSystem* TS = GetTimeSystem())
+		{
+			TS->SetPaused(TS->IsEndOfDayReached());
+		}
+		bHoldingTutorialClock = false;
+	}
+	ResetRuntimeState();
+	AppliedDay = INDEX_NONE;
+}
+
 bool ATutorialTaskManager::IsFirstServiceTutorialActive() const
 {
 	if (!bEnable || AppliedDay != 1) return false;
@@ -212,6 +333,10 @@ void ATutorialTaskManager::NotifyAction(UWorld* World, ETutorialTaskType Type, i
 		if (!It->bEnable || It->bRestoring) continue;
 		if (It->AppliedDay != It->GetCurrentDay()) It->ApplyDay(It->GetCurrentDay());
 		const UTimeSystem* TS = It->GetTimeSystem();
+		if (It->AppliedDay == 1 && Type == ETutorialTaskType::PickupItem && ItemID == FirstDayEggItemID && Target)
+		{
+			Target->Tags.AddUnique(CollectedFirstDayEggTag);
+		}
 		if (It->AppliedDay >= 2 && It->AppliedDay <= 3 && Type == ETutorialTaskType::ServeGuests)
 			if (UBaseGameInstance* GI = Cast<UBaseGameInstance>(It->GetGameInstance()))
 				if (GI->curSaveGameData) GI->curSaveGameData->TutorialDays.FindOrAdd(It->AppliedDay).Served += Quantity;
@@ -236,11 +361,14 @@ void ATutorialTaskManager::NotifyAction(UWorld* World, ETutorialTaskType Type, i
 			// taken in hand, even if the player acted between two polling frames.
 			if (Type == ETutorialTaskType::ResearchItem || Type == ETutorialTaskType::AddToCooker)
 				for (FActiveTask& Earlier : It->ActiveTasks)
-					if (Earlier.Row.StepOrder < Task.Row.StepOrder && Earlier.Row.TaskType == ETutorialTaskType::PickupItem
+				{
+					if (&Earlier == &Task) break;
+					if (Earlier.Row.TaskType == ETutorialTaskType::PickupItem
 						&& Earlier.Row.TargetItemID == ItemID && !Earlier.bDone)
 					{
 						Earlier.Progress = Earlier.Row.TargetCount; Earlier.bDone = true; It->SaveCompletedTask(Earlier);
 					}
+				}
 			break;
 		}
 		It->bSavePending = true;
@@ -268,13 +396,12 @@ bool ATutorialTaskManager::NeedsOpeningGuidance() const
 	if (!bEnable || ActiveTasks.IsEmpty() || !TS || TS->IsBusinessOpen() || TS->IsEndOfDayReached())
 		return false;
 	if (AppliedDay == 1) return IsFirstServiceTutorialActive();
-	if (AppliedDay == 2 || AppliedDay == 3)
+	if (AppliedDay == 3) return true;
+	if (AppliedDay == 2)
 	{
 		for (const FActiveTask& Task : ActiveTasks)
-			if (Task.Row.TaskType == ETutorialTaskType::OpenBusiness && Task.bDone) return true;
+			if (!Task.bDone) return Task.Row.TaskType == ETutorialTaskType::OpenBusiness || Task.Row.TaskType == ETutorialTaskType::ServeGuests;
 		// 先完成篮子采集和入库，轮到接待时才引导开门。
-		for (const FActiveTask& Task : ActiveTasks)
-			if (!Task.bDone) return Task.Row.TaskType == ETutorialTaskType::ServeGuests;
 	}
 	return false;
 }
@@ -282,7 +409,7 @@ bool ATutorialTaskManager::NeedsOpeningGuidance() const
 int32 ATutorialTaskManager::GetCurrentDay() const
 {
 	const UTimeSystem* TS = GetTimeSystem();
-	return TS ? FMath::Max(1, TS->Day) : 1;
+	return TS ? FMath::Max(1, TS->GetBusinessDayNumber()) : 1;
 }
 
 ADiningHygieneManager* ATutorialTaskManager::FindHygieneManager() const
@@ -328,11 +455,17 @@ void ATutorialTaskManager::ApplyDay(int32 Day)
 	}
 
 	TArray<FTutorialTaskRow*> Rows;
+	const bool bAutoBasket = UGameplayStatics::GetActorOfClass(this, AHarvestBasketArea::StaticClass()) != nullptr;
 	TaskTable->GetAllRows<FTutorialTaskRow>(TEXT("TutorialTaskManager"), Rows);
 	for (FTutorialTaskRow* Row : Rows)
 	{
 		if (Row && Row->Day == Day)
 		{
+			if (Row->TaskType == ETutorialTaskType::CleanTrash
+				&& (Day < 5 || NoMessesDays.Contains(Day) || !FindHygieneManager()))
+			{
+				continue;
+			}
 			if (Row->TaskType == ETutorialTaskType::ReturnPlate
 				&& !UGameplayStatics::GetActorOfClass(this, ADishwasher::StaticClass()))
 			{
@@ -340,48 +473,64 @@ void ATutorialTaskManager::ApplyDay(int32 Day)
 			}
 			FActiveTask Task;
 			Task.Row = *Row;
+			if (bAutoBasket && Day == 2)
+			{
+				if (Row->TaskType == ETutorialTaskType::EquipBasket)
+				{
+					Task.Row.Description = NSLOCTEXT("Tutorial", "AutoBasketOnExit", "空手走出厨房，自动带上采集篮");
+					Task.Row.HintText = Task.Row.Description;
+				}
+				else if (Row->TaskType == ETutorialTaskType::StoreToWarehouse)
+				{
+					Task.Row.Description = Row->TargetItemID == 2
+						? NSLOCTEXT("Tutorial", "ReturnEggBasket", "带鸡蛋回厨房，自动存入冰箱")
+						: NSLOCTEXT("Tutorial", "ReturnTomatoBasket", "带番茄回厨房，自动存入冰箱");
+					Task.Row.HintText = Task.Row.Description;
+				}
+			}
 			ActiveTasks.Add(Task);
 		}
 	}
 
 
 	if (bNewSave) RestoreTutorialState();
-	if (Day == 3)
+	if (Day == 2)
 	{
 		for (int32 ID : {0, 2})
 		{
 			FActiveTask Supply;
-			Supply.Row.Day = 3;
-			Supply.Row.StepOrder = ID == 0 ? -20 : -10;
+			Supply.Row.Day = 2;
+			Supply.Row.StepOrder = ID == 0 ? 106 : 107;
 			Supply.Row.TaskType = ETutorialTaskType::StockSupplies;
 			Supply.Row.TargetItemID = ID;
-			Supply.Row.TargetCount = ID == 0 ? 4 : 5;
-			Supply.Row.Description = FText::FromString(ID == 0 ? TEXT("为研究和营业备好番茄") : TEXT("为研究和营业备好鸡蛋"));
+			Supply.Row.TargetCount = 2;
+			Supply.Row.Description = FText::FromString(ID == 0 ? TEXT("确认冰箱有足够番茄") : TEXT("确认冰箱有足够鸡蛋"));
 			ActiveTasks.Add(Supply);
 		}
 	}
 	ActiveTasks.Sort([](const FActiveTask& A, const FActiveTask& B)
 	{
-		return A.Row.StepOrder < B.Row.StepOrder;
+		// Keep the existing day-two save keys for harvest and service.
+		const auto SortKey = [](int32 Step) { return Step >= 101 && Step <= 107 ? 50 + Step - 100 : Step * 10; };
+		return SortKey(A.Row.StepOrder) < SortKey(B.Row.StepOrder);
 	});
 	if (Day == 2)
-		DayExtraNotes.Add(2, NSLOCTEXT("Tutorial", "Day2SuppliesNote", "煎鸡蛋用煎锅；炖番茄（番茄汤）用汤锅。备好鸡蛋和番茄后再开门。"));
-	if (Day == 3)
+		DayExtraNotes.Add(2, NSLOCTEXT("Tutorial", "Day2ResearchAndPots", "鸡蛋和番茄可以研究新菜。番茄炒鸡蛋用煎锅，番茄汤用汤锅。"));
+	if (Day == 2)
 	{
-		DayExtraNotes.Add(3, NSLOCTEXT("Tutorial", "Day3ResearchNote", "研究炉：番茄 + 鸡蛋，空手按 E 开始研究；解锁后用煎锅制作番茄炒鸡蛋。"));
 		// 已研究过的存档不应再要求向研究炉投入同一配方。
 		const FActiveTask* Research = ActiveTasks.FindByPredicate([](const FActiveTask& Task)
 			{ return Task.Row.TaskType == ETutorialTaskType::ResearchRecipe; });
 		if (Research && GI && GI->IsRecipeUnlocked(Research->Row.TargetItemID))
 			for (FActiveTask& Task : ActiveTasks)
-			{
-				Task.bDone = true;
-				Task.Progress = Task.Row.TargetCount;
-				if (Task.Row.TaskType == ETutorialTaskType::ResearchRecipe) break;
-			}
+				if (Task.Row.StepOrder >= 101 && Task.Row.StepOrder <= 105)
+				{
+					Task.bDone = true;
+					Task.Progress = Task.Row.TargetCount;
+				}
 	}
 
-	if (Day >= 2 && Day <= 3 && GI && GI->curSaveGameData)
+	if (Day == 2 && GI && GI->curSaveGameData)
 		if (const FTutorialDaySave* Saved = GI->curSaveGameData->TutorialDays.Find(Day))
 			for (FActiveTask& Task : ActiveTasks)
 			{
@@ -399,7 +548,7 @@ void ATutorialTaskManager::ApplyDay(int32 Day)
 		if (Completed && FirstServe && Completed->Contains(FirstServe->Row.StepOrder))
 			for (FActiveTask& Task : ActiveTasks)
 			{
-				if (!Completed->Contains(Task.Row.StepOrder)) break;
+				if (!Completed->Contains(GetFirstDaySaveKey(Task.Row))) break;
 				Task.bDone = true;
 				Task.Progress = Task.Row.TargetCount;
 			}
@@ -421,6 +570,7 @@ void ATutorialTaskManager::ApplyDay(int32 Day)
 
 	if (ADiningHygieneManager* Hygiene = FindHygieneManager())
 	{
+		TrashBaseline = Hygiene->GetTotalCleanedCount();
 		if (RequiredTrash > 0)
 		{
 			Hygiene->SetAutoSpawnEnabled(false);
@@ -430,7 +580,6 @@ void ATutorialTaskManager::ApplyDay(int32 Day)
 			{
 				Hygiene->SpawnMessInArea(EDiningMessType::Trash);
 			}
-			TrashBaseline = Hygiene->GetTotalCleanedCount();
 		}
 		else if (NoMessesDays.Contains(Day))
 		{
@@ -651,7 +800,9 @@ void ATutorialTaskManager::UpdateProgress()
 		case ETutorialTaskType::EarnMoney:
 			if (LevelBP)
 			{
-				Task.Progress = FMath::Max(0, LevelBP->MoneyEarnedThisLevel - MoneyBaseline);
+				const UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetGameInstance());
+				Task.Progress = AppliedDay == 3 && GI && GI->businessSimulation
+					? GI->businessSimulation->TodaySales : FMath::Max(0, LevelBP->MoneyEarnedThisLevel - MoneyBaseline);
 			}
 			break;
 		case ETutorialTaskType::PickupItem:
@@ -682,9 +833,7 @@ void ATutorialTaskManager::UpdateProgress()
 			break;
 		case ETutorialTaskType::StockSupplies:
 			Task.Progress = FMath::Min(Task.Row.TargetCount, CountReadyStock(Task.Row.TargetItemID)
-				+ CountItemInResearch(Task.Row.TargetItemID, NAME_None));
-			if (const UBaseGameInstance* GI = Cast<UBaseGameInstance>(GetGameInstance()))
-				if (GI->IsRecipeUnlocked(1003)) Task.Progress = Task.Row.TargetCount;
+				+ CountItemAcrossPlayers(Task.Row.TargetItemID));
 			break;
 		default:
 			break;
@@ -752,6 +901,7 @@ void ATutorialTaskManager::EnsureFirstDayPracticePlate()
 		Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 		if (AItemActor* Plate = World->SpawnActor<AItemActor>(PracticePlateClass, FreeSeat->GetPlateSocketTransform(), Params))
 		{
+			Plate->TryPrepareServingPlate();
 			FreeSeat->SetDirtyPlate(Plate);
 		}
 	}
@@ -763,7 +913,7 @@ void ATutorialTaskManager::SaveCompletedTask(const FActiveTask& Task)
 		if (GI->curSaveGameData)
 		{
 			if (AppliedDay == 1 && Task.bDone)
-				GI->curSaveGameData->FirstDayTutorialCompletedSteps.AddUnique(Task.Row.StepOrder);
+				GI->curSaveGameData->FirstDayTutorialCompletedSteps.AddUnique(GetFirstDaySaveKey(Task.Row));
 			if (AppliedDay >= 2 && AppliedDay <= 3)
 				GI->curSaveGameData->TutorialDays.FindOrAdd(AppliedDay).Steps.Add(Task.Row.StepOrder, Task.Progress);
 			bSavePending = true;
@@ -980,14 +1130,34 @@ void ATutorialTaskManager::UpdateFocusTarget()
 	if (NeedsOpeningGuidance())
 	{
 		FText Reason;
-		if (!CanOpenForTutorial(Reason))
+		const UTimeSystem* Time = GetTimeSystem();
+		const bool bDayThreeOpening = Time && Time->IsFirstRegularKitchenService();
+		if (bDayThreeOpening)
+		{
+			int32 MissingItem = INDEX_NONE;
+			if (!GetDayThreeOpeningStatus(Reason, MissingItem))
+			{
+				FocusHint = Reason;
+				if (MissingItem != INDEX_NONE)
+				{
+					ResolveIngredientRoute(MissingItem, true, 1);
+				}
+				else if (AActor* Stove = UGameplayStatics::GetActorOfClass(this, AResearchStove::StaticClass()))
+				{
+					FocusLocation = Stove->GetActorLocation();
+					bHasFocusTarget = true;
+				}
+				return;
+			}
+		}
+		else if (!CanOpenForTutorial(Reason))
 		{
 			FocusHint = Reason;
 			for (int32 ID : {0, 2})
 				if (CountAvailableSupply(ID) < GetSupplyRequirement(ID)) { ResolveIngredientRoute(ID, true); break; }
 			return;
 		}
-		FocusHint = AppliedDay == 1
+		FocusHint = bDayThreeOpening ? Reason : AppliedDay == 1
 			? NSLOCTEXT("Tutorial", "FirstDayOpeningHint", "跟随箭头走到入口大门，靠近后按 E 开始试营业。今天完成 3 单即可，不限时。")
 			: NSLOCTEXT("Tutorial", "SecondDayOpeningHint", "备料完成！跟随箭头走到入口大门，靠近后按 E 开始营业，再接待今天的客人。");
 		const FVector Ref = GetLocalPlayerReferenceLocation(GetWorld());
@@ -1011,6 +1181,20 @@ void ATutorialTaskManager::UpdateFocusTarget()
 		}
 
 		FocusHint = Task.Row.HintText.IsEmpty() ? Task.Row.Description : Task.Row.HintText;
+		if (Task.Row.TaskType == ETutorialTaskType::EquipBasket || Task.Row.TaskType == ETutorialTaskType::StoreToWarehouse)
+		{
+			const AHarvestBasketArea* Area = Cast<AHarvestBasketArea>(UGameplayStatics::GetActorOfClass(this, AHarvestBasketArea::StaticClass()));
+			const AShootCharacter* Player = Cast<AShootCharacter>(UGameplayStatics::GetPlayerPawn(this, 0));
+			if (Area && Player && ((Task.Row.TaskType == ETutorialTaskType::EquipBasket
+					&& Area->IsInsideKitchen(Player->GetActorLocation()) && Area->IsBasketAvailableInKitchen())
+				|| (Task.Row.TaskType == ETutorialTaskType::StoreToWarehouse
+					&& Player->GetEquippedBasket() == Area->Basket && CountItemInBaskets(Task.Row.TargetItemID, Area->Basket) > 0)))
+			{
+				FocusLocation = Area->GetEntranceGuideLocation();
+				bHasFocusTarget = true;
+				return;
+			}
+		}
 		if (Task.Row.TaskType == ETutorialTaskType::ReturnPlate)
 		{
 			if (AActor* Target = FindTargetActor(Task))
@@ -1094,7 +1278,7 @@ void ATutorialTaskManager::UpdateFocusTarget()
 TArray<FTutorialChecklistEntry> ATutorialTaskManager::GetChecklistEntries() const
 {
 	TArray<FTutorialChecklistEntry> Entries;
-	if (NeedsOpeningGuidance())
+	if (NeedsOpeningGuidance() && AppliedDay != 3)
 	{
 		if (AppliedDay == 2)
 			for (const FActiveTask& Task : ActiveTasks)
@@ -1133,6 +1317,9 @@ TArray<FTutorialChecklistEntry> ATutorialTaskManager::GetChecklistEntries() cons
 
 FText ATutorialTaskManager::GetDayTitle() const
 {
+	if (AppliedDay == 3) return NeedsOpeningGuidance()
+		? NSLOCTEXT("Tutorial", "Day3OpeningCard", "第 3 天 · 开班准备")
+		: NSLOCTEXT("Tutorial", "Day3FirstRegularService", "第 3 天 · 正式营业");
 	if (NeedsOpeningGuidance()) return FText::Format(
 		NSLOCTEXT("Tutorial", "PreparingToOpenTitle", "第 {0} 天 · 准备开门"), FText::AsNumber(AppliedDay));
 	return FText::FromString(FString::Printf(TEXT("第 %d 天任务"), FMath::Max(1, AppliedDay)));
